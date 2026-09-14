@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse, parse_qs
 import vesper_activity as activity
 import vesper_wake_store as wake_store
+import vesper_conversation_delete as conversation_delete
 import vesper_watch as watch
 
 
@@ -62,6 +63,11 @@ CREATE TABLE IF NOT EXISTS message_tombstones (
 );
 CREATE INDEX IF NOT EXISTS message_tombstones_lookup
   ON message_tombstones(vesper_conversation_id, stable_id);
+CREATE TABLE IF NOT EXISTS deleted_conversations (
+  conversation_hash TEXT PRIMARY KEY, thread_hash TEXT, deleted_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS deleted_conversations_thread
+  ON deleted_conversations(thread_hash) WHERE thread_hash IS NOT NULL;
 """
 
 
@@ -238,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
         elif len(path) == 2 and path[0] == "conversations":
             if self.command == "GET": self.get_conversation(path[1])
             elif self.command in {"POST", "PATCH"}: self.upsert_conversation(path[1])
-            elif self.command == "DELETE": self.archive_conversation(path[1])
+            elif self.command == "DELETE": self.delete_conversation(path[1])
             else: self.send_json(405, {"error": "Method not allowed"})
         elif len(path) == 3 and path[0] == "conversations" and path[2] == "wake-history" and self.command == "GET":
             with db() as connection:
@@ -272,6 +278,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_conversation(self, conversation_id: str) -> None:
         with db() as connection:
+            if conversation_delete.is_deleted(connection, conversation_id):
+                self.send_json(404, {"error": "Conversation not found"}); return
             row = connection.execute("SELECT * FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone()
             messages = connection.execute("""SELECT * FROM messages WHERE vesper_conversation_id = ?
               ORDER BY created_at ASC, rowid ASC LIMIT 1000""", (conversation_id,)).fetchall()
@@ -296,6 +304,8 @@ class Handler(BaseHTTPRequestHandler):
         created_at = str(body.get("createdAt") or timestamp)
         updated_at = str(body.get("updatedAt") or timestamp)
         with db() as connection:
+            if conversation_delete.is_deleted(connection, conversation_id, thread_id):
+                self.send_json(410, {"error": "Conversation was permanently deleted"}); return
             connection.execute("""INSERT INTO conversations
               (vesper_conversation_id, codex_thread_id, title, created_at, updated_at, archived_at, source)
               VALUES (?, ?, ?, ?, ?, NULL, ?)
@@ -341,9 +351,12 @@ class Handler(BaseHTTPRequestHandler):
         source = source if source in {"legacy-vesper", "codex"} else "codex"
         time_source = str(body.get("timeSource") or metadata.get("timeSource") or ("message" if created_at else "unknown"))[:32]
         with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing_conversation = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone()
+            if conversation_delete.is_deleted(connection, conversation_id, existing_conversation["codex_thread_id"] if existing_conversation else None):
+                self.send_json(410, {"error": "Conversation was permanently deleted"}); return
             if body.get("wakeTargetUserId"):
                 # Serialize with archive/delete: background output must never recreate a window.
-                connection.execute("BEGIN IMMEDIATE")
                 target = connection.execute("""SELECT 1 FROM conversations c JOIN messages m
                   ON m.vesper_conversation_id=c.vesper_conversation_id
                   WHERE c.vesper_conversation_id=? AND c.archived_at IS NULL AND m.id=? AND m.role='user'""",
@@ -384,11 +397,29 @@ class Handler(BaseHTTPRequestHandler):
             row = connection.execute("SELECT * FROM messages WHERE id = ?", (target_id,)).fetchone()
         self.send_json(200, {"message": message(row)})
 
-    def archive_conversation(self, conversation_id: str) -> None:
-        timestamp = now()
+    def delete_conversation(self, conversation_id: str) -> None:
         with db() as connection:
-            cursor = connection.execute("UPDATE conversations SET archived_at = ?, updated_at = ? WHERE vesper_conversation_id = ?", (timestamp, timestamp, conversation_id))
-        self.send_json(200, {"ok": True, "archived": cursor.rowcount})
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone()
+            if not row:
+                if conversation_delete.is_deleted(connection, conversation_id):
+                    self.send_json(200, {"ok": True, "permanentlyDeleted": True, "deleted": 0}); return
+                self.send_json(404, {"error": "Conversation not found"}); return
+            thread_id=row["codex_thread_id"]
+            if conversation_delete.thread_is_shared(thread_id):
+                self.send_json(409, {"error": "Conversation belongs to a shared Codex thread and was retained"}); return
+            conversation_delete.block(connection, conversation_id, thread_id)
+        try:source=conversation_delete.delete_codex_thread(thread_id)
+        except Exception:
+            self.send_json(502, {"error": "Codex source deletion failed; conversation is blocked pending retry"}); return
+        wake_jobs=conversation_delete.purge_wake(conversation_id)
+        with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM message_tombstones WHERE vesper_conversation_id=?",(conversation_id,))
+            messages=connection.execute("DELETE FROM messages WHERE vesper_conversation_id=?",(conversation_id,)).rowcount
+            deleted=connection.execute("DELETE FROM conversations WHERE vesper_conversation_id=?",(conversation_id,)).rowcount
+        self.send_json(200,{"ok":True,"permanentlyDeleted":True,"deleted":deleted,"messagesDeleted":messages,
+                            "wakeJobsDeleted":wake_jobs,"source":source})
 
     def delete_message(self, conversation_id: str, message_id: str) -> None:
         body = self.body()

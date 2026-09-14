@@ -2107,16 +2107,23 @@ function HistoryModal({
   const remove = async (item: ConversationSummary) => {
     if (!window.confirm(`Delete “${item.title || "Untitled conversation"}”? This cannot be undone.`)) return;
     const token = deviceToken();
-    if (token) {
+    if (!token) {
+      setHistoryError("Delete failed: this device is not connected to the server");
+      return;
+    }
+    try {
       const response = await fetch(
         codexHistoryUrl(`/conversations/${encodeURIComponent(item.id)}`),
         { method: "DELETE", headers: codexHistoryHeaders() },
       );
-      if (!response.ok && response.status !== 404) {
-        const payload = await response.json().catch(() => ({})) as { error?: string };
+      const payload = await response.json().catch(() => ({})) as { error?: string; ok?: boolean; permanentlyDeleted?: boolean };
+      if (!response.ok || !payload.ok || !payload.permanentlyDeleted) {
         setHistoryError(payload.error || `Delete failed (HTTP ${response.status})`);
         return;
       }
+    } catch (reason) {
+      setHistoryError(reason instanceof Error ? reason.message : "Delete failed");
+      return;
     }
     for (const key of Object.keys(window.localStorage)) {
       if ((key.startsWith("vesper-local-chat-") || key.startsWith("vesper-codex-chat-")) && key.endsWith(`-${item.id}`))
