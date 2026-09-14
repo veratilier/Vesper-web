@@ -185,7 +185,7 @@ def execute(job):
         with store.db() as con:
             if not store.get(con, 'config', {'enabled': True})['enabled']:return False
             row=con.execute('SELECT status FROM jobs WHERE id=?',(ident,)).fetchone()
-            if not row or row['status']!='running':return False
+            if not row or row['status'] not in {'queued','running'}:return False
         return not current_preferences().get('quiet') and not front_busy(time.time()) and any(
             r['id']==job['user_message_id'] and r['vesper_conversation_id']==job['conversation_id'] and policy.normal(r)
             for r in policy.history(HISTORY))
