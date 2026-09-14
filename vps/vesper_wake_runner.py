@@ -112,6 +112,7 @@ def reschedule(job_id=None):
     with store.db() as con:
         schedule_config = store.get(con, 'config', {})
         fixed = schedule_config.get('intervalMinutes')
+    if fixed is None and 'desire_status' not in store.access()['tools']:fixed = 120
     if fixed is not None:
         now = time.time()
         with store.db() as con:
@@ -167,18 +168,19 @@ def update(ident,**fields):
 
 def execute(job):
     ident=job['id'];rpc=None;completed=False;failed=False;final=[];tool_count=0;turn_id='';thread_id='';created=iso();external_tools={}
-    allowed=READ_ONLY if job['source']=='verification' else ALLOWED
+    allowed=permissions.allowed_tools(store.access(), READ_ONLY if job['source']=='verification' else ALLOWED)
     tools=[t for t in http('/api/codex/tools')['tools'] if t['name'] in allowed]
-    if not {'desire_status','read_vesper_state'}.issubset({t['name'] for t in tools}):raise RuntimeError('Required native tools missing')
+    if not tools:
+        update(ident,status='silent',finished=time.time(),decision='no_authorized_tools');return
+    tools=[dict(t, type='function') for t in tools]
     if not job.get('conversation_id'):raise RuntimeError('No locked target conversation')
     wake={'requestId':ident,'requestedAt':created,'source':'automation'}
     def permitted():
+        with store.db() as con:
+            if not store.get(con, 'config', {'enabled': True})['enabled']:return False
         return not current_preferences().get('quiet') and not front_busy(time.time()) and any(
             r['id']==job['user_message_id'] and r['vesper_conversation_id']==job['conversation_id'] and policy.normal(r)
             for r in policy.history(HISTORY))
-    def marker(status):
-        save_message(job,'wake:'+ident,'system','后台活动',{'_createdAt':created,'wake':dict(wake),
-            'source':job['source'],'wakeRunId':ident,'turnId':turn_id,'threadId':thread_id,'turnStatus':status},status)
     def handle(msg):
         nonlocal completed,failed,tool_count,turn_id,external_tools
         method=msg.get('method','');p=msg.get('params',{})
@@ -188,7 +190,7 @@ def execute(job):
             if isinstance(args,str):args=json.loads(args)
             if not isinstance(args,dict):args={}
             try:
-                if name not in allowed:raise RuntimeError('Tool not authorized for unattended wake')
+                if name not in allowed or name not in permissions.allowed_tools(store.access(), allowed):raise RuntimeError('Tool not authorized for unattended wake')
                 args=permissions.tool_input(name,args,ident,item,external_tools)
                 with store.db() as con:
                     old=con.execute('SELECT status,result FROM calls WHERE job_id=? AND item_id=?',(ident,item)).fetchone()
@@ -196,16 +198,19 @@ def execute(job):
                     if not old:
                         if con.execute('SELECT count(*) FROM calls WHERE job_id=?',(ident,)).fetchone()[0]>=8:raise RuntimeError('Wake tool budget exhausted (8)')
                         if not permitted():raise RuntimeError('Wake paused by current preference or foreground chat')
-                        con.execute('INSERT INTO calls(job_id,item_id,status,name) VALUES(?,?,?,?)',(ident,item,'started',name))
+                        con.execute('INSERT INTO calls(job_id,item_id,status,name,started) VALUES(?,?,?,?,?)',(ident,item,'started',name,time.time()))
                 if old:result=json.loads(old['result'])
                 else:
                     result=http('/api/codex/tools',{'name':name,'arguments':args,'threadId':thread_id,'itemId':item,'turnId':turn_id,'conversationId':job['conversation_id']})['result']
-                    with store.db() as con:con.execute("UPDATE calls SET status='done',result=? WHERE job_id=? AND item_id=?",(json.dumps(result),ident,item))
+                    with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),ident,item))
                     tool_count+=1;update(ident,tools=tool_count)
                 if name=='list_configured_mcp_tools':
                     external_tools=permissions.external_catalog(result);result=external_tools
                 rpc.send({'id':msg['id'],'result':{'contentItems':[{'type':'inputText','text':json.dumps(result,ensure_ascii=False)}],'success':True}})
             except Exception as error:
+                with store.db() as con:
+                    con.execute('INSERT OR IGNORE INTO calls(job_id,item_id,status,name,started,finished) VALUES(?,?,?,?,?,?)',(ident,item,'failed',name,time.time(),time.time()))
+                    con.execute("UPDATE calls SET status='failed',finished=? WHERE job_id=? AND item_id=? AND status='started'",(time.time(),ident,item))
                 rpc.send({'id':msg['id'],'result':{'contentItems':[{'type':'inputText','text':str(error)}],'success':False}})
         elif method=='item/completed':
             item=p.get('item',{})
@@ -235,6 +240,7 @@ def execute(job):
 
         prompt='这是一次已授权的 Vesper 后台主动唤醒。request_id='+ident+'。当前时间 '+datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()+'.\n'
         prompt+='Vera 设置的本轮任务要求：\n'+store.task_prompt()+'\n'
+        prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
         prompt+='只返回 JSON {"share": boolean, "message": string}。不值得分享时 share=false,message为空；不输出活动摘要，由系统根据实际工具记录生成。分享文字限400字。\n'
@@ -249,7 +255,7 @@ def execute(job):
         decision=json.loads(final[-1])
         if not isinstance(decision.get('share'),bool) or not isinstance(decision.get('message'),str):raise RuntimeError('Invalid wake decision')
         if job['source']=='verification' and tool_count<2:raise RuntimeError('Verification did not execute both native reads')
-        sharing=decision['share'] and bool(decision['message'].strip())
+        sharing=decision['share'] and bool(decision['message'].strip()) and 'text' in store.access()['messages']
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
         if not tool_count:raise RuntimeError('No actual activity to substantiate wake')
@@ -258,15 +264,10 @@ def execute(job):
         wake['endedAt']=iso()
         wake['messageOmitted']=not sharing
         # No synthetic user turn and no model commentary. Activities come only from the ledger.
-        marker('completed')
         with store.db() as con:records=con.execute('SELECT * FROM calls WHERE job_id=?',(ident,)).fetchall()
         for record in records:
             item=record['item_id'];result=json.loads(record['result'] or '{}')
-            save_message(job,'execution:'+ident+':'+item,'system',record['name'] or 'tool',{
-                'source':job['source'],'wakeRunId':ident,'blockType':'execution','turnId':turn_id,'threadId':thread_id,
-                'execution':{'id':item,'type':'dynamicToolCall','title':record['name'],'status':'completed' if record['status']=='done' else 'failed',
-                'output':'工具已返回结果。' if record['status']=='done' else '执行未确认，不重试。','updatedAt':iso()}})
-            if isinstance(result,dict) and (result.get('attachments') or result.get('stickerMessage')):
+            if record['status']=='done' and permissions.message_allowed(store.access(),record) and isinstance(result,dict) and (result.get('attachments') or result.get('stickerMessage')):
                 save_message(job,'attachment:'+ident+':'+item,'agent',result.get('message') or '附件',{
                     'source':job['source'],'wakeRunId':ident,'attachments':result.get('attachments'),'sticker':result.get('stickerMessage')})
         if not sharing:
@@ -280,6 +281,7 @@ def execute(job):
         if rpc:rpc.close()
 
 def deliver(ident,message):
+    if 'text' not in store.access()['messages']:return
     with store.db() as con:job=dict(con.execute('SELECT * FROM jobs WHERE id=?',(ident,)).fetchone())
     if current_preferences().get('quiet') or front_busy(time.time()):return
     receipt=http('/api/wake',{'requestId':ident,'message':message,'conversationId':job['conversation_id']})

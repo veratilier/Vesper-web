@@ -1,6 +1,18 @@
 """Explicit unattended permissions; external results never grant new permissions."""
 import copy, hashlib
 
+SEND_TYPES = {'album_send_photos': 'photos', 'send_chat_file': 'files', 'sticker_send': 'stickers'}
+
+
+def allowed_tools(access, ceiling):
+    return {name for name in ceiling if name in access['tools'] and
+            (name not in SEND_TYPES or SEND_TYPES[name] in access['messages'])}
+
+
+def message_allowed(access, record):
+    kind = SEND_TYPES.get(record['name'])
+    return kind is not None and kind in access['messages'] and record['name'] in access['tools']
+
 MCP_READ_ACTIONS = {
     'glxy': {'wall', 'read', 'annos', 'faq'},
     'botling_knows': {'announcements', 'browse', 'search', 'get', 'get_content',

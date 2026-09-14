@@ -82,17 +82,15 @@ class WakeTests(unittest.TestCase):
         if not share:
             self.assertEqual(push,[])
             self.assertFalse(any(m['role']=='agent' for m in messages.values()))
-            marker=messages['wake:'+ident]
-            self.assertTrue(marker['metadata']['wake']['messageOmitted'])
-            self.assertTrue(marker['createdAt'])
-            self.assertTrue(marker['metadata']['wake']['endedAt'])
-            executions=[m for m in messages.values() if m['metadata'].get('blockType')=='execution']
-            self.assertEqual(len(executions),2)
-            self.assertTrue(all(m['metadata']['turnId']==marker['metadata']['turnId'] for m in executions))
+            self.assertEqual(messages,{})
+            ledger=store.status()['lastJob']['calls']
+            self.assertEqual(len(ledger),2)
+            self.assertTrue(all(c['started'] and c['finished'] for c in ledger))
             self.assertEqual(store.status()['lastJob']['status'],'silent');return
         self.assertEqual(len(push),1)
         self.assertEqual(store.status()['lastJob']['status'],'completed')
         self.assertEqual(sum(m['role']=='agent' for m in messages.values()),1)
+        self.assertEqual(len(messages),1)
     def test_silent_round_records_tools_without_message_or_push(self):
         self.test_full_runner_saves_before_push_and_deduplicates_tools(False)
     def test_off_does_not_auto_start_and_partial_turn_is_not_replayed(self):
