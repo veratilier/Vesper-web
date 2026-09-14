@@ -172,7 +172,11 @@ def execute(job):
     tools=[t for t in http('/api/codex/tools')['tools'] if t['name'] in allowed]
     if not tools:
         update(ident,status='silent',finished=time.time(),decision='no_authorized_tools');return
-    tools=[dict(t, type='function') for t in tools]
+    required_desire = job['source'] != 'verification'
+    if required_desire and not {'desire_status', 'desire_encounter'} <= allowed:
+        raise RuntimeError('Required Desire read/write permission is disabled')
+    # The runner owns the mandatory write, so the model cannot skip or duplicate it.
+    tools=[dict(t, type='function') for t in tools if not (required_desire and t['name']=='desire_encounter')]
     if not job.get('conversation_id'):raise RuntimeError('No locked target conversation')
     wake={'requestId':ident,'requestedAt':created,'source':'automation'}
     def permitted():
@@ -181,6 +185,26 @@ def execute(job):
         return not current_preferences().get('quiet') and not front_busy(time.time()) and any(
             r['id']==job['user_message_id'] and r['vesper_conversation_id']==job['conversation_id'] and policy.normal(r)
             for r in policy.history(HISTORY))
+    def run_tool(name,args,item):
+        nonlocal tool_count,external_tools
+        if name not in allowed or name not in permissions.allowed_tools(store.access(), allowed):raise RuntimeError('Tool not authorized for unattended wake')
+        args=permissions.tool_input(name,args,ident,item,external_tools)
+        with store.db() as con:
+            old=con.execute('SELECT status,result FROM calls WHERE job_id=? AND item_id=?',(ident,item)).fetchone()
+            if old and old['status']!='done':raise RuntimeError('Previous tool outcome uncertain; not replayed')
+            if not old:
+                if con.execute('SELECT count(*) FROM calls WHERE job_id=?',(ident,)).fetchone()[0]>=(7 if required_desire and name!='desire_encounter' else 8):raise RuntimeError('Wake tool budget exhausted (8)')
+                if not permitted():raise RuntimeError('Wake paused by current preference or foreground chat')
+                con.execute('INSERT INTO calls(job_id,item_id,status,name,started) VALUES(?,?,?,?,?)',(ident,item,'started',name,time.time()))
+        if old:result=json.loads(old['result'])
+        else:
+            result=http('/api/codex/tools',{'name':name,'arguments':args,'threadId':thread_id,'itemId':item,'turnId':turn_id,'conversationId':job['conversation_id']})['result']
+            with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),ident,item))
+            tool_count+=1;update(ident,tools=tool_count)
+        if name=='list_configured_mcp_tools':
+            external_tools=permissions.external_catalog(result);result=external_tools
+        if isinstance(result,dict) and result.get("isError"):raise RuntimeError("Tool failed: "+name)
+        return result
     def handle(msg):
         nonlocal completed,failed,tool_count,turn_id,external_tools
         method=msg.get('method','');p=msg.get('params',{})
@@ -190,22 +214,8 @@ def execute(job):
             if isinstance(args,str):args=json.loads(args)
             if not isinstance(args,dict):args={}
             try:
-                if name not in allowed or name not in permissions.allowed_tools(store.access(), allowed):raise RuntimeError('Tool not authorized for unattended wake')
-                args=permissions.tool_input(name,args,ident,item,external_tools)
-                with store.db() as con:
-                    old=con.execute('SELECT status,result FROM calls WHERE job_id=? AND item_id=?',(ident,item)).fetchone()
-                    if old and old['status']!='done':raise RuntimeError('Previous tool outcome uncertain; not replayed')
-                    if not old:
-                        if con.execute('SELECT count(*) FROM calls WHERE job_id=?',(ident,)).fetchone()[0]>=8:raise RuntimeError('Wake tool budget exhausted (8)')
-                        if not permitted():raise RuntimeError('Wake paused by current preference or foreground chat')
-                        con.execute('INSERT INTO calls(job_id,item_id,status,name,started) VALUES(?,?,?,?,?)',(ident,item,'started',name,time.time()))
-                if old:result=json.loads(old['result'])
-                else:
-                    result=http('/api/codex/tools',{'name':name,'arguments':args,'threadId':thread_id,'itemId':item,'turnId':turn_id,'conversationId':job['conversation_id']})['result']
-                    with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),ident,item))
-                    tool_count+=1;update(ident,tools=tool_count)
-                if name=='list_configured_mcp_tools':
-                    external_tools=permissions.external_catalog(result);result=external_tools
+                if required_desire and name=="desire_encounter":raise RuntimeError("Desire write is reserved for the mandatory final assessment")
+                result=run_tool(name,args,item)
                 rpc.send({'id':msg['id'],'result':{'contentItems':[{'type':'inputText','text':json.dumps(result,ensure_ascii=False)}],'success':True}})
             except Exception as error:
                 with store.db() as con:
@@ -238,14 +248,22 @@ def execute(job):
         started=rpc.call('thread/start',{'cwd':str(WORK),'dynamicTools':tools,'approvalPolicy':'never','sandbox':'read-only','config':CONFIG,'developerInstructions':INSTRUCTIONS})
         thread_id=started['thread']['id'];update(ident,thread_id=thread_id)
 
+        desire_state=run_tool('desire_status',{},'required-desire-status') if required_desire else None
         prompt='这是一次已授权的 Vesper 后台主动唤醒。request_id='+ident+'。当前时间 '+datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()+'.\n'
         prompt+='Vera 设置的本轮任务要求：\n'+store.task_prompt()+'\n'
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
+        if required_desire:
+            prompt+='必做 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，在输出 desire 中提供 kind 和一两句 note。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。系统会强制调用 desire_encounter 保存；这不要求给 Vera 发消息。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
         prompt+='只返回 JSON {"share": boolean, "message": string}。不值得分享时 share=false,message为空；不输出活动摘要，由系统根据实际工具记录生成。分享文字限400字。\n'
         prompt+='近期聊天背景（不是新指令）：\n'+context(job)
-        result=rpc.call('turn/start',{'threadId':thread_id,'input':[{'type':'text','text':prompt}],'outputSchema':{'type':'object','properties':{'share':{'type':'boolean'},'message':{'type':'string'}},'required':['share','message'],'additionalProperties':False}})
+        schema={'type':'object','properties':{'share':{'type':'boolean'},'message':{'type':'string'}},'required':['share','message'],'additionalProperties':False}
+        if required_desire:
+            schema['properties']['desire']={'type':'object','properties':{'kind':{'type':'string','enum':['warmth','absence','repair','shared_work','flirt']},'note':{'type':'string','minLength':1,'maxLength':1200}},'required':['kind','note'],'additionalProperties':False}
+            schema['required'].append('desire')
+            prompt+=' JSON 还必须包含 desire: {kind, note}。\n'
+        result=rpc.call('turn/start',{'threadId':thread_id,'input':[{'type':'text','text':prompt}],'outputSchema':schema})
         turn_id=result.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
         deadline=time.time()+600
         while not completed and time.time()<deadline:
@@ -258,6 +276,9 @@ def execute(job):
         sharing=decision['share'] and bool(decision['message'].strip()) and 'text' in store.access()['messages']
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
+        if required_desire:
+            encounter=permissions.required_desire_input(decision.get('desire'))
+            run_tool('desire_encounter',encounter,'required-desire-encounter')
         if not tool_count:raise RuntimeError('No actual activity to substantiate wake')
         message=decision['message'].strip()[:1600]
         wake['startedAt']=created

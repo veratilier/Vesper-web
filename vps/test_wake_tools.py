@@ -20,6 +20,14 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(a['interaction_source'],'automation')
         self.assertEqual(a['request_id'],b['request_id'])
         self.assertNotEqual(a['request_id'],p.tool_input('desire_encounter',{},'other','one',{})['request_id'])
+    def test_required_desire_note_and_source(self):
+        for invalid in [None, {}, {'kind':'absence','note':''}, {'kind':'absence','note':'   '}, {'kind':'fake','note':'x'}]:
+            with self.assertRaises(RuntimeError):p.required_desire_input(invalid)
+        result=p.required_desire_input({'kind':'absence','note':'此刻留下一点想念。','interaction_source':'user','request_id':'fake'})
+        self.assertEqual(result['interaction_source'],'automation')
+        self.assertNotIn('request_id',result)
+        self.assertEqual(result['note'],'此刻留下一点想念。')
+
     def test_memory_and_document_mutation_boundaries(self):
         for name,args in [('manage_vesper_memory',{'action':'delete'}),('manage_vesper_memory',{'action':'edit'}),('write_vesper_state',{'kind':'reminder'})]:
             with self.assertRaises(RuntimeError):p.tool_input(name,args,'job','item',{})

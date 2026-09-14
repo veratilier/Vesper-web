@@ -69,3 +69,12 @@ def tool_input(name, arguments, job_id, item_id, catalog):
             payload['mark_seen'] = False
         args['arguments'] = nested
     return args
+
+
+def required_desire_input(value):
+    if not isinstance(value, dict) or value.get('kind') not in {'warmth', 'absence', 'repair', 'shared_work', 'flirt'}:
+        raise RuntimeError('Missing required Desire assessment')
+    note = value.get('note')
+    if not isinstance(note, str) or not note.strip() or len(note) > 1200:
+        raise RuntimeError('A nonempty Desire note is required')
+    return {'kind': value['kind'], 'note': note.strip(), 'surface': 'chat', 'interaction_source': 'automation'}
