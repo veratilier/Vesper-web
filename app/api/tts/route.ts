@@ -48,8 +48,13 @@ export async function POST(request: Request) {
         : isMiniMax
           ? { model: connection.model || "speech-2.6-hd", text, stream: false, voice_setting: { voice_id: connection.voiceId || "male-qn-qingse", speed: Number(connection.speed || 1), vol: 1, pitch: 0 }, audio_setting: { audio_sample_rate: 32000, bitrate: 128000, format: "mp3" } }
         : { model: connection.model || "gpt-4o-mini-tts", voice: connection.voiceId || "alloy", input: text, response_format: "mp3", speed: Number(connection.speed || 1) }),
-      redirect: "error",
+      redirect: "manual",
     });
+    // Workers supports manual/follow only. Do not forward provider credentials
+    // to a redirected destination.
+    if (response.status >= 300 && response.status < 400) {
+      return json({ error: `TTS endpoint returned a redirect (${response.status}). Enter the provider\'s final HTTPS endpoint in Voice settings.` }, 502);
+    }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 500);
       return json({ error: detail || `TTS returned ${response.status}` }, 502);
