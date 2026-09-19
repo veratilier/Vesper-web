@@ -239,6 +239,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "Expected month YYYY-MM"})
         elif path == ["health"] and self.command == "GET":
             self.send_json(200, {"ok": True})
+        elif path == ["search"] and self.command == "GET":
+            self.search_messages()
         elif path == ["conversations"] and self.command == "GET":
             self.list_conversations()
         elif len(path) == 2 and path[0] == "conversations":
@@ -270,24 +272,57 @@ class Handler(BaseHTTPRequestHandler):
 
     def list_conversations(self) -> None:
         with db() as connection:
-            rows = connection.execute("""SELECT c.*, COUNT(m.id) AS message_count
+            rows = connection.execute("""SELECT c.*, COUNT(m.id) AS message_count,
+              (SELECT content FROM messages p WHERE p.vesper_conversation_id=c.vesper_conversation_id AND p.role IN ('user','agent') ORDER BY p.created_at DESC,p.rowid DESC LIMIT 1) AS preview
               FROM conversations c LEFT JOIN messages m ON m.vesper_conversation_id = c.vesper_conversation_id
               WHERE c.archived_at IS NULL GROUP BY c.vesper_conversation_id
               ORDER BY c.updated_at DESC LIMIT 100""").fetchall()
-        self.send_json(200, {"conversations": [conversation(row, row["message_count"]) for row in rows]})
+        self.send_json(200, {"conversations": [dict(conversation(row, row["message_count"]), preview=row["preview"] or "") for row in rows]})
+
+    def search_messages(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        text = query.get("q", [""])[0].strip()[:300]
+        conversation_id = query.get("conversationId", [""])[0]
+        try: offset = min(100000, max(0, int(query.get("offset", ["0"])[0])))
+        except ValueError: offset = 0
+        if not text:
+            self.send_json(200, {"results": [], "hasMore": False}); return
+        with db() as connection:
+            rows = connection.execute("""SELECT m.*, c.title FROM messages m JOIN conversations c
+              ON c.vesper_conversation_id=m.vesper_conversation_id
+              WHERE c.archived_at IS NULL AND m.role IN ('user','agent')
+              AND (?='' OR m.vesper_conversation_id=?) AND instr(lower(m.content),lower(?))>0
+              AND coalesce(json_extract(m.metadata_json,'$.blockType'),'') IN ('','agentMessage','assistantMessage','userMessage','text')
+              ORDER BY m.created_at DESC,m.rowid DESC LIMIT 61 OFFSET ?""", (conversation_id,conversation_id,text,offset)).fetchall()
+        self.send_json(200, {"results": [dict(message(row), title=row["title"]) for row in rows[:60]], "hasMore": len(rows)>60})
 
     def get_conversation(self, conversation_id: str) -> None:
         with db() as connection:
             if conversation_delete.is_deleted(connection, conversation_id):
                 self.send_json(404, {"error": "Conversation not found"}); return
             row = connection.execute("SELECT * FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone()
-            messages = connection.execute("""SELECT * FROM messages WHERE vesper_conversation_id = ?
-              ORDER BY created_at ASC, rowid ASC LIMIT 1000""", (conversation_id,)).fetchall()
+            query = parse_qs(urlparse(self.path).query)
+            paginated = query.get("latest", [""])[0] == "1"
+            try: limit = min(500, max(1, int(query.get("limit", ["200"])[0])))
+            except ValueError: limit = 200
+            before = query.get("before", [""])[0]
+            cursor = connection.execute("SELECT created_at,rowid FROM messages WHERE id=? AND vesper_conversation_id=?", (before, conversation_id)).fetchone() if before else None
+            if paginated:
+                clause = " AND (created_at,rowid) < (?,?)" if cursor else ""
+                args = (conversation_id,) + ((cursor["created_at"], cursor["rowid"]) if cursor else ()) + (limit+1,)
+                batch = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=?" + clause + " ORDER BY created_at DESC,rowid DESC LIMIT ?", args).fetchall()
+                has_more = len(batch) > limit
+                messages = list(reversed(batch[:limit]))
+            else:
+                messages = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=? ORDER BY created_at ASC,rowid ASC LIMIT 1000", (conversation_id,)).fetchall()
+                has_more = False
             tombstones = connection.execute("""SELECT codex_thread_id, stable_id, deleted_at
               FROM message_tombstones WHERE vesper_conversation_id = ?""", (conversation_id,)).fetchall()
         self.send_json(200, {
             "conversation": conversation(row) if row else None,
             "messages": [message(item) for item in messages],
+            "hasMore": has_more,
+            "before": messages[0]["id"] if messages else None,
             "tombstones": [{"threadId": item["codex_thread_id"], "stableId": item["stable_id"],
                             "messageId": item["stable_id"], "deletedAt": item["deleted_at"]}
                            for item in tombstones],

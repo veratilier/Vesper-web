@@ -1,3 +1,4 @@
+import { evidenceIdsForMessages, linkEvidence } from "@/lib/memory-vault";
 import { env } from "cloudflare:workers";
 import { ensureSchema, getDb } from "@/lib/db";
 
@@ -6,6 +7,7 @@ export type MemoryType = (typeof MEMORY_TYPES)[number];
 export type MemoryScope = { userId: string; characterId: string };
 
 type MemoryRow = {
+  corrected_at?: string | null;
   id: string;
   user_id: string;
   character_id: string;
@@ -38,6 +40,7 @@ type MemoryRevisionRow = {
 };
 
 export type MemoryRecord = {
+  correctedAt?: string | null;
   id: string;
   userId: string;
   characterId: string;
@@ -115,6 +118,7 @@ function rowToMemory(row: MemoryRow): MemoryRecord {
   const vector = parseJson<number[]>(row.embedding, []);
   return {
     id: row.id,
+    correctedAt: row.corrected_at || null,
     userId: row.user_id,
     characterId: row.character_id,
     type: row.type,
@@ -247,7 +251,7 @@ async function scopedRows(scope: MemoryScope, options: { type?: MemoryType; incl
   if (!options.includeDemoted) conditions.push("demoted_at IS NULL");
   if (!options.includeCandidates) conditions.push("review_status = 'approved'");
   const limit = Math.min(250, Math.max(1, options.limit || 120));
-  const result = await getDb().prepare(`SELECT * FROM vesper_memories WHERE ${conditions.join(" AND ")}
+  const result = await getDb().prepare(`SELECT *, (SELECT MAX(r.created_at) FROM vesper_memory_revisions r WHERE r.memory_id=vesper_memories.id AND r.action IN ('corrected','edited')) AS corrected_at FROM vesper_memories WHERE ${conditions.join(" AND ")}
     ORDER BY pinned DESC, updated_at DESC LIMIT ?`).bind(...bindings, limit).all<MemoryRow>();
   return result.results.map(rowToMemory);
 }
@@ -279,8 +283,13 @@ export async function listMemories(scope: MemoryScope, options: { type?: MemoryT
   if (!query) return values;
   const lower = query.toLocaleLowerCase("zh-CN");
   const scores = await ftsScores(scope, query);
-  return values.filter((memory) => scores.has(memory.id) || `${memory.body} ${memory.tags.join(" ")}`.toLocaleLowerCase("zh-CN").includes(lower))
-    .sort((left, right) => (scores.get(right.id) || 0) - (scores.get(left.id) || 0) || Number(right.pinned) - Number(left.pinned) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const vector = await embeddingFor(query);
+  const ranked = values.map(memory => {
+    const semantic = Math.max(0, cosine(vector, memory.embedding));
+    const literal = `${memory.body} ${memory.tags.join(" ")}`.toLocaleLowerCase("zh-CN").includes(lower);
+    return { memory, score: semantic * 0.6 + (scores.get(memory.id) || 0) * 0.3 + (literal ? 0.5 : 0), matched: literal || scores.has(memory.id) || semantic >= 0.45 };
+  });
+  return ranked.filter(item => item.matched).sort((a,b) => b.score-a.score || Date.parse(b.memory.updatedAt)-Date.parse(a.memory.updatedAt)).map(item => item.memory);
 }
 
 export async function memoryDetail(scope: MemoryScope, id: string) {
@@ -337,7 +346,7 @@ export async function createMemory(scope: MemoryScope, input: CreateMemoryInput)
     memory.id, memory.userId, memory.characterId, memory.type, memory.body, memory.mood, JSON.stringify(memory.tags), memory.weight,
     memory.pinned ? 1 : 0, memory.source, memory.reviewStatus, memory.createdAt, memory.updatedAt, JSON.stringify(memory.embedding), fingerprint,
   ).run();
-  if (type === "core") {
+  {
     await db.prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 'created', ?)`).bind(crypto.randomUUID(), memory.id, memory.body, memory.mood, JSON.stringify(memory.tags), "明确新增核心记忆", createdAt).run();
   }
@@ -375,6 +384,9 @@ export async function correctCoreMemory(scope: MemoryScope, id: string, input: {
   const changedAt = now();
   await getDb().batch([
     getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'previous', ?)`).bind(crypto.randomUUID(), id, detail.memory.body, detail.memory.mood,
+        JSON.stringify(detail.memory.tags), "修正前的版本", detail.memory.updatedAt),
+    getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 'corrected', ?)`)
       .bind(crypto.randomUUID(), id, body, mood, JSON.stringify(tags), cleanText(input.reason, 180) || "用户修正", changedAt),
     getDb().prepare(`UPDATE vesper_memories SET body = ?, mood = ?, tags = ?, embedding = ?, fingerprint = ?,
@@ -402,6 +414,9 @@ export async function editMemory(scope: MemoryScope, id: string, input: { body: 
   const embedding = await embeddingFor(`${body}\n${tags.join(" ")}`);
   const changedAt = now();
   await getDb().batch([
+    getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'previous', ?)`).bind(crypto.randomUUID(), id, detail.memory.body, detail.memory.mood,
+        JSON.stringify(detail.memory.tags), "修正前的版本", detail.memory.updatedAt),
     getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 'edited', ?)`)
       .bind(crypto.randomUUID(), id, body, mood, JSON.stringify(tags), cleanText(input.reason, 180) || "用户通过 Codex 修正", changedAt),
@@ -439,7 +454,7 @@ export async function recallMemory(scope: MemoryScope, query: string) {
     .slice(0, MEMORY_CONFIG.longRecallLimit).map((item) => item.memory);
   const memories = [...core, ...ranked.filter((memory) => !core.some((item) => item.id === memory.id))];
   await markSurfaced(scope, memories.map((memory) => memory.id));
-  const lines = memories.map((memory) => `- ${memory.type === "feeling" ? "Rowan 的感受" : memory.type === "core" ? "核心" : "旧记忆"}：${memory.body}`);
+  const lines = memories.map((memory) => `- [${memory.id}; ${memory.updatedAt}; ${memory.type === "core" ? "当前已确认" : "历史背景"}] ${memory.type === "feeling" ? "Rowan 的感受" : memory.type === "core" ? "核心" : "旧记忆"}：${memory.body}`);
   const context = lines.join("\n").slice(0, MEMORY_CONFIG.maxContextCharacters);
   return {
     memories: memories.map((memory) => ({ ...memory, surfaceCount: memory.surfaceCount + 1 })),
@@ -531,6 +546,8 @@ export async function runDueMemoryJobs(scope: MemoryScope) {
         type, body: cleanText(candidate.body), mood: cleanText(candidate.mood, 48), tags: candidate.tags,
         source: requested === "core" ? "model-core-candidate" : "model-distillation", reviewStatus: requested === "core" ? "candidate" : "approved",
       });
+      const evidenceIds = await evidenceIdsForMessages(scope, job.conversation_id, messages.map(message => message.message_id));
+      await linkEvidence(scope, result.memory.id, evidenceIds);
       if (result.created) stored += 1;
     }
     await db.prepare("UPDATE vesper_memory_jobs SET status = 'completed', last_error = '', updated_at = ? WHERE id = ?").bind(now(), job.id).run();
