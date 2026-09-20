@@ -24,6 +24,11 @@
       "binding": "DB",
       "database_name": "vesper-db",
       "database_id": "00f8c1ca-f8a3-47d8-9f08-1fec87ec9f4a"
+    },
+    {
+      "binding": "SHARED_MEMORY_DB",
+      "database_name": "memory-db",
+      "database_id": "94e8bf24-53d1-4199-8483-e908c10c571b"
     }
   ],
   "r2_buckets": [
