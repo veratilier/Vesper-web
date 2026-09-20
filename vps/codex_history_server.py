@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, parse_qs
 
 
 DB_PATH = Path(os.environ.get("VESPER_HISTORY_DB", "/home/ubuntu/.vesper/chat-history.sqlite3"))
@@ -199,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
         path = [unquote(part) for part in urlparse(self.path).path.strip("/").split("/") if part]
         if path == ["health"] and self.command == "GET":
             self.send_json(200, {"ok": True})
+        elif path == ["search"] and self.command == "GET":
+            self.search_messages()
         elif path == ["conversations"] and self.command == "GET":
             self.list_conversations()
         elif len(path) == 2 and path[0] == "conversations":
@@ -228,16 +230,64 @@ class Handler(BaseHTTPRequestHandler):
               ORDER BY c.updated_at DESC LIMIT 100""").fetchall()
         self.send_json(200, {"conversations": [conversation(row, row["message_count"]) for row in rows]})
 
+    def search_messages(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        text = query.get("q", [""])[0].strip()
+        if not text:
+            self.send_json(200, {"results": [], "hasMore": False})
+            return
+        if len(text) > 500:
+            self.send_json(400, {"error": "Search text is too long"})
+            return
+        offset = max(0, int(query.get("offset", ["0"])[0]))
+        limit = min(100, max(1, int(query.get("limit", ["50"])[0])))
+        cid = query.get("conversationId", [""])[0]
+        # instr treats %, _ and apostrophes literally; Chinese single characters work.
+        where = "c.archived_at IS NULL AND m.role IN ('user', 'agent') AND instr(lower(m.content), lower(?)) > 0"
+        params = [text]
+        if cid:
+            where += " AND m.vesper_conversation_id = ?"
+            params.append(cid)
+        with db() as connection:
+            rows = connection.execute("SELECT m.*, c.title FROM messages m JOIN conversations c ON c.vesper_conversation_id = m.vesper_conversation_id WHERE " + where + " ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?", (*params, limit + 1, offset)).fetchall()
+        self.send_json(200, {"results": [dict(message(row), title=row["title"]) for row in rows[:limit]], "hasMore": len(rows) > limit})
+
     def get_conversation(self, conversation_id: str) -> None:
         with db() as connection:
             row = connection.execute("SELECT * FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone()
-            messages = connection.execute("""SELECT * FROM messages WHERE vesper_conversation_id = ?
-              ORDER BY created_at ASC, rowid ASC LIMIT 1000""", (conversation_id,)).fetchall()
+            query = parse_qs(urlparse(self.path).query)
+            limit = min(1000, max(1, int(query.get("limit", ["200"])[0])))
+            around = query.get("around", [""])[0]
+            before = query.get("before", [""])[0]
+            if around:
+                target = connection.execute("SELECT created_at, id FROM messages WHERE vesper_conversation_id = ? AND id = ?", (conversation_id, around)).fetchone()
+                if not target:
+                    self.send_json(404, {"error": "Message not found"})
+                    return
+                older = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ? AND (created_at, id) <= (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?", (conversation_id, target["created_at"], target["id"], limit // 2 + 1)).fetchall()
+                newer = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ? AND (created_at, id) > (?, ?) ORDER BY created_at, id LIMIT ?", (conversation_id, target["created_at"], target["id"], limit // 2)).fetchall()
+                messages = list(reversed(older)) + list(newer)
+            elif query.get("latest") == ["1"]:
+                boundary = ""
+                args = [conversation_id]
+                if before:
+                    cursor = connection.execute("SELECT created_at, id FROM messages WHERE vesper_conversation_id = ? AND id = ?", (conversation_id, before)).fetchone()
+                    if not cursor:
+                        self.send_json(400, {"error": "Invalid history cursor"})
+                        return
+                    boundary = " AND (created_at, id) < (?, ?)"
+                    args.extend([cursor["created_at"], cursor["id"]])
+                messages = list(reversed(connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ?" + boundary + " ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit)).fetchall()))
+            else:
+                messages = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ? ORDER BY created_at, id LIMIT 1000", (conversation_id,)).fetchall()
+            has_more = bool(messages and connection.execute("SELECT 1 FROM messages WHERE vesper_conversation_id = ? AND (created_at, id) < (?, ?) LIMIT 1", (conversation_id, messages[0]["created_at"], messages[0]["id"])).fetchone())
             tombstones = connection.execute("""SELECT codex_thread_id, stable_id, deleted_at
               FROM message_tombstones WHERE vesper_conversation_id = ?""", (conversation_id,)).fetchall()
         self.send_json(200, {
             "conversation": conversation(row) if row else None,
             "messages": [message(item) for item in messages],
+            "hasMore": has_more,
+            "before": messages[0]["id"] if messages else "",
             "tombstones": [{"threadId": item["codex_thread_id"], "stableId": item["stable_id"],
                             "messageId": item["stable_id"], "deletedAt": item["deleted_at"]}
                            for item in tombstones],
