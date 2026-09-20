@@ -438,7 +438,7 @@ class Handler(BaseHTTPRequestHandler):
             row = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone()
             if not row:
                 if conversation_delete.is_deleted(connection, conversation_id):
-                    self.send_json(200, {"ok": True, "permanentlyDeleted": True, "deleted": 0}); return
+                    self.send_json(200, {"ok": True, "permanent": True, "permanentlyDeleted": True, "deleted": 0}); return
                 self.send_json(404, {"error": "Conversation not found"}); return
             thread_id=row["codex_thread_id"]
             if conversation_delete.thread_is_shared(thread_id):
@@ -453,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
             connection.execute("DELETE FROM message_tombstones WHERE vesper_conversation_id=?",(conversation_id,))
             messages=connection.execute("DELETE FROM messages WHERE vesper_conversation_id=?",(conversation_id,)).rowcount
             deleted=connection.execute("DELETE FROM conversations WHERE vesper_conversation_id=?",(conversation_id,)).rowcount
-        self.send_json(200,{"ok":True,"permanentlyDeleted":True,"deleted":deleted,"messagesDeleted":messages,
+        self.send_json(200,{"ok":True,"permanent":True,"permanentlyDeleted":True,"deleted":deleted,"messagesDeleted":messages,
                             "wakeJobsDeleted":wake_jobs,"source":source})
 
     def delete_message(self, conversation_id: str, message_id: str) -> None:
