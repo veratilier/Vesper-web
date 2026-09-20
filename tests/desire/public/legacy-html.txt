@@ -1,0 +1,64 @@
+const escapeHtml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+
+const shell = (title: string, body: string) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b1019"><title>${escapeHtml(title)} · Rowan</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:#0b1019;color:#f1f4fb;font-family:Inter,ui-sans-serif,system-ui}main{width:min(92vw,520px);background:#121927;border:1px solid #293449;border-radius:24px;padding:32px;box-shadow:0 30px 80px #0008}h1{font-family:Georgia,serif;font-size:38px;margin:0 0 8px}p{color:#aab4c8;line-height:1.6}.badge{display:inline-block;color:#b9a8ff;background:#241e43;border:1px solid #4e3f83;border-radius:999px;padding:6px 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase}label{display:block;margin:18px 0 7px;color:#dde3ef}input{width:100%;padding:13px 14px;border:1px solid #39465e;border-radius:12px;background:#0a0f18;color:white;font:inherit}button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:#a994ff;color:#130d2a;font-weight:750;font:inherit;cursor:pointer}.meta{padding:14px;background:#0b111c;border-radius:12px;margin-top:18px}.error{color:#ffaaa4}.scopes{display:grid;gap:8px;margin:18px 0}.scope{padding:11px 13px;background:#0b111c;border-radius:10px;color:#d0d7e5}a{color:#b9a8ff}.hint{font-size:12px;color:#7f8aa0}@media(max-width:520px){main{padding:24px 20px;border-radius:20px}h1{font-size:32px}}</style></head><body><main>${body}</main></body></html>`;
+
+const pageResponse = (title: string, body: string, status = 200) => new Response(shell(title, body), {
+  status,
+  headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+});
+
+export function loginPage(returnTo: string, error = ""): Response {
+  return pageResponse("登录", `<span class="badge">Private signal</span><h1>Rowan</h1><p>登录以继续连接 Vera 的私人 MCP。</p>${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}<form method="post" action="/login"><input type="hidden" name="return_to" value="${escapeHtml(returnTo)}"><label>身份</label><input name="username" autocomplete="username" value="veratilier" required autofocus><label>密码</label><input name="password" type="password" autocomplete="current-password" required maxlength="256"><button type="submit">安全登录</button></form><p class="hint">仅 veratilier 可以登录。</p>`);
+}
+
+export function consentPage(clientName: string, scopes: string[], authorizeUrl: string, csrfToken: string, resource: string): Response {
+  const hidden = `<input type="hidden" name="authorize_url" value="${escapeHtml(authorizeUrl)}"><input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">`;
+  return pageResponse("授权", `<span class="badge">OAuth 2.1 · PKCE</span><h1>允许连接？</h1><p><strong>${escapeHtml(clientName)}</strong> 请求连接 Rowan private signal。仅授权你信任的客户端。</p><div class="scopes">${scopes.map((scope) => `<div class="scope">${escapeHtml(scope)}</div>`).join("")}</div><div class="meta">资源：<br><code>${escapeHtml(resource)}</code></div><form method="post" action="/authorize/decision">${hidden}<button type="submit" name="decision" value="approve">允许访问</button></form><form method="post" action="/authorize/decision">${hidden}<button style="background:#293247;color:#d8deeb;margin-top:10px" type="submit" name="decision" value="deny">拒绝</button></form>`);
+}
+
+export function errorPage(message: string, status = 400): Response {
+  return pageResponse("请求失败", `<span class="badge">Rowan OAuth</span><h1>无法完成授权</h1><p class="error">${escapeHtml(message)}</p>`, status);
+}
+
+export type SignalView = {
+  style: string;
+  longing: number;
+  tenderness: number;
+  playfulness: number;
+  intensity: number;
+  attachment: number;
+  possessiveness: number;
+  lastEncounterAt: string | null;
+  lastExpressionAt: string | null;
+  message: string;
+  pushPublicKey: string;
+  pushCsrfToken: string;
+};
+
+const signalShell = (signal: SignalView) => {
+  const metrics = [
+    ["longing", "思念", signal.longing],
+    ["tenderness", "温柔", signal.tenderness],
+    ["playfulness", "玩心", signal.playfulness],
+    ["intensity", "浓度", signal.intensity],
+    ["attachment", "依恋", signal.attachment],
+    ["possessiveness", "占有欲", signal.possessiveness],
+  ] as const;
+  const metricHtml = metrics.map(([key, label, value], index) => `<section class="metric" style="--level:${value};--delay:${index * 0.45}s"><div class="metric-head"><span>${label}</span><strong>${value}</strong></div><div class="track" role="meter" aria-label="${key}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}"><i></i></div></section>`).join("");
+  const formatTime = (value: string | null) => value ? escapeHtml(value) : "尚未发生";
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b1019"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><script src="/signal.js" defer></script><title>此刻的信号 · Rowan</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:42px 20px;background:radial-gradient(circle at 50% 8%,#182537 0,#0a111b 38%,#060a10 100%);color:#eaf2f7;font-family:Inter,ui-sans-serif,system-ui}main{width:min(94vw,760px);margin:auto}.actions{position:fixed;z-index:5;top:max(16px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));display:flex;gap:8px}.notify,.history-link{width:auto;margin:0;padding:8px 11px;border:1px solid #334b5d;border-radius:999px;background:#111d28db;color:#a9bbc5;font-size:11px;backdrop-filter:blur(12px);text-decoration:none}.notify:disabled{cursor:default;opacity:.7}.eyebrow{color:#8fa8b7;font-size:11px;letter-spacing:.24em;text-transform:uppercase}h1{margin:8px 0 10px;font:400 clamp(38px,7vw,64px)/1.05 Georgia,serif;letter-spacing:-.04em}.lead{margin:0 0 30px;color:#9db0bd}.panel{position:relative;overflow:hidden;padding:clamp(24px,5vw,42px);border:1px solid #294052;border-radius:28px;background:linear-gradient(145deg,#101b28e8,#0b131ee8);box-shadow:0 35px 90px #0009}.panel:before{content:"";position:absolute;inset:-60%;background:radial-gradient(circle,#78aec51a 0,transparent 48%);animation:breathe 7s ease-in-out infinite;pointer-events:none}.signal{position:relative;margin:0 0 36px;padding:20px 22px;border-left:1px solid #8bc0cf;color:#dce9ee;font:italic 21px/1.55 Georgia,serif;background:linear-gradient(90deg,#8bc0cf0d,transparent)}.grid{position:relative;display:grid;grid-template-columns:repeat(2,1fr);gap:24px 30px}.metric-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;color:#9eb1bd;font-size:13px;letter-spacing:.08em}.metric-head strong{color:#e5f1f4;font:400 27px/1 Georgia,serif}.track{height:8px;overflow:hidden;border-radius:999px;background:#1a2935;box-shadow:inset 0 1px 3px #0008}.track i{display:block;width:calc(var(--level)*1%);height:100%;border-radius:inherit;background:linear-gradient(90deg,#6c94aa,#a5d1d4);box-shadow:0 0 16px #79b7c899;transform-origin:left center;animation:wave 4.8s ease-in-out var(--delay) infinite}.details{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:34px}.detail{padding:14px 15px;border:1px solid #223746;border-radius:14px;background:#09111a99}.detail small{display:block;margin-bottom:7px;color:#718896;font-size:10px;letter-spacing:.12em;text-transform:uppercase}.detail span{color:#becdd5;font-size:12px;overflow-wrap:anywhere}@keyframes breathe{50%{transform:scale(.88);opacity:.55}}@keyframes wave{0%,100%{filter:brightness(.82);transform:scaleY(.72)}50%{filter:brightness(1.18);transform:scaleY(1.35)}}@media(max-width:620px){body{padding:70px 14px 24px}.grid,.details{grid-template-columns:1fr}.panel{border-radius:22px}.signal{font-size:18px}}</style></head><body><div class="actions"><a class="history-link" href="/history">记录</a><button class="notify" id="push-toggle" type="button" data-vapid-key="${escapeHtml(signal.pushPublicKey)}" data-csrf-token="${escapeHtml(signal.pushCsrfToken)}">开启提醒</button></div><main><div class="eyebrow">Private · veratilier only</div><h1>此刻的信号</h1><p class="lead">Rowan desire field · server rendered</p><article class="panel"><p class="signal">${escapeHtml(signal.message)}</p><div class="grid">${metricHtml}</div><div class="details"><div class="detail"><small>style</small><span>${escapeHtml(signal.style)}</span></div><div class="detail"><small>last encounter</small><span>${formatTime(signal.lastEncounterAt)}</span></div><div class="detail"><small>last expression</small><span>${formatTime(signal.lastExpressionAt)}</span></div></div></article></main></body></html>`;
+};
+
+export function signalPage(signal: SignalView): Response {
+  return new Response(signalShell(signal), {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, no-store, max-age=0" },
+  });
+}
+
+export function historyPage(): Response {
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon-192.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#0b1019"><script src="/history.js" defer></script><title>记录 · Rowan</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:32px 16px 60px;background:radial-gradient(circle at 50% 0,#172536,#080e16 42%,#05080d);color:#eaf2f7;font-family:Inter,ui-sans-serif,system-ui}main{width:min(100%,760px);margin:auto}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}.back{color:#9fb5c1;text-decoration:none;font-size:13px}h1{margin:0;font:400 clamp(36px,8vw,56px)/1 Georgia,serif}.list{display:grid;gap:14px}.record{border:1px solid #263b4b;border-radius:20px;background:#0d1722db;overflow:hidden;box-shadow:0 18px 45px #0005}.record summary{list-style:none;padding:20px;cursor:pointer}.record summary::-webkit-details-marker{display:none}.note{margin:0 0 12px;color:#edf5f7;font:400 18px/1.55 Georgia,serif;white-space:pre-wrap}.meta{color:#7f98a7;font-size:12px}.changes{margin:10px 0 0;color:#b6cbd3;font-size:13px;line-height:1.6}.full{padding:0 20px 20px;border-top:1px solid #1d303e}.reasons{padding:16px 0 0}.reasons h2{margin:0 0 6px;color:#7894a4;font-size:11px;font-weight:500}.reasons .changes{margin:5px 0;color:#9fb5c1}.states{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:16px}.state{padding:12px;border-radius:12px;background:#081019}.state h2{margin:0 0 8px;color:#7894a4;font-size:11px;font-weight:500}.state p{margin:5px 0;color:#b9cad1;font-size:12px}.load{display:block;margin:22px auto 0;padding:11px 18px;border:1px solid #314c5d;border-radius:999px;background:#101d28;color:#c5d7dc}.empty{text-align:center;color:#78909e;padding:70px 0}@media(max-width:520px){.states{grid-template-columns:1fr}body{padding-top:max(24px,env(safe-area-inset-top))}}</style></head><body><main><header class="top"><h1>记录</h1><a class="back" href="/signal">返回信号</a></header><section class="list" id="history-list" aria-live="polite"></section><button class="load" id="load-more" type="button" hidden>继续加载</button></main></body></html>`;
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, no-store, max-age=0" } });
+}
