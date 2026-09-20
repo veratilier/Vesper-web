@@ -18,6 +18,10 @@ TOKEN_PATH = Path(os.environ.get("CODEX_TOKEN_FILE", "/home/ubuntu/.codex/app-se
 ALLOWED_ORIGINS = {"https://vesper.r-vera.com", "http://localhost:3000", "http://localhost:5173"}
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS conversation_tombstones (
+  vesper_conversation_id TEXT PRIMARY KEY,
+  deleted_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS conversations (
   vesper_conversation_id TEXT PRIMARY KEY,
   codex_thread_id TEXT UNIQUE,
@@ -179,6 +183,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def dispatch(self) -> None:
+        try:
+            self.dispatch_request()
+        except (ValueError, UnicodeDecodeError):
+            self.send_json(400, {"error": "Invalid request body"})
+        except sqlite3.Error as error:
+            # Do not log SQL parameters, which may contain private chat content.
+            self.log_message("History database failure: %s", type(error).__name__)
+            self.send_json(503, {"error": "History storage unavailable; operation not confirmed"})
+
+    def dispatch_request(self) -> None:
         if not self.authenticated():
             self.send_json(401, {"error": "Unauthorized"})
             return
@@ -190,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
         elif len(path) == 2 and path[0] == "conversations":
             if self.command == "GET": self.get_conversation(path[1])
             elif self.command in {"POST", "PATCH"}: self.upsert_conversation(path[1])
-            elif self.command == "DELETE": self.archive_conversation(path[1])
+            elif self.command == "DELETE": self.delete_conversation(path[1])
             else: self.send_json(405, {"error": "Method not allowed"})
         elif len(path) == 3 and path[0] == "conversations" and path[2] == "messages" and self.command == "POST":
             self.upsert_message(path[1])
@@ -240,6 +254,10 @@ class Handler(BaseHTTPRequestHandler):
         created_at = str(body.get("createdAt") or timestamp)
         updated_at = str(body.get("updatedAt") or timestamp)
         with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM conversation_tombstones WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone():
+                self.send_json(410, {"error": "Conversation was deleted"})
+                return
             connection.execute("""INSERT INTO conversations
               (vesper_conversation_id, codex_thread_id, title, created_at, updated_at, archived_at, source)
               VALUES (?, ?, ?, ?, ?, NULL, ?)
@@ -285,6 +303,10 @@ class Handler(BaseHTTPRequestHandler):
         source = source if source in {"legacy-vesper", "codex"} else "codex"
         time_source = str(body.get("timeSource") or metadata.get("timeSource") or ("message" if created_at else "unknown"))[:32]
         with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM conversation_tombstones WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone():
+                self.send_json(410, {"error": "Conversation was deleted"})
+                return
             connection.execute("""INSERT INTO conversations
               (vesper_conversation_id, title, created_at, updated_at, archived_at, source)
               VALUES (?, ?, ?, ?, NULL, ?)
@@ -317,15 +339,26 @@ class Handler(BaseHTTPRequestHandler):
             row = connection.execute("SELECT * FROM messages WHERE id = ?", (target_id,)).fetchone()
         self.send_json(200, {"message": message(row)})
 
-    def archive_conversation(self, conversation_id: str) -> None:
-        timestamp = now()
+    def delete_conversation(self, conversation_id: str) -> None:
         with db() as connection:
-            cursor = connection.execute("UPDATE conversations SET archived_at = ?, updated_at = ? WHERE vesper_conversation_id = ?", (timestamp, timestamp, conversation_id))
-        self.send_json(200, {"ok": True, "archived": cursor.rowcount})
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("""INSERT INTO conversation_tombstones
+              (vesper_conversation_id, deleted_at) VALUES (?, ?)
+              ON CONFLICT(vesper_conversation_id) DO NOTHING""", (conversation_id, now()))
+            # Children must be removed first with foreign keys enabled.
+            connection.execute("DELETE FROM message_tombstones WHERE vesper_conversation_id = ?", (conversation_id,))
+            connection.execute("DELETE FROM messages WHERE vesper_conversation_id = ?", (conversation_id,))
+            cursor = connection.execute("DELETE FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,))
+        self.send_json(200, {"ok": True, "deleted": cursor.rowcount, "permanent": True,
+                             "scope": "vesper_history"})
 
     def delete_message(self, conversation_id: str, message_id: str) -> None:
         body = self.body()
         with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute("SELECT 1 FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone():
+                self.send_json(200, {"ok": True, "deleted": 0})
+                return
             row = connection.execute(
                 "SELECT item_id, metadata_json FROM messages WHERE vesper_conversation_id = ? AND id = ?",
                 (conversation_id, message_id),
@@ -375,3 +408,4 @@ if __name__ == "__main__":
         pass
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("VESPER_HISTORY_PORT", "4510"))), Handler)
     server.serve_forever()
+
