@@ -33,6 +33,7 @@ The two cherry-picks applied without textual conflicts. Semantic overlaps were r
 - Add temporary-database History tests for message context, search authorization, rollback, retry, tombstones and storage errors. No test uses live D1 or real Codex deletion.
 - Repair stale Wake test expectations against release commits `6a87b1d` (English UI) and `10b0f68` (owner-visible notification ledger); continue asserting raw errors/results are excluded.
 - Resolve pre-existing type-check failures in music response typing, playlist-intent track ID, Watch response typing, Capacitor KeyboardResize enum, and TS test import configuration. The playlist fix prevents an existing runtime access to missing `track.id` on an intent.
+- Update release instructions to name `veratilier/Vesper-web` and make checked `main` the sole production source.
 - Add a PR workflow covering type-checks, existing tests, isolated integration tests, both production builds and Worker dry-run.
 
 ## Validation scope
@@ -49,4 +50,4 @@ After the audited content commit `4a1e21a`, a normal no-commit merge of main was
 
 This preserves the release's Capacitor dependencies, native notification tests and OAuth/gallery behavior, while keeping all selected backend fixes. Main's two old History test files were not added: they assert the superseded plaintext-tombstone design and are covered by `test_history_reconcile.py` plus release paging/deletion tests. The ancestry merge changes no product code relative to the audited integration commit.
 
-Lint was also run: the repository reports 48 errors / 1544 warnings across existing and vendored code. This is not claimed as passing and is not used as a substitute for the successful type-check, regression tests and builds.
+Lint was also run: the initial repository run reported 48 errors / 1544 warnings across existing, imported and generated code. The new Memory component warning was subsequently fixed and its targeted lint passes. This is not claimed as passing and is not used as a substitute for the successful type-check, regression tests and builds.
