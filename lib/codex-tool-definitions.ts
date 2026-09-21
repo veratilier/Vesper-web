@@ -138,12 +138,15 @@ export const codexToolDefinitions = [
   },
   {
     name: "remember_vesper_memory",
-    description: "Use only after a meaningful exchange to preserve a concise, specific and durable memory. Do not save jokes, guesses, secrets not needed for the relationship, or repeat an existing memory. Use type core only for a candidate that the user must confirm; use feeling for Rowan's first-person feeling.",
+    description: "Save to the shared Memory library shown in Vesper. Include source and kind when known; never invent event time. Use only after a meaningful exchange to preserve a concise, specific and durable memory. Do not save jokes, guesses, secrets not needed for the relationship, or repeat an existing memory. Legacy type core is stored as a reflection, not a confirmed fact; use feeling for Rowan's first-person feeling.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         type: { type: "string", enum: ["core", "long_term", "feeling", "dream"] },
+        kind: { type: "string", enum: ["episode", "preference", "agreement", "reflection", "dream"] },
+        source: { type: "string", description: "Actual source of the remembered text." },
+        occurred_at: { type: "string", description: "Known event time in ISO 8601; omit when unknown." },
         body: { type: "string" },
         mood: { type: "string" },
         tags: { type: "array", items: { type: "string" } },
@@ -153,14 +156,17 @@ export const codexToolDefinitions = [
   },
   {
     name: "manage_vesper_memory",
-    description: "List, add, edit, or remove Rowan's Vesper memories. Only make a change after the user explicitly asks for that exact change. A delete safely removes the memory from recall and keeps it recoverable; editing a core memory requires an explicit user confirmation and a reason.",
+    description: "List, add, or correct shared Memory library records. Changes require the user's explicit request. Edit creates a new version preserving the original and requires a reason. Legacy delete/pin/restore operations are unavailable here.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["list", "add", "edit", "delete", "pin", "unpin", "restore"] },
+        action: { type: "string", enum: ["list", "add", "edit"] },
         id: { type: "string", description: "Memory id for edit/delete/pin/unpin/restore." },
         type: { type: "string", enum: ["core", "long_term", "feeling", "dream"] },
+        kind: { type: "string", enum: ["episode", "preference", "agreement", "reflection", "dream"] },
+        source: { type: "string", description: "Actual source of the remembered text." },
+        occurred_at: { type: "string", description: "Known event time in ISO 8601; omit when unknown." },
         body: { type: "string" },
         mood: { type: "string" },
         tags: { type: "array", items: { type: "string" } },

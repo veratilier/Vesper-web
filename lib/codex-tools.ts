@@ -9,7 +9,8 @@ import { readExecutions } from '@/lib/codex-events';
 import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
 import { callConfiguredMcpTool, configuredMcpTools } from "@/lib/mcp-connections";
-import { captureMemoryCandidate, correctCoreMemory, createMemory, editMemory, listMemories, recallMemory, updateMemoryState, type MemoryScope, type MemoryType } from "@/lib/memory";
+import { type MemoryScope } from "@/lib/memory";
+import { recallSharedMemory, sharedMemoryTool } from "@/lib/shared-memory-tools";
 import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
 
 type ToolInput = Record<string, unknown>;
@@ -177,7 +178,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const section = String(input.section || "notes").toLowerCase();
     if (section === "memory") {
       if (!memoryScope) throw new Error("Memory scope is unavailable");
-      return { section, value: (await recallMemory(memoryScope, "")).memories };
+      return { section, value: (await recallSharedMemory("")).memories };
     }
     const key = sectionToKey[section];
     if (!key) throw new Error(`Unknown Vesper section: ${section}`);
@@ -193,7 +194,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
       if (JSON.stringify(value).toLowerCase().includes(query)) matches.push({ section, value });
     }
     if (memoryScope) {
-      const memories = await recallMemory(memoryScope, query);
+      const memories = await recallSharedMemory(query);
       if (memories.memories.length) matches.push({ section: "memory", value: memories.memories });
     }
     return { matches: matches.filter((item, index, list) => list.findIndex((candidate) => candidate.section === item.section) === index) };
@@ -320,55 +321,9 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     return { ok: true, alreadyInPlaylist: true, trackId: track.id, playlist: "Vesper music" };
   }
-  if (name === "recall_vesper_memory") {
+  if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
     if (!memoryScope) throw new Error("Memory scope is unavailable");
-    return recallMemory(memoryScope, String(input.query || ""));
-  }
-  if (name === "remember_vesper_memory") {
-    if (!memoryScope) throw new Error("Memory scope is unavailable");
-    const result = await captureMemoryCandidate(memoryScope, input);
-    return { stored: result.created, duplicate: result.duplicate, memory: result.memory };
-  }
-  if (name === "manage_vesper_memory") {
-    if (!memoryScope) throw new Error("Memory scope is unavailable");
-    const action = String(input.action || "");
-    if (action === "list") {
-      const memories = await listMemories(memoryScope, { includeDemoted: input.includeDemoted === true, includeCandidates: true, limit: 80 });
-      return {
-        memories: memories.map((memory) =>
-          Object.fromEntries(Object.entries(memory).filter(([key]) => key !== "embedding")),
-        ),
-      };
-    }
-    if (action === "add") {
-      const typeValue = String(input.type || "long_term");
-      const type: MemoryType = typeValue === "core" ? "core" : typeValue === "feeling" ? "feeling" : typeValue === "dream" ? "dream" : "long_term";
-      const result = await createMemory(memoryScope, {
-        type,
-        body: String(input.body || ""),
-        mood: String(input.mood || ""),
-        tags: input.tags,
-        source: type === "core" ? "codex-explicit-core-candidate" : "codex-explicit",
-        reviewStatus: type === "core" ? "candidate" : "approved",
-      });
-      return { added: result.created, duplicate: result.duplicate, memory: result.memory, note: type === "core" ? "核心记忆已作为候选保存，仍需用户在 Memory 页面确认。" : undefined };
-    }
-    const id = String(input.id || "").trim();
-    if (!id) throw new Error("Memory id is required");
-    if (action === "edit") {
-      const reason = String(input.reason || "").trim();
-      if (!reason) throw new Error("Editing a memory requires an explicit reason");
-      const current = (await listMemories(memoryScope, { includeDemoted: true, includeCandidates: true, limit: 250 })).find((memory) => memory.id === id);
-      if (!current) throw new Error("找不到这条记忆");
-      const detail = current.type === "core"
-        ? await correctCoreMemory(memoryScope, id, { body: String(input.body || ""), mood: String(input.mood || ""), tags: input.tags, reason })
-        : await editMemory(memoryScope, id, { body: String(input.body || ""), mood: String(input.mood || ""), tags: input.tags, reason });
-      return { edited: true, memory: detail?.memory || null };
-    }
-    if (action === "delete") return { deleted: true, memory: (await updateMemoryState(memoryScope, id, "demote"))?.memory || null };
-    if (action === "restore") return { restored: true, memory: (await updateMemoryState(memoryScope, id, "restore"))?.memory || null };
-    if (action === "pin" || action === "unpin") return { pinned: action === "pin", memory: (await updateMemoryState(memoryScope, id, "pin", action === "pin"))?.memory || null };
-    throw new Error("Unsupported memory action");
+    return sharedMemoryTool(name, input, context);
   }
   if (name === "sticker_search") {
     if (!memoryScope) throw new Error("Sticker scope is unavailable");
