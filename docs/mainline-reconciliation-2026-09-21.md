@@ -42,3 +42,11 @@ Local: Desire 36 tests; existing Codex tests; all `tools/test-*` checks via `nod
 Browser local checks: opening scene → release card homepage; shared and legacy Memory entry; Chat composer and History panel. Local preview is not paired, so its unavailable-data messages are expected and not a successful live API test.
 
 Production verification must be recorded separately after merge/deploy. A build passing does not establish Desire, AI memory writes or browser readback on production. VPS code is included and tested, but deploying the Cloudflare Worker does not deploy the separate VPS History service.
+
+## Ancestry integration conflict resolution
+
+After the audited content commit `4a1e21a`, a normal no-commit merge of main was inspected to retain both histories. Nine conflict paths were resolved to that reviewed integration tree: `app/attachment-gallery.tsx`, `app/mcp/oauth/callback/route.ts`, `docs/shared-memory.md`, `lib/codex-tool-definitions.ts`, `lib/codex-tools.ts`, `package-lock.json`, `package.json`, `tests/desire/native.test.mjs`, and `vps/codex_history_server.py`.
+
+This preserves the release's Capacitor dependencies, native notification tests and OAuth/gallery behavior, while keeping all selected backend fixes. Main's two old History test files were not added: they assert the superseded plaintext-tombstone design and are covered by `test_history_reconcile.py` plus release paging/deletion tests. The ancestry merge changes no product code relative to the audited integration commit.
+
+Lint was also run: the repository reports 48 errors / 1544 warnings across existing and vendored code. This is not claimed as passing and is not used as a substitute for the successful type-check, regression tests and builds.
