@@ -1,5 +1,5 @@
 import { authorizeApp } from "@/lib/bridge-auth";
-import { memoryScopeFromRequest, recallMemory } from "@/lib/memory";
+import { recallSharedMemory } from "@/lib/shared-memory-tools";
 import { corsHeaders, optionsResponse } from "@/lib/cors";
 
 function json(request: Request, value: unknown, status = 200) {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!(await authorizeApp(request))) return json(request, { error: "Device not paired" }, 401);
   try {
     const body = await request.json() as { query?: string };
-    const result = await recallMemory(await memoryScopeFromRequest(request), String(body.query || ""));
+    const result = await recallSharedMemory(String(body.query || ""));
     return json(request, result);
   } catch (reason) {
     return json(request, { error: reason instanceof Error ? reason.message : "Memory recall is unavailable." }, 500);
