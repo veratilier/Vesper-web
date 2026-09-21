@@ -1,0 +1,4 @@
+ALTER TABLE desire_state ADD COLUMN possessiveness_calculated_through_at TEXT;
+UPDATE desire_state
+SET possessiveness_calculated_through_at = longing_calculated_through_at
+WHERE possessiveness_calculated_through_at IS NULL;

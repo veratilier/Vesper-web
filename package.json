@@ -12,9 +12,11 @@
     "preview:pages": "vite preview --config static-vite.config.mjs",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test:codex": "node --experimental-strip-types tools/test-codex-message-merge.mjs && node --experimental-strip-types tools/test-codex-approval.ts && node --experimental-strip-types tools/test-codex-models.ts && node --experimental-strip-types tools/test-stickers.ts && python3 vps/test_history_stickers.py"
+    "test:codex": "node --experimental-strip-types tools/test-codex-message-merge.mjs && node --experimental-strip-types tools/test-codex-approval.ts && node --experimental-strip-types tools/test-codex-models.ts && node --experimental-strip-types tools/test-stickers.ts && python3 vps/test_history_stickers.py",
+    "test:desire": "node tools/test-desire.mjs"
   },
   "dependencies": {
+    "@block65/webcrypto-web-push": "^1.0.2",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@mmmike/web-push": "^1.3.0",
     "@modelcontextprotocol/server": "^2.0.0",
