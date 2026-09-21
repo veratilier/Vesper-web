@@ -55,3 +55,24 @@ console.log('Nested tool results, complete patches, missing-code and serialized 
 
 const escapedMetadata = executionEvent('item/completed', { item: { id: 'escaped-meta', type: 'fileChange', command: '\u0000'.repeat(3000), cwd: '\u0000'.repeat(1000), aggregatedOutput: '\u0000'.repeat(24000), changes: [{ path: 'a.ts', kind: 'update'.repeat(100000), diff: '+'.repeat(60000) }] } });
 assert.ok(JSON.stringify(escapedMetadata).length < 128000, 'full execution including escaped metadata stays within persistence budget');
+
+// Production legacy records may have an execution object without an execution ID.
+const { savedExecution } = await import('../app/codex-execution.ts');
+const legacy = { title: 'old tool', result: { ok: true }, files: [{ path: 'a.ts', diff: null }] };
+const before = JSON.stringify(legacy);
+const restored = savedExecution(legacy, 'history-message-1', '2026-09-21T00:00:00Z');
+assert.equal(restored.id, 'history-message-1');
+assert.equal(restored.id.startsWith('turn:'), false);
+assert.equal(restored.status, 'unknown');
+assert.equal(restored.output, JSON.stringify({ ok: true }, null, 2));
+assert.equal(restored.files[0].diff, '');
+assert.equal(JSON.stringify(legacy), before, 'display normalization must not mutate stored evidence');
+for (const value of [null, [], true, { id: 7, title: {}, output: null }]) {
+  const row = savedExecution(value, 'fallback', '');
+  assert.equal(row.id, 'fallback');
+  assert.equal(typeof row.title, 'string');
+  assert.equal(typeof row.output, 'string');
+}
+assert.equal(savedExecution({ id: 'turn:summary', output: 'saved text' }, 'message', '').id, 'turn:summary');
+assert.equal(savedExecution({ id: 'tool', output: 'exact\n output' }, 'message', '').output, 'exact\n output');
+console.log('Partial legacy execution metadata renders safely without changing stored history');

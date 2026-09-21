@@ -16,7 +16,7 @@ import { AppCenter } from "./app-center";
 import { DesirePanel, HomeDesire } from "./desire-panel";
 import { WakeCard } from "./wake-card";
 import type { WakeRecord } from "./wake-summary";
-import { executionEvent, workspaceOptions, type Execution } from './codex-execution';
+import { executionEvent, savedExecution, workspaceOptions, type Execution } from './codex-execution';
 import { ChatActivity, type TurnActivity } from './chat-activity';
 import { ExecutionCard } from './execution-card';
 import { PhotoAlbum } from './photo-album';
@@ -4728,7 +4728,9 @@ function ConnectedChat({
   }, [focusMessageId, messages.length]);
   // A live item and its saved form share their React key, so completion updates
   // the existing row instead of appending a second message or remounting it.
-  const displayMessages: BridgeChatMessage[] = [...messages];
+  const displayMessages: BridgeChatMessage[] = messages.map(item => item.metadata?.execution
+    ? { ...item, metadata: { ...item.metadata, execution: savedExecution(item.metadata.execution, item.id, item.createdAt) } }
+    : item);
   for (const [itemId, content] of Object.entries(streamingItems)) {
     if (isCompletedCodexItem(messages, itemId)) continue;
     displayMessages.push({
