@@ -28,13 +28,15 @@ export function SharedMemoryLibrary({ apiUrl, headers, legacy }: { apiUrl: (path
   useEffect(() => {
     if (old) return;
     let cancelled = false;
+    const timer = window.setTimeout(() => {
     setLoading(true); setError('');
     const path = '/api/memories?' + new URLSearchParams({ offset: String(offset), limit: '40', ...(kind ? { kind } : {}) });
     void (search.trim() ? request<{ hits: Memory[]; items?: Memory[]; total?: number }>('/api/search', { query: search.trim(), limit: 20, include_nonfacts: true, ...(kind ? { kind } : {}) }) : request<{ items: Memory[]; total: number; hits?: Memory[] }>(path))
       .then(data => { if (!cancelled) { setItems(data.items || data.hits || []); setTotal(data.total ?? data.hits?.length ?? 0); } })
       .catch(reason => { if (!cancelled) { setItems([]); setError(reason instanceof Error ? reason.message : 'Memory is unavailable'); } })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [request, old, search, kind, offset]);
   const open = async (id: string) => {
     try { setDetail(await request<Memory>('/api/memories/' + encodeURIComponent(id))); setError(''); }
