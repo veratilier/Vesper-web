@@ -1,3 +1,8 @@
+import { legacyDesireRead } from './desire/routing.js';
+import { env } from 'cloudflare:workers';
+import { executeDesire, type NativeDesireEnv } from './desire/native';
+import { desireTools } from './desire/tools';
+import { memoryScopeFromRequest } from './memory';
 import { listAlbumPhotos, saveAlbumPhoto, getAlbumPhoto } from '@/lib/photo-album';
 import { createChatFile } from '@/lib/codex-artifacts';
 import { readExecutions } from '@/lib/codex-events';
@@ -123,6 +128,24 @@ async function readMusicStatus() {
 }
 
 export async function executeCodexTool(name: string, input: ToolInput, memoryScope?: MemoryScope, context: CodexToolContext = {}) {
+  if (name === "call_configured_mcp_tool") {
+    const nativeRead = legacyDesireRead(input.toolName);
+    if (nativeRead) {
+      const args = input.arguments && typeof input.arguments === "object" && !Array.isArray(input.arguments) ? input.arguments as ToolInput : {};
+      return executeCodexTool(nativeRead, args, memoryScope, context);
+    }
+  }
+  if (desireTools.some(tool => tool.name === name)) {
+    const bindings = env as NativeDesireEnv & { VESPER_APP_TOKEN?: string };
+    if (!memoryScope || !bindings.VESPER_APP_TOKEN) throw new Error('Owner context required');
+    const owner = await memoryScopeFromRequest(new Request('https://vesper.internal', { headers: { 'x-vesper-device-token': bindings.VESPER_APP_TOKEN } }));
+    if (owner.userId !== memoryScope.userId) throw new Error('Owner context mismatch');
+    // Refuse to seed a fresh state if production is bound to the wrong database.
+    if (!bindings.DB) throw new Error('Vesper Desire storage is unavailable');
+    const existing = await bindings.DB.prepare('SELECT user_id FROM vesper_desire_state WHERE user_id = ?').bind('vesper').first();
+    if (!existing) throw new Error('Existing Vesper Desire state was not found; no values have been initialized.');
+    return executeDesire(bindings, name, input);
+  }
   await ensureSchema();
   if (['album_save_photo', 'album_search_photos', 'album_send_photos'].includes(name)) {
     if (!memoryScope || !context.origin) throw new Error('Account context required');
