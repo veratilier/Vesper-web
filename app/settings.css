@@ -7,8 +7,8 @@
 .settings-page.detail-active .external-mcp-modal {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 100%;
+  height: auto;
+  min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
   color: var(--ui-ink);
@@ -17,7 +17,7 @@
 .settings-page.detail-active .external-mcp-modal > .modal-head {
   flex: 0 0 auto;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .mcp-list-scroll,
@@ -37,44 +37,44 @@
 
 .mcp-list-intro {
   max-width: 38rem;
-  margin: 0 0 18px;
+  margin: 0 0 12px;
   color: var(--ui-ink-secondary);
   font-size: 13px;
-  line-height: 1.65;
+  line-height: 1.5;
   text-align: left;
 }
 
 .mcp-server-list {
   display: grid;
-  gap: 12px;
-  padding-bottom: 18px;
+  gap: 8px;
+  padding-bottom: 10px;
 }
 
 .mcp-server-card {
   display: grid;
-  gap: 14px;
-  padding: 16px;
+  gap: 8px;
+  padding: 11px 12px;
   border: 1px solid var(--ui-line);
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--ui-surface);
 }
 
 .mcp-server-summary {
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 7px minmax(0, 1fr);
+  gap: 8px;
   align-items: start;
 }
 
 .mcp-server-summary > div {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 3px;
 }
 
 .mcp-server-summary b {
   color: var(--ui-ink);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -88,8 +88,8 @@
 }
 
 .mcp-live-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   margin-top: 5px;
   border-radius: 50%;
   background: var(--ui-ink-secondary);
@@ -104,13 +104,14 @@
 .mcp-card-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .mcp-card-actions button {
-  min-width: 48px;
-  min-height: 36px;
-  padding: 0 10px;
+  min-width: 42px;
+  min-height: 32px;
+  padding: 0 8px;
   border: 1px solid var(--ui-line);
   border-radius: 10px;
   background: var(--ui-surface);
@@ -136,8 +137,8 @@
 .mcp-editor-scroll {
   display: grid;
   align-content: start;
-  gap: 14px;
-  padding: 1px 1px 14px;
+  gap: 10px;
+  padding: 1px 1px 10px;
 }
 
 .mcp-editor-modal .profile-field {
@@ -145,17 +146,18 @@
 }
 
 .mcp-editor-modal .profile-field span {
-  margin: 0 4px 7px;
+  margin: 0 2px 4px;
   color: var(--ui-ink-secondary);
   font-size: 13px;
 }
 
 .mcp-editor-modal .profile-field input {
   box-sizing: border-box;
-  min-height: 52px;
-  height: 52px;
+  min-height: 42px;
+  height: 42px;
+  padding: 8px 12px;
   border: 1px solid var(--ui-line);
-  border-radius: 15px;
+  border-radius: 11px;
   background: var(--ui-surface);
   color: var(--ui-ink);
   font-size: 16px;
@@ -168,7 +170,7 @@
 }
 
 .mcp-auth-choice {
-  min-height: 54px;
+  min-height: 40px;
   justify-content: space-between;
   gap: 12px;
   color: var(--ui-ink-secondary);
@@ -180,13 +182,13 @@
 }
 
 .mcp-auth-choice button {
-  min-width: 58px;
-  min-height: 42px;
+  min-width: 48px;
+  min-height: 34px;
   border: 1px solid var(--ui-line);
   border-radius: 21px;
   background: var(--ui-surface);
   color: var(--ui-ink-secondary);
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .mcp-auth-choice button.selected {
@@ -206,7 +208,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 50px;
+  min-height: 40px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -254,14 +256,14 @@
   flex: 0 0 auto;
   grid-template-columns: 1fr 1.35fr;
   gap: 10px;
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--ui-line);
 }
 
 .mcp-editor-actions > button {
-  min-height: 50px;
+  min-height: 40px;
   border: 1px solid var(--ui-line);
-  border-radius: 15px;
+  border-radius: 11px;
   background: var(--ui-surface);
   color: var(--ui-ink);
   font-size: 16px;
@@ -282,4 +284,111 @@
   font-size: 13px;
   line-height: 1.45;
   text-align: left;
+}
+
+/* Center detail cards between the header and dock; long forms scroll inside. */
+.app-shell .settings-page.detail-active .modal-layer {
+  position: fixed;
+  inset: calc(var(--safe-top) + 70px) 20px calc(var(--safe-bottom) + 20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+}
+.app-shell .settings-page.detail-active .modal-layer > section {
+  flex: 0 1 640px;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  max-height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  border-radius: 24px;
+  padding: 24px 22px !important;
+  overscroll-behavior: contain;
+}
+.app-shell .settings-page.detail-active .modal-layer > .external-mcp-modal {
+  flex-basis: 480px;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px 16px !important;
+  border-radius: 20px;
+}
+.app-shell .mcp-settings-page .modal-head h2 {
+  font-size: 14px !important;
+  margin-block: 4px 0;
+}
+.app-shell .mcp-settings-page .modal-head small {
+  font-size: 10px;
+}
+.app-shell .mcp-settings-page .modal-head > button {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 7px;
+}
+.app-shell .mcp-settings-page :is(.mcp-auth-choice, .mcp-enable, .mcp-editor-actions > button) {
+  font-size: 13px;
+}
+.app-shell .mcp-settings-page :is(.mcp-list-intro, .mcp-card-actions button, .connection-message) {
+  font-size: 12px;
+}
+.app-shell .mcp-settings-page .settings-hint {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 767px) {
+  .app-shell .settings-page.detail-active .modal-layer {
+    bottom: calc(var(--safe-bottom) + var(--mobile-nav-height, 64px) + var(--mobile-nav-gap, 18px) + 14px);
+  }
+  html[data-mobile-keyboard="true"] .app-shell .settings-page.detail-active .modal-layer {
+    bottom: 12px;
+  }
+}
+@media (min-width: 1024px) {
+  .app-shell .settings-page.detail-active .modal-layer {
+    left: calc(var(--desktop-nav-width, 272px) + 20px);
+  }
+}
+
+/* Settings categories reveal their options in place. */
+.app-shell .settings-accordion { gap: 10px; }
+.app-shell .settings-accordion-item {
+  overflow: hidden;
+  border-radius: 16px;
+}
+.app-shell .settings-accordion-item > .setting-row > .ui-icon {
+  transition: transform .18s ease;
+}
+.app-shell .settings-accordion-item > .setting-row[aria-expanded="true"] > .ui-icon {
+  transform: rotate(90deg);
+}
+.app-shell .settings-accordion-content {
+  margin: 0 14px 10px;
+  border-top: 1px solid var(--ui-line);
+}
+.app-shell .settings-accordion-content:not([hidden]) {
+  animation: settings-options-in .18s ease both;
+}
+.app-shell .settings-accordion-content .setting-row {
+  min-height: 56px;
+  padding: 10px 4px;
+}
+.app-shell .settings-accordion-content .setting-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  background: transparent;
+}
+.app-shell .settings-accordion-content .setting-row b { font-size: 13px !important; }
+.app-shell .settings-accordion-content .setting-row small { font-size: 11px !important; }
+@keyframes settings-options-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .settings-accordion-content:not([hidden]) { animation: none; }
+  .app-shell .settings-accordion-item > .setting-row > .ui-icon { transition: none; }
 }

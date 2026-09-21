@@ -5018,3 +5018,64 @@ body {
 
 .file-download-status { margin: 4px 0; font-size: 12px; color: var(--ui-muted); overflow-wrap: anywhere; }
 .file-download-status button { margin-left: 8px; }
+
+/* Journal: message activity and an inline day detail page. */
+.diary-activity-page .diary-heat-grid { gap: 8px 4px; }
+.diary-activity-page .diary-heat-grid button { height: 66px; border-radius: 12px; gap: 3px; padding: 5px 0; }
+.diary-heat-grid button small { font-size: 9px; opacity: .72; line-height: 12px; }
+.diary-heat-grid button b { display: grid; place-items: center; width: 25px; height: 25px; }
+.diary-heat-grid .diary-entry-dots { display: flex; gap: 3px; height: 4px; }
+.diary-heat-grid .diary-entry-dots i { position: static; display: block; width: 3px; height: 3px; }
+.diary-entry-dots .user-dot { background: #b6917c; }
+.diary-entry-dots .agent-dot { background: #728984; }
+.diary-activity-page .diary-heat-0 { background: rgba(222,234,243,.2); }
+.diary-activity-page .diary-heat-1 { background: rgba(201,223,241,.45); }
+.diary-activity-page .diary-heat-2 { background: rgba(166,203,231,.55); }
+.diary-activity-page .diary-heat-3 { background: rgba(130,182,219,.6); }
+.diary-activity-page .diary-heat-4 { background: rgba(93,153,199,.65); }
+.diary-heat-legend { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 18px; font-size: 10px; color: var(--muted); }
+.diary-heat-legend i { width: 11px; height: 11px; border-radius: 3px; }
+.diary-count-status { display: block; text-align: center; margin: 14px auto; color: var(--muted); font-size: 11px; border: 0; background: none; }
+.diary-back { border: 0; background: none; color: inherit; padding: 8px 0 18px; font-size: 13px; }
+.diary-day-counts { padding: 24px; margin-bottom: 20px; }
+.diary-day-counts strong { font-size: 32px; font-weight: 400; margin-right: 8px; }
+.diary-day-counts span, .diary-day-counts p { font-size: 13px; }
+.diary-day-counts small { font-size: 11px; color: var(--muted); }
+.diary-day-page .diary-sheet { margin: 16px 0; }
+.diary-day-page .diary-sheet textarea { min-height: 180px; }
+
+/* Compact journal overview and direct header avatar editing. */
+.identity-avatar { padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
+.identity-avatar:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 3px; }
+.diary-activity-page .calendar-grid b,
+.diary-activity-page .calendar-grid small { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; font-style: normal !important; }
+.diary-activity-page .page-intro { margin-bottom: 0; padding-bottom: 12px; }
+.diary-activity-page .page-intro h1 { margin-block: 8px; }
+.diary-activity-page .page-intro p { margin-block: 8px; }
+.diary-activity-page .diary-heat-grid { gap: 4px; }
+.diary-activity-page .diary-heat-grid button { height: clamp(39px, 6vh, 48px); gap: 1px; padding: 2px 0; }
+.diary-activity-page .calendar { padding-block: 12px 8px; }
+.diary-activity-page .diary-heat-legend { margin-top: 8px; }
+.diary-activity-page .diary-count-status { margin-block: 6px; }
+
+html[data-native="true"] .app-header { background: transparent !important; }
+html[data-native="true"] .app-shell::after { content: none !important; display: none !important; }
+
+/* Wake controls share the existing Settings detail surface. */
+.wake-controls, .wake-history { text-align: left; font-size: 13px; font-style: normal; }
+.wake-controls label { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 0; }
+.wake-controls select { max-width: 65%; padding: 10px; border: 1px solid #bacbd3; border-radius: 12px; background: rgba(255,255,255,.65); color: inherit; font: inherit; }
+.wake-toggle input { width: 22px; height: 22px; accent-color: #789eae; }
+.wake-controls button:disabled { opacity: .5; cursor: not-allowed; }
+.wake-history details { margin: 10px 0; padding: 13px; border: 1px solid rgba(100,130,150,.2); border-radius: 14px; background: rgba(255,255,255,.25); }
+.wake-history summary { cursor: pointer; }
+.wake-history summary b { float: right; font-size: 12px; font-weight: 500; }
+.wake-history dl { display: grid; grid-template-columns: 75px 1fr; gap: 8px; }
+.wake-history dd { margin: 0; overflow-wrap: anywhere; }
+.wake-history small, .wake-history li { overflow-wrap: anywhere; }
+.wake-history h3 { font-size: 17px; }
+.wake-visualizer { overflow-y: auto; max-height: calc(100dvh - 40px); }
+
+.wake-prompt-editor textarea { display: block; width: 100%; box-sizing: border-box; min-height: 190px; padding: 12px; resize: vertical; border: 1px solid #bacbd3; border-radius: 12px; background: rgba(255,255,255,.65); color: inherit; font: inherit; line-height: 1.6; }
+.wake-prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wake-prompt-footer button { padding: 8px; color: inherit; font: inherit; text-decoration: underline; }

@@ -43,7 +43,7 @@
   font-size: var(--text-body) !important;
   line-height: 1.5;
 }
-/* Do not shrink text editors below 16px: iOS would zoom while focusing them. */
+/* Other form editors retain 16px. The chat composer follows --text-chat below. */
 .app-shell :is(input:not([type]), input[type="text"], input[type="password"], input[type="url"], input[type="email"], textarea, select) {
   font-size: 1rem;
 }
@@ -71,7 +71,7 @@
 }
 .app-shell .codex-chat .message-actions { margin-block: 0; }
 .app-shell .codex-chat .message-actions time { font-size: var(--text-caption) !important; }
-.app-shell .codex-chat .chat-compose textarea { font-size: 1rem !important; line-height: 1.45; }
+.app-shell .codex-chat .chat-compose textarea { font-size: var(--text-chat) !important; line-height: 1.5; }
 
 /* Compact island and plain user messages; keep attachments and controls intact. */
 .app-shell .drawer { width: min(64%, 248px); padding-inline: 12px; }

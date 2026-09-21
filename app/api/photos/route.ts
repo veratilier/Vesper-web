@@ -16,5 +16,5 @@ export async function POST(request: Request) {
     const raw = await request.text(); if (raw.length > 4000) throw new Error('Request too large');
     const data = JSON.parse(raw), scope = await memoryScopeFromRequest(request);
     return Response.json({ photo: await saveAlbumPhoto(scope.userId, String(data.key || ''), data.category, data.caption, new URL(request.url).origin) }, { headers });
-  } catch (e) { return Response.json({ error: e instanceof Error ? e.message : '保存失败' }, { status: 400, headers }); }
+  } catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Save failed" }, { status: 400, headers }); }
 }

@@ -66,14 +66,14 @@ export async function POST(request: Request) {
   const payload = body.action === "notify"
     ? {
         title: (body.notification?.title || "Vesper").slice(0, 80),
-        body: (body.notification?.body || "Vesper 有新的行动").slice(0, 260),
+        body: (body.notification?.body || "New activity in Vesper").slice(0, 260),
         url: body.notification?.url?.startsWith("/") ? body.notification.url : "/",
         tag: (body.notification?.tag || "vesper-agent-action").slice(0, 120),
         kind: body.notification?.kind || "message",
       }
     : {
         title: "Vesper",
-        body: "Web Push 已连接。即使关闭页面，Vesper 也可以送达提醒。",
+        body: "Web Push is connected. Vesper can notify you even when the page is closed.",
         url: "/",
         tag: "vesper-test",
       };

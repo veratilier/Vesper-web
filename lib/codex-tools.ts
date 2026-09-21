@@ -141,18 +141,22 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!memoryScope || !bindings.VESPER_APP_TOKEN) throw new Error('Owner context required');
     const owner = await memoryScopeFromRequest(new Request('https://vesper.internal', { headers: { 'x-vesper-device-token': bindings.VESPER_APP_TOKEN } }));
     if (owner.userId !== memoryScope.userId) throw new Error('Owner context mismatch');
-    // Refuse to seed a fresh state if production is bound to the wrong database.
+    // Never initialize defaults when production storage or existing state is missing.
     if (!bindings.DB) throw new Error('Vesper Desire storage is unavailable');
     const existing = await bindings.DB.prepare('SELECT user_id FROM vesper_desire_state WHERE user_id = ?').bind('vesper').first();
     if (!existing) throw new Error('Existing Vesper Desire state was not found; no values have been initialized.');
     return executeDesire(bindings, name, input);
   }
+  if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
+    if (!memoryScope) throw new Error("Memory scope is unavailable");
+    return sharedMemoryTool(name, input, context);
+  }
   await ensureSchema();
   if (['album_save_photo', 'album_search_photos', 'album_send_photos'].includes(name)) {
     if (!memoryScope || !context.origin) throw new Error('Account context required');
     if (name === 'album_save_photo') {
-      if (typeof input.summary !== 'string' || !input.summary.trim() || typeof input.evaluation !== 'string' || !input.evaluation.trim()) throw new Error('保存照片时请填写概述和评价');
-      return { photo: await saveAlbumPhoto(memoryScope.userId, String(input.key || ''), input.category, `概述：${input.summary.trim().slice(0,240)}\n\n评价：${input.evaluation.trim().slice(0,240)}`, context.origin) };
+      if (typeof input.evaluation !== 'string' || !input.evaluation.trim()) throw new Error('保存照片时请填写评价');
+      return { photo: await saveAlbumPhoto(memoryScope.userId, String(input.key || ''), input.category, input.evaluation.trim().slice(0,240), context.origin) };
     }
     if (name === 'album_search_photos') return listAlbumPhotos(memoryScope.userId, input, context.origin);
     if (!context.conversationId || !Array.isArray(input.photoIds) || !input.photoIds.length || input.photoIds.length > 8 || input.photoIds.some(id => typeof id !== 'string')) throw new Error('Choose 1–8 exact album photo IDs');
@@ -173,6 +177,30 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
       attachments.push(await createChatFile(file as ToolInput, memoryScope.userId, context.origin));
     }
     return { attachments, message: String(input.message || '').slice(0, 2000) };
+  }
+  if (name === "reading_room_read" || name === "reading_room_annotate") {
+    const books = await readDocument("readingRoom") as import("@/app/reading-room").ReadingBook[];
+    if (!Array.isArray(books)) throw new Error("Reading room data unavailable");
+    if (name === "reading_room_read" && !input.bookId) return { books: books.map(book => ({ id: book.id, title: book.title, page: book.page, pages: Math.ceil(book.text.length / 1800), notes: book.notes.length })) };
+    const book = books.find(item => item.id === input.bookId);
+    if (!book) throw new Error("Book not found. Read the bookshelf first.");
+    const page = input.page === undefined ? book.page : input.page;
+    const pages = book.text.match(/[\s\S]{1,1800}/g) || [];
+    if (typeof page !== "number" || !Number.isInteger(page) || page < 0 || page >= pages.length) throw new Error("Page out of range");
+    if (name === "reading_room_read") return { id: book.id, title: book.title, page, pages: pages.length, text: pages[page], notes: book.notes.filter(note => note.page === page) };
+    if (typeof input.text !== "string" || !input.text.trim() || input.text.length > 10000 || typeof input.noteId !== "string" || !input.noteId.trim() || input.noteId.length > 100) throw new Error("Provide noteId and annotation text");
+    if (input.quote !== undefined && (typeof input.quote !== "string" || input.quote.length > 1800)) throw new Error("Invalid quote");
+    const existing = book.notes.find(note => note.id === input.noteId);
+    if (existing) {
+      if (existing.text !== input.text.trim() || existing.page !== page || existing.quote !== (input.quote || "")) throw new Error("noteId already used for a different annotation");
+      return { note: existing, replayed: true };
+    }
+    const previous = JSON.stringify(books);
+    const note = { id: input.noteId, page, text: input.text.trim(), quote: String(input.quote || ""), author: "Rowan", date: new Date().toISOString() };
+    book.notes.push(note);
+    const result = await getDb().prepare("UPDATE vesper_documents SET value = ?, updated_at = ? WHERE key = ? AND value = ?").bind(JSON.stringify(books), new Date().toISOString(), "readingRoom", previous).run();
+    if (!result.meta.changes) throw new Error("Reading room changed. Read again and retry with the same noteId.");
+    return { note, replayed: false };
   }
   if (name === "read_vesper_state") {
     const section = String(input.section || "notes").toLowerCase();
@@ -320,10 +348,6 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const track = findMusicTrack(tracks, trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     return { ok: true, alreadyInPlaylist: true, trackId: track.id, playlist: "Vesper music" };
-  }
-  if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
-    if (!memoryScope) throw new Error("Memory scope is unavailable");
-    return sharedMemoryTool(name, input, context);
   }
   if (name === "sticker_search") {
     if (!memoryScope) throw new Error("Sticker scope is unavailable");

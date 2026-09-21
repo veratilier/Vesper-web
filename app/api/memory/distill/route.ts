@@ -14,9 +14,9 @@ export async function POST(request: Request) {
   if (!(await authorizeApp(request))) return json(request, { error: "Device not paired" }, 401);
   try {
     const body = await request.json() as { conversationId?: string };
-    if (!body.conversationId?.trim()) return json(request, { error: "缺少对话标识" }, 400);
+    if (!body.conversationId?.trim()) return json(request, { error: "Missing conversation ID" }, 400);
     return json(request, await scheduleDistillation(await memoryScopeFromRequest(request), body.conversationId.trim()), 202);
   } catch (reason) {
-    return json(request, { error: reason instanceof Error ? reason.message : "记忆蒸馏任务暂时不可用" }, 500);
+    return json(request, { error: reason instanceof Error ? reason.message : "Memory distillation is unavailable." }, 500);
   }
 }

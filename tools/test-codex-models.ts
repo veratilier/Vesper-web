@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-// @ts-expect-error Node strip-types tests import the TypeScript source directly.
+// Node strip-types tests import the TypeScript source directly.
 import { chooseCodexModel, codexTurnModelParams, listCodexModels, selectionFromThread, startCodexTurnWithModel, type CodexModel } from "../lib/codex-models.ts";
 
 // Synthetic fixtures intentionally do not define the production model catalog.

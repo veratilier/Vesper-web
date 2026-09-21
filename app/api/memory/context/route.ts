@@ -17,6 +17,6 @@ export async function POST(request: Request) {
     const result = await recallSharedMemory(String(body.query || ""));
     return json(request, result);
   } catch (reason) {
-    return json(request, { error: reason instanceof Error ? reason.message : "记忆召回暂时不可用" }, 500);
+    return json(request, { error: reason instanceof Error ? reason.message : "Memory recall is unavailable." }, 500);
   }
 }

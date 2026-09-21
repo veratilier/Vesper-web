@@ -5,17 +5,19 @@
   -webkit-backdrop-filter: none !important;
   color: rgba(245, 249, 248, .94);
 }
-.app-header.music-mode .page-name { visibility: hidden; }
+.app-header.music-mode .page-name { visibility: visible; }
 .music-header-spacer { width: 40px; height: 40px; justify-self: end; }
 .music-scroll-view { overflow: hidden; padding: 0 !important; background: #111617; }
 
 .listening-player {
+  /* Only the inner player and library content may scroll, including focus scroll. */
+  overflow: clip;
+  position: relative;
   --music-tint: 110, 144, 148;
   --music-on-tint: 246, 249, 248;
   display: grid;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
   color: rgb(var(--music-on-tint));
   background:
     radial-gradient(circle at 50% 31%, rgba(var(--music-tint), .33), transparent 31%),
@@ -202,9 +204,11 @@
 .listening-library-bar button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 1px solid rgba(var(--music-on-tint), .14); border-radius: 17px; background: rgba(5, 9, 10, .19); color: rgba(var(--music-on-tint), .78); font: 500 11px/1 var(--font-chinese); }
 .listening-library-bar .ui-icon { width: 15px; height: 15px; stroke-width: 1.55; }
 
-.netease-library-layer { position: fixed; z-index: 70; inset: 0; isolation: isolate; color: #f7fbfa; background: #111819; }
+/* Stay inside the player, whose height already excludes the mobile nav island.
+   A viewport-fixed layer escapes that height and is clipped by the player. */
+.netease-library-layer { position: absolute; z-index: 70; inset: calc(var(--safe-top) + 54px) 0 0; min-height: 0; overflow: hidden; isolation: isolate; color: #f7fbfa; background: #111819; }
 .netease-library-layer::before { content: ""; position: absolute; z-index: -1; inset: 0; opacity: .72; background: radial-gradient(circle at 50% -12%, rgba(var(--music-tint), .43), transparent 38%), radial-gradient(circle at 92% 40%, rgba(var(--music-tint), .16), transparent 38%), linear-gradient(165deg, #151f20, #0d1213 68%); }
-.netease-library-sheet { height: 100%; box-sizing: border-box; display: grid; grid-template-rows: auto auto minmax(0, 1fr); padding: calc(var(--safe-top) + 8px) 16px 0; }
+.netease-library-sheet { height: 100%; min-height: 0; overflow: hidden; box-sizing: border-box; display: grid; grid-template-rows: auto auto minmax(0, 1fr); padding: 8px 16px 0; }
 .netease-library-head { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; align-items: center; min-height: 60px; }
 .netease-library-head > button { width: 42px; height: 42px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.075); color: rgba(255,255,255,.9); }
 .netease-library-head > button:first-child .ui-icon { transform: rotate(180deg); }
@@ -309,7 +313,7 @@
 @keyframes netease-library-spin { to { transform: rotate(360deg); } }
 
 @media (max-height: 720px) {
-  .netease-library-sheet { padding-top: calc(var(--safe-top) + 2px); }
+  .netease-library-sheet { padding-top: 2px; }
   .netease-library-head { min-height: 53px; }
   .netease-library-tabs { margin: 4px 0; }
   .netease-library-content { padding-top: 5px; }

@@ -7,5 +7,5 @@ function json(request: Request, value: unknown, status = 200) { const headers = 
 export async function POST(request: Request) {
   if (!(await authorizeApp(request))) return json(request, { error: "Device not paired" }, 401);
   try { const body = await request.json() as Record<string, unknown>; const result = await importAttachmentAsSticker(await memoryScopeFromRequest(request), new URL(request.url).origin, body); return json(request, result, result.created ? 201 : 200); }
-  catch (error) { return json(request, { error: error instanceof Error ? error.message : "无法保存为表情包" }, 400); }
+  catch (error) { return json(request, { error: error instanceof Error ? error.message : "Could not save as sticker" }, 400); }
 }

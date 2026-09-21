@@ -205,6 +205,7 @@ export const schemaStatements = [
 ];
 
 export const allowedDocumentKeys = new Set([
+  "readingRoom",
   "profile",
   "appearance",
   "notes",

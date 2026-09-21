@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { usageWindows } from '../lib/subscription-usage.ts';
+assert.deepEqual(usageWindows(null), []);
+assert.deepEqual(usageWindows({ rateLimits: { primary: { usedPercent: 76, windowDurationMins: 300, resetsAt: 123 } } }), [{ label: '5-hour limit', remaining: 24, resetsAt: 123 }]);
+assert.equal(usageWindows({ rateLimits: { primary: { usedPercent: 27, windowDurationMins: 10080 }, secondary: null } })[0].label, 'Weekly limit');
+assert.equal(usageWindows({ rateLimits: { primary: { usedPercent: 130 } } })[0].remaining, 0);
+assert.deepEqual(usageWindows({ rateLimits: { primary: { usedPercent: null } } }), []);
+assert.equal(usageWindows({ rateLimits: { primary: { usedPercent: 90 } }, rateLimitsByLimitId: { codex: { primary: { usedPercent: 10 } } } })[0].remaining, 90);
+assert.deepEqual(usageWindows({ rateLimits: { limitId: 'another-meter', primary: { usedPercent: 20 } } }), []);
+console.log('Subscription usage: passed');

@@ -9,7 +9,7 @@ function le16(bytes: Uint8Array, offset: number) { return bytes[offset] | (bytes
 /** Inspects only trusted file headers; extensions and browser MIME claims are ignored. */
 export function inspectStickerImage(input: ArrayBuffer): StickerImageInfo {
   const b = new Uint8Array(input);
-  if (b.length < 10) throw new Error("表情图片损坏或为空");
+  if (b.length < 10) throw new Error("Sticker image is empty or damaged.");
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b.length >= 24) return { mimeType: "image/png", width: be32(b, 16), height: be32(b, 20), extension: "png" };
   if (String.fromCharCode(...b.slice(0, 6)) === "GIF87a" || String.fromCharCode(...b.slice(0, 6)) === "GIF89a") return { mimeType: "image/gif", width: le16(b, 6), height: le16(b, 8), extension: "gif" };
   if (String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP") {
@@ -29,9 +29,9 @@ export function inspectStickerImage(input: ArrayBuffer): StickerImageInfo {
       offset += 2 + length;
     }
   }
-  throw new Error("只支持 PNG、JPG、GIF 或 WebP 表情包");
+  throw new Error("Only PNG, JPG, GIF and WebP stickers are supported.");
 }
 
 export function validateStickerImage(info: StickerImageInfo, maxPixels: number) {
-  if (!STICKER_IMAGE_TYPES.has(info.mimeType) || !info.width || !info.height || info.width * info.height > maxPixels) throw new Error("表情包格式或尺寸不符合要求");
+  if (!STICKER_IMAGE_TYPES.has(info.mimeType) || !info.width || !info.height || info.width * info.height > maxPixels) throw new Error("Unsupported sticker format or dimensions");
 }

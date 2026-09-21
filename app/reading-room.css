@@ -1,0 +1,14 @@
+.reading-room { width: 100%; min-width: 0; }
+.reading-heading,.reading-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:14px 0; }
+.app-shell .reading-room h2 { font-size:1.05rem; overflow-wrap:anywhere; }
+.app-shell .reading-room h3 { font-size:.9rem; }
+.reading-paper { white-space:pre-wrap; overflow-wrap:anywhere; font-size:1rem; line-height:1.9; padding:22px 18px; border-radius:16px; background:var(--ui-surface); user-select:text; -webkit-user-select:text; }
+.reading-note { display:grid; gap:12px; margin:18px 0; padding:16px; border:1px solid var(--ui-line); border-radius:16px; background:var(--ui-surface); }
+.reading-note label { display:grid; gap:6px; font-size:.8rem; }
+.reading-note input,.reading-note textarea { box-sizing:border-box; width:100%; min-width:0; padding:10px; border:1px solid var(--ui-line); border-radius:10px; background:transparent; color:inherit; font:inherit; font-size:16px; }
+.reading-note textarea { min-height:110px; resize:vertical; }
+.reading-books,.reading-notes { display:grid; gap:12px; }
+.app-center .reading-books > button,.reading-notes > article { display:grid; gap:8px; padding:16px; text-align:left; border-radius:14px; background:var(--ui-surface); overflow-wrap:anywhere; }
+.reading-books small,.reading-notes small,.reading-empty { color:var(--ui-muted); font-size:.8rem; }
+.reading-notes p,.reading-notes blockquote { white-space:pre-wrap; }
+.reading-notes blockquote { margin:8px 0; padding-left:12px; border-left:2px solid var(--ui-line); }

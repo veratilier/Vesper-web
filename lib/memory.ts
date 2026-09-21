@@ -1,3 +1,4 @@
+import { evidenceIdsForMessages, linkEvidence } from "@/lib/memory-vault";
 import { env } from "cloudflare:workers";
 import { ensureSchema, getDb } from "@/lib/db";
 
@@ -6,6 +7,7 @@ export type MemoryType = (typeof MEMORY_TYPES)[number];
 export type MemoryScope = { userId: string; characterId: string };
 
 type MemoryRow = {
+  corrected_at?: string | null;
   id: string;
   user_id: string;
   character_id: string;
@@ -38,6 +40,7 @@ type MemoryRevisionRow = {
 };
 
 export type MemoryRecord = {
+  correctedAt?: string | null;
   id: string;
   userId: string;
   characterId: string;
@@ -115,6 +118,7 @@ function rowToMemory(row: MemoryRow): MemoryRecord {
   const vector = parseJson<number[]>(row.embedding, []);
   return {
     id: row.id,
+    correctedAt: row.corrected_at || null,
     userId: row.user_id,
     characterId: row.character_id,
     type: row.type,
@@ -155,7 +159,7 @@ async function sha256(value: string) {
 /** The paired device credential is validated before this is called. Only its hash reaches D1. */
 export async function memoryScopeFromRequest(request: Request): Promise<MemoryScope> {
   const token = request.headers.get("x-vesper-device-token")?.trim();
-  if (!token) throw new Error("未找到已配对账户");
+  if (!token) throw new Error("No paired account found");
   const digest = await sha256(`vesper-memory-user-v1:${token}`);
   return { userId: `usr_${digest.slice(0, 32)}`, characterId: MEMORY_CONFIG.characterId };
 }
@@ -247,7 +251,7 @@ async function scopedRows(scope: MemoryScope, options: { type?: MemoryType; incl
   if (!options.includeDemoted) conditions.push("demoted_at IS NULL");
   if (!options.includeCandidates) conditions.push("review_status = 'approved'");
   const limit = Math.min(250, Math.max(1, options.limit || 120));
-  const result = await getDb().prepare(`SELECT * FROM vesper_memories WHERE ${conditions.join(" AND ")}
+  const result = await getDb().prepare(`SELECT *, (SELECT MAX(r.created_at) FROM vesper_memory_revisions r WHERE r.memory_id=vesper_memories.id AND r.action IN ('corrected','edited')) AS corrected_at FROM vesper_memories WHERE ${conditions.join(" AND ")}
     ORDER BY pinned DESC, updated_at DESC LIMIT ?`).bind(...bindings, limit).all<MemoryRow>();
   return result.results.map(rowToMemory);
 }
@@ -279,8 +283,13 @@ export async function listMemories(scope: MemoryScope, options: { type?: MemoryT
   if (!query) return values;
   const lower = query.toLocaleLowerCase("zh-CN");
   const scores = await ftsScores(scope, query);
-  return values.filter((memory) => scores.has(memory.id) || `${memory.body} ${memory.tags.join(" ")}`.toLocaleLowerCase("zh-CN").includes(lower))
-    .sort((left, right) => (scores.get(right.id) || 0) - (scores.get(left.id) || 0) || Number(right.pinned) - Number(left.pinned) || Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const vector = await embeddingFor(query);
+  const ranked = values.map(memory => {
+    const semantic = Math.max(0, cosine(vector, memory.embedding));
+    const literal = `${memory.body} ${memory.tags.join(" ")}`.toLocaleLowerCase("zh-CN").includes(lower);
+    return { memory, score: semantic * 0.6 + (scores.get(memory.id) || 0) * 0.3 + (literal ? 0.5 : 0), matched: literal || scores.has(memory.id) || semantic >= 0.45 };
+  });
+  return ranked.filter(item => item.matched).sort((a,b) => b.score-a.score || Date.parse(b.memory.updatedAt)-Date.parse(a.memory.updatedAt)).map(item => item.memory);
 }
 
 export async function memoryDetail(scope: MemoryScope, id: string) {
@@ -306,7 +315,7 @@ export async function createMemory(scope: MemoryScope, input: CreateMemoryInput)
   await ensureSchema();
   const type = MEMORY_TYPES.includes(input.type) ? input.type : "long_term";
   const body = cleanText(input.body);
-  if (body.length < 4) throw new Error("记忆需要更具体一点");
+  if (body.length < 4) throw new Error("Add more detail to this memory.");
   const mood = cleanText(input.mood, 48);
   const tags = cleanTags(input.tags);
   const fingerprint = await sha256(`${type}:${normalizeText(body)}`);
@@ -337,7 +346,7 @@ export async function createMemory(scope: MemoryScope, input: CreateMemoryInput)
     memory.id, memory.userId, memory.characterId, memory.type, memory.body, memory.mood, JSON.stringify(memory.tags), memory.weight,
     memory.pinned ? 1 : 0, memory.source, memory.reviewStatus, memory.createdAt, memory.updatedAt, JSON.stringify(memory.embedding), fingerprint,
   ).run();
-  if (type === "core") {
+  {
     await db.prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 'created', ?)`).bind(crypto.randomUUID(), memory.id, memory.body, memory.mood, JSON.stringify(memory.tags), "明确新增核心记忆", createdAt).run();
   }
@@ -347,7 +356,7 @@ export async function createMemory(scope: MemoryScope, input: CreateMemoryInput)
 
 export async function updateMemoryState(scope: MemoryScope, id: string, action: "pin" | "demote" | "restore" | "approve_core", value?: boolean) {
   const detail = await memoryDetail(scope, id);
-  if (!detail) throw new Error("找不到这条记忆");
+  if (!detail) throw new Error("Memory not found");
   const db = getDb();
   if (action === "pin") {
     const pinned = value === true ? 1 : 0;
@@ -357,7 +366,7 @@ export async function updateMemoryState(scope: MemoryScope, id: string, action: 
   } else if (action === "restore") {
     await db.prepare("UPDATE vesper_memories SET demoted_at = NULL, updated_at = ? WHERE id = ?").bind(now(), id).run();
   } else if (action === "approve_core") {
-    if (detail.memory.type !== "core") throw new Error("只有核心记忆候选可以确认");
+    if (detail.memory.type !== "core") throw new Error("Only core memory candidates can be confirmed.");
     await db.prepare("UPDATE vesper_memories SET review_status = 'approved', pinned = 1, weight = 1, updated_at = ? WHERE id = ?")
       .bind(now(), id).run();
   }
@@ -366,14 +375,17 @@ export async function updateMemoryState(scope: MemoryScope, id: string, action: 
 
 export async function correctCoreMemory(scope: MemoryScope, id: string, input: { body: string; mood?: string; tags?: unknown; reason?: string }) {
   const detail = await memoryDetail(scope, id);
-  if (!detail || detail.memory.type !== "core") throw new Error("只能修正核心记忆");
+  if (!detail || detail.memory.type !== "core") throw new Error("Only core memories can use this correction flow.");
   const body = cleanText(input.body);
-  if (body.length < 4) throw new Error("修正后的记忆需要更具体一点");
+  if (body.length < 4) throw new Error("Add more detail to the corrected memory.");
   const mood = cleanText(input.mood, 48);
   const tags = cleanTags(input.tags);
   const embedding = await embeddingFor(`${body}\n${tags.join(" ")}`);
   const changedAt = now();
   await getDb().batch([
+    getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'previous', ?)`).bind(crypto.randomUUID(), id, detail.memory.body, detail.memory.mood,
+        JSON.stringify(detail.memory.tags), "修正前的版本", detail.memory.updatedAt),
     getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 'corrected', ?)`)
       .bind(crypto.randomUUID(), id, body, mood, JSON.stringify(tags), cleanText(input.reason, 180) || "用户修正", changedAt),
@@ -393,15 +405,18 @@ export async function correctCoreMemory(scope: MemoryScope, id: string, input: {
  */
 export async function editMemory(scope: MemoryScope, id: string, input: { body: string; mood?: string; tags?: unknown; reason?: string }) {
   const detail = await memoryDetail(scope, id);
-  if (!detail) throw new Error("找不到这条记忆");
-  if (detail.memory.type === "core") throw new Error("核心记忆需要使用修正流程");
+  if (!detail) throw new Error("Memory not found");
+  if (detail.memory.type === "core") throw new Error("Core memories require the correction flow.");
   const body = cleanText(input.body);
-  if (body.length < 4) throw new Error("修正后的记忆需要更具体一点");
+  if (body.length < 4) throw new Error("Add more detail to the corrected memory.");
   const mood = cleanText(input.mood, 48);
   const tags = cleanTags(input.tags);
   const embedding = await embeddingFor(`${body}\n${tags.join(" ")}`);
   const changedAt = now();
   await getDb().batch([
+    getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'previous', ?)`).bind(crypto.randomUUID(), id, detail.memory.body, detail.memory.mood,
+        JSON.stringify(detail.memory.tags), "修正前的版本", detail.memory.updatedAt),
     getDb().prepare(`INSERT INTO vesper_memory_revisions(id, memory_id, body, mood, tags, reason, action, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 'edited', ?)`)
       .bind(crypto.randomUUID(), id, body, mood, JSON.stringify(tags), cleanText(input.reason, 180) || "用户通过 Codex 修正", changedAt),
@@ -439,7 +454,7 @@ export async function recallMemory(scope: MemoryScope, query: string) {
     .slice(0, MEMORY_CONFIG.longRecallLimit).map((item) => item.memory);
   const memories = [...core, ...ranked.filter((memory) => !core.some((item) => item.id === memory.id))];
   await markSurfaced(scope, memories.map((memory) => memory.id));
-  const lines = memories.map((memory) => `- ${memory.type === "feeling" ? "Rowan 的感受" : memory.type === "core" ? "核心" : "旧记忆"}：${memory.body}`);
+  const lines = memories.map((memory) => `- [${memory.id}; ${memory.updatedAt}; ${memory.type === "core" ? "当前已确认" : "历史背景"}] ${memory.type === "feeling" ? "Rowan 的感受" : memory.type === "core" ? "核心" : "旧记忆"}：${memory.body}`);
   const context = lines.join("\n").slice(0, MEMORY_CONFIG.maxContextCharacters);
   return {
     memories: memories.map((memory) => ({ ...memory, surfaceCount: memory.surfaceCount + 1 })),
@@ -452,7 +467,7 @@ export async function recordMemoryMessage(scope: MemoryScope, input: { conversat
   const conversationId = cleanText(input.conversationId, 160);
   const messageId = cleanText(input.messageId, 160);
   const content = cleanText(input.content, 20_000);
-  if (!conversationId || !messageId || !content) throw new Error("缺少可沉淀的对话内容");
+  if (!conversationId || !messageId || !content) throw new Error("No conversation content to remember.");
   const parsedTime = Date.parse(input.createdAt || "");
   const createdAt = Number.isFinite(parsedTime) ? new Date(parsedTime).toISOString() : now();
   await getDb().prepare(`INSERT INTO vesper_memory_messages
@@ -482,7 +497,7 @@ async function callDistillationModel(messages: Array<{ role: "user" | "agent"; c
     signal: AbortSignal.timeout(25_000),
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
-  if (!response.ok) throw new Error(payload.error?.message || "记忆蒸馏模型暂时不可用");
+  if (!response.ok) throw new Error(payload.error?.message || "The memory model is unavailable.");
   const raw = payload.choices?.[0]?.message?.content || "{}";
   const parsed = parseJson<{ memories?: Array<{ type?: unknown; body?: unknown; mood?: unknown; tags?: unknown }> }>(raw.replace(/^```json\s*|\s*```$/g, ""), {});
   return Array.isArray(parsed.memories) ? parsed.memories.slice(0, 4) : [];
@@ -520,7 +535,7 @@ export async function runDueMemoryJobs(scope: MemoryScope) {
     const distilled = await callDistillationModel(messages);
     if (distilled === null) {
       await db.prepare("UPDATE vesper_memory_jobs SET status = 'retry', attempts = attempts + 1, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE id = ?")
-        .bind(new Date(Date.now() + MEMORY_CONFIG.jobRetryMinutes * 60_000).toISOString(), "等待服务端记忆模型", now(), job.id).run();
+        .bind(new Date(Date.now() + MEMORY_CONFIG.jobRetryMinutes * 60_000).toISOString(), "Waiting for the server memory model", now(), job.id).run();
       return { processed: false, pendingModel: true };
     }
     let stored = 0;
@@ -531,6 +546,8 @@ export async function runDueMemoryJobs(scope: MemoryScope) {
         type, body: cleanText(candidate.body), mood: cleanText(candidate.mood, 48), tags: candidate.tags,
         source: requested === "core" ? "model-core-candidate" : "model-distillation", reviewStatus: requested === "core" ? "candidate" : "approved",
       });
+      const evidenceIds = await evidenceIdsForMessages(scope, job.conversation_id, messages.map(message => message.message_id));
+      await linkEvidence(scope, result.memory.id, evidenceIds);
       if (result.created) stored += 1;
     }
     await db.prepare("UPDATE vesper_memory_jobs SET status = 'completed', last_error = '', updated_at = ? WHERE id = ?").bind(now(), job.id).run();
@@ -538,7 +555,7 @@ export async function runDueMemoryJobs(scope: MemoryScope) {
   } catch (reason) {
     const attempts = Number(job.attempts || 0) + 1;
     await db.prepare("UPDATE vesper_memory_jobs SET status = 'retry', attempts = ?, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE id = ?")
-      .bind(attempts, new Date(Date.now() + MEMORY_CONFIG.jobRetryMinutes * 60_000).toISOString(), cleanText(reason instanceof Error ? reason.message : "记忆蒸馏失败", 300), now(), job.id).run();
+      .bind(attempts, new Date(Date.now() + MEMORY_CONFIG.jobRetryMinutes * 60_000).toISOString(), cleanText(reason instanceof Error ? reason.message : "Memory distillation failed", 300), now(), job.id).run();
     return { processed: false, retry: true };
   }
 }

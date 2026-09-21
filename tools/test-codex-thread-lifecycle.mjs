@@ -1,3 +1,4 @@
+import { VESPER_DESIRE_SESSION_CONFIG } from '../lib/desire/routing.js';
 import assert from 'node:assert/strict';
 import {syncCodexThread,createConnectionQueue,resumeCodexThread} from '../lib/codex-thread-lifecycle.ts';
 const calls=[];
@@ -34,7 +35,7 @@ const resumeCalls=[];
 const snapshot={result:{thread:{id:'existing',turns:[]}}};
 const rpc=async(method,params)=>{resumeCalls.push({method,params});return snapshot;};
 assert.equal(await resumeCodexThread(rpc,'existing','context'),snapshot);
-assert.deepEqual(resumeCalls,[{method:'thread/resume',params:{threadId:'existing',developerInstructions:'context'}}]);
+assert.deepEqual(resumeCalls,[{method:'thread/resume',params:{threadId:'existing',developerInstructions:'context',config:VESPER_DESIRE_SESSION_CONFIG}}]);
 let attempts=0;
 await assert.rejects(resumeCodexThread(async()=>{attempts++;throw Error('invalid params');},'existing','context'),/invalid params/);
 assert.equal(attempts,1,'Failed resume must not retry without configuration and imply tools were refreshed');

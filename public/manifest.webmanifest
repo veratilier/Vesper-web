@@ -2,7 +2,7 @@
   "name": "Vesper",
   "short_name": "Vesper",
   "id": "/",
-  "description": "属于你的安静生活角落",
+  "description": "Your quiet, private corner",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

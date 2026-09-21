@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { documentSyncAction as action } from '../lib/document-sync.ts';
+const old = '2026-09-08T00:00:00Z', fresh = '2026-09-10T00:00:00Z';
+assert.equal(action(null, undefined, null, undefined), 'none', 'fresh install must not upload an empty default');
+assert.equal(action(null, undefined, [{ id: 'saved' }], old), 'download', 'paired fresh install retrieves cloud favorites');
+assert.equal(action('[]', undefined, [{ id: 'saved' }], old), 'download', 'undated local default must not replace remote');
+assert.equal(action('[1]', fresh, [], old), 'upload', 'failed local write retries');
+assert.equal(action('[]', fresh, [1], old), 'upload', 'intentional deletion propagates');
+assert.equal(action('[1]', old, [2], fresh), 'download', 'other device updates arrive');
+assert.equal(action('[1]', fresh, [1], fresh), 'none', 'equal timestamps do not loop');
+console.log('7 document synchronization cases passed');

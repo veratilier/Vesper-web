@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { parseSubtitles, watchContext } from '../app/watch-context.ts';
+const cues = parseSubtitles('1\r\n00:00:02,000 --> 00:00:04,000\r\n<b>Hello</b>\r\n\r\n2\r\n00:00:06,000 --> 00:00:08,000\r\nFuture reveal');
+assert.equal(cues.length, 2);
+assert.equal(cues[0].text, 'Hello');
+const current = watchContext('Movie', 3, cues, false);
+assert.ok(current.includes('Hello'));
+assert.ok(!current.includes('Future reveal'));
+assert.ok(current.includes('0:03'));
+assert.ok(!watchContext('Movie', 40, cues, false).includes('Hello'));
+assert.ok(!watchContext('Screen', 3, cues, true).includes('Hello'));
+assert.equal(parseSubtitles('WEBVTT\n\n00:02.000 --> 00:04.000 align:start\nHello')[0].start, 2);
+assert.deepEqual(parseSubtitles('nonsense\n\n00:04.000 --> 00:02.000\nInvalid'), []);
+console.log('SRT/VTT parsing, past-only subtitle window and unknown screen timeline passed');

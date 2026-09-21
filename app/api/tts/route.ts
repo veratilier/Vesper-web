@@ -7,14 +7,14 @@ function safeHttpsUrl(value: unknown) {
   try {
     url = new URL(String(value || "").trim());
   } catch {
-    throw new Error("TTS 地址格式不正确，请填写完整的 https:// 地址");
+    throw new Error("Invalid TTS URL. Enter a full HTTPS URL.");
   }
-  if (url.protocol !== "https:") throw new Error("TTS 地址必须使用 HTTPS");
+  if (url.protocol !== "https:") throw new Error("The TTS URL must use HTTPS.");
   const host = url.hostname.toLowerCase();
   if (
     host === "localhost" || host === "127.0.0.1" || host === "::1" ||
     /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  ) throw new Error("不能连接本机或私网 TTS 地址");
+  ) throw new Error("Local or private TTS addresses are not allowed.");
   return url;
 }
 
@@ -23,9 +23,9 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { text?: string; connection?: Record<string, string> };
     const text = String(body.text || "").trim().slice(0, 4_000);
     const connection = body.connection || {};
-    if (!text) return json({ error: "朗读文本不能为空" }, 400);
+    if (!text) return json({ error: "Text to speak is required." }, 400);
     if (!connection.baseUrl || !connection.apiKey)
-      return json({ error: "请先在设置中填写 TTS 地址和 API Key" }, 400);
+      return json({ error: "Enter the TTS URL and API Key in Settings first." }, 400);
     const provider = (connection.provider || "").toLowerCase();
     const base = safeHttpsUrl(connection.baseUrl.replace(/\/$/, ""));
     const isElevenLabs = provider.includes("eleven") || base.hostname.includes("elevenlabs");
@@ -48,21 +48,26 @@ export async function POST(request: Request) {
         : isMiniMax
           ? { model: connection.model || "speech-2.6-hd", text, stream: false, voice_setting: { voice_id: connection.voiceId || "male-qn-qingse", speed: Number(connection.speed || 1), vol: 1, pitch: 0 }, audio_setting: { audio_sample_rate: 32000, bitrate: 128000, format: "mp3" } }
         : { model: connection.model || "gpt-4o-mini-tts", voice: connection.voiceId || "alloy", input: text, response_format: "mp3", speed: Number(connection.speed || 1) }),
-      redirect: "error",
+      redirect: "manual",
     });
+    // Workers supports manual/follow only. Do not forward provider credentials
+    // to a redirected destination.
+    if (response.status >= 300 && response.status < 400) {
+      return json({ error: `TTS endpoint returned a redirect (${response.status}). Enter the provider\'s final HTTPS endpoint in Voice settings.` }, 502);
+    }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 500);
-      return json({ error: detail || `TTS 返回 ${response.status}` }, 502);
+      return json({ error: detail || `TTS returned ${response.status}` }, 502);
     }
     if (isMiniMax) {
       const payload = await response.json() as { data?: { audio?: string }; audio?: string; base_resp?: { status_code?: number; status_msg?: string } };
       const encoded = payload.data?.audio || payload.audio;
-      if (!encoded) return json({ error: payload.base_resp?.status_msg || "MiniMax 未返回音频" }, 502);
+      if (!encoded) return json({ error: payload.base_resp?.status_msg || "MiniMax returned no audio." }, 502);
       const bytes = /^[0-9a-f]+$/i.test(encoded) ? Uint8Array.from(encoded.match(/.{1,2}/g) || [], (pair) => parseInt(pair, 16)) : Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
       return new Response(bytes, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
     }
     return new Response(response.body, { headers: { "content-type": response.headers.get("content-type") || "audio/mpeg", "cache-control": "no-store" } });
   } catch (reason) {
-    return json({ error: reason instanceof Error ? reason.message : "TTS 请求失败" }, 400);
+    return json({ error: reason instanceof Error ? reason.message : "TTS request failed" }, 400);
   }
 }

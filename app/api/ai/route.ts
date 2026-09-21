@@ -4,13 +4,13 @@ import { authorizeApp } from "@/lib/bridge-auth";
 type Message = { role: "user" | "assistant" | "system"; content: string };
 type ToolCall = { id: string; function: { name: string; arguments: string } };
 const json = (value: unknown, status = 200) => Response.json(value, { status });
-const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : "AI 连接请求失败";
+const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : "AI connection request failed";
 
 function parseMcpText(value: unknown): string {
   const result = value as { result?: { content?: Array<{ type?: string; text?: string }> }; error?: { message?: string } };
   if (result.error?.message) throw new Error(result.error.message);
   return result.result?.content?.filter((item) => item.type === "text" && item.text)
-    .map((item) => item.text).join("\n") || "MCP 工具没有返回文本";
+    .map((item) => item.text).join("\n") || "The MCP tool returned no text.";
 }
 
 const toolDefinitions = [
@@ -70,34 +70,34 @@ async function executeTool(
   if (name === "save_note") {
     const items = [...await read<Array<Record<string, unknown>>>("notes", [])];
     const entry = { id: crypto.randomUUID(), text: String(input.text || ""), kind: "agent", tone: String(input.tone || "cool"), createdAt: now };
-    if (!entry.text) throw new Error("便笺内容不能为空");
+    if (!entry.text) throw new Error("Note content is required.");
     items.push(entry); await write("notes", items); return entry;
   }
   if (name === "list_todos") return read("todos", []);
   if (name === "save_todo") {
     const items = [...await read<Array<Record<string, unknown>>>("todos", [])];
     const entry = { id: crypto.randomUUID(), title: String(input.title || ""), done: false, due: String(input.due || ""), tag: String(input.tag || "Agent"), createdAt: now };
-    if (!entry.title) throw new Error("提醒标题不能为空");
+    if (!entry.title) throw new Error("A reminder title is required.");
     items.push(entry); await write("todos", items); return entry;
   }
   if (name === "complete_todo") {
     const items = (await read<Array<Record<string, unknown>>>("todos", [])).map((item) => ({ ...item }));
     const entry = items.find((item) => item.id === input.id);
-    if (!entry) throw new Error("未找到提醒");
+    if (!entry) throw new Error("Reminder not found");
     entry.done = input.done !== false; await write("todos", items); return entry;
   }
   if (name === "list_anniversaries") return read("anniversaries", []);
   if (name === "save_anniversary") {
     const items = [...await read<Array<Record<string, unknown>>>("anniversaries", [])];
     const entry = { id: crypto.randomUUID(), title: String(input.title || ""), date: String(input.date || ""), repeats: input.repeats !== false };
-    if (!entry.title || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) throw new Error("纪念日标题或日期无效");
+    if (!entry.title || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date)) throw new Error("Invalid anniversary title or date");
     items.push(entry); await write("anniversaries", items); return entry;
   }
   if (name === "get_diary") return (await read<Record<string, unknown>>("diary", {}))[String(input.date || "")] || null;
   if (name === "write_agent_diary") {
     const diary = { ...await read<Record<string, Record<string, unknown>>>("diary", {}) };
     const date = String(input.date || "");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("日记日期无效");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Invalid journal date");
     diary[date] = { ...(diary[date] || {}), agent: String(input.content || ""), updatedAt: now };
     await write("diary", diary); return diary[date];
   }
@@ -115,7 +115,7 @@ async function executeTool(
     const command = { id: crypto.randomUUID(), action: String(input.action || ""), trackId: input.trackId ? String(input.trackId) : undefined, createdAt: now };
     await write("musicControl", command); return { queued: true, command };
   }
-  throw new Error(`未知工具：${name}`);
+  throw new Error(`Unknown tool: ${name}`);
 }
 
 export async function POST(request: Request) {
@@ -127,11 +127,11 @@ export async function POST(request: Request) {
     };
     const connection = body.connection || {};
     const messages = Array.isArray(body.messages) ? body.messages.slice(-80) : [];
-    if (!messages.length) return json({ error: "消息不能为空" }, 400);
+    if (!messages.length) return json({ error: "Message content is required." }, 400);
     if (body.mode === "api") {
       const baseUrl = connection.baseUrl?.replace(/\/$/, "");
       if (!baseUrl || !connection.apiKey || !connection.model)
-        return json({ error: "请先填写 API Base URL、模型和 API Key" }, 400);
+        return json({ error: "Enter an API Base URL, model and API Key first." }, 400);
       const isAnthropic = /anthropic/i.test(connection.provider || "") || /api\.anthropic\.com/i.test(baseUrl);
       const endpoint = isAnthropic ? `${baseUrl}/messages` : `${baseUrl}/chat/completions`;
       const canPersistTools = await authorizeApp(request);
@@ -145,10 +145,10 @@ export async function POST(request: Request) {
           body: JSON.stringify({ model: connection.model, max_tokens: 4096, messages: messages.filter((item) => item.role !== "system") }),
         });
         const result = await response.json() as { error?: { message?: string }; content?: Array<{ type?: string; text?: string; summary?: string }> };
-        if (!response.ok) return json({ error: result.error?.message || `API 返回 ${response.status}` }, 502);
+        if (!response.ok) return json({ error: result.error?.message || `API returned ${response.status}` }, 502);
         const content = result.content?.filter((item) => item.type === "text").map((item) => item.text || "").join("\n");
         const reasoningSummary = result.content?.filter((item) => item.type === "thinking_summary").map((item) => item.summary || item.text || "").join("\n");
-        return json({ content: content || "AI 没有返回文本", reasoningSummary: reasoningSummary || undefined });
+        return json({ content: content || "The AI returned no text.", reasoningSummary: reasoningSummary || undefined });
       }
       const thread: Array<Record<string, unknown>> = messages.map((item) => ({ role: item.role, content: item.content }));
       let finalContent = "", reasoningSummary = "";
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({ model: connection.model, messages: thread, tools: openAiTools, tool_choice: "auto" }),
         });
         const result = await response.json() as { error?: { message?: string }; choices?: Array<{ message?: { content?: string; reasoning_summary?: string; tool_calls?: ToolCall[] } }> };
-        if (!response.ok) return json({ error: result.error?.message || `API 返回 ${response.status}` }, 502);
+        if (!response.ok) return json({ error: result.error?.message || `API returned ${response.status}` }, 502);
         const message = result.choices?.[0]?.message;
         if (!message) break;
         if (message.reasoning_summary) reasoningSummary = message.reasoning_summary;
@@ -173,10 +173,10 @@ export async function POST(request: Request) {
           thread.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(output) });
         }
       }
-      return json({ content: finalContent || "AI 没有返回文本", reasoningSummary: reasoningSummary || undefined, changedDocuments });
+      return json({ content: finalContent || "The AI returned no text.", reasoningSummary: reasoningSummary || undefined, changedDocuments });
     }
     if (body.mode === "mcp") {
-      if (!connection.url) return json({ error: "请先填写 MCP 服务地址" }, 400);
+      if (!connection.url) return json({ error: "Enter the MCP server URL first." }, 400);
       const latest = messages[messages.length - 1]?.content || "";
       const response = await fetch(connection.url, {
         method: "POST",
@@ -184,11 +184,11 @@ export async function POST(request: Request) {
         body: JSON.stringify({ jsonrpc: "2.0", id: crypto.randomUUID(), method: "tools/call", params: { name: connection.toolName || "chat", arguments: { message: latest, conversationId: body.conversationId || "main", history: messages, attachments: body.attachments || [] } } }),
       });
       const raw = await response.text();
-      if (!response.ok) return json({ error: `MCP 返回 ${response.status}` }, 502);
+      if (!response.ok) return json({ error: `MCP returned ${response.status}` }, 502);
       const payload = raw.includes("data:") ? raw.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).filter((line) => line && line !== "[DONE]").map((line) => JSON.parse(line)).pop() : JSON.parse(raw);
       return json({ content: parseMcpText(payload) });
     }
-    return json({ error: "不支持的 AI 连接方式" }, 400);
+    return json({ error: "Unsupported AI connection type" }, 400);
   } catch (reason) {
     return json({ error: errorMessage(reason) }, 502);
   }

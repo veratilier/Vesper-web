@@ -1,3 +1,4 @@
+import { VESPER_DESIRE_SESSION_CONFIG } from './desire/routing.js';
 // An idle connection must not create a thread with no durable rollout.
 export async function syncCodexThread(options: {
   hasThread: boolean; newConnection: boolean; createIfMissing: boolean; instructionsChanged: boolean;
@@ -27,5 +28,5 @@ export function resumeCodexThread<T>(
   threadId: string,
   developerInstructions: string,
 ): Promise<T> {
-  return rpc("thread/resume", { threadId, developerInstructions });
+  return rpc("thread/resume", { threadId, developerInstructions, config: VESPER_DESIRE_SESSION_CONFIG });
 }

@@ -26,7 +26,7 @@ export function FileAttachmentCard({ file }: { file: FileItem }) {
       try { await navigator.share({ files: [value] }); }
       catch (reason) {
         if (reason instanceof Error && reason.name === 'AbortError') return;
-        setDownloadError('请再点“保存文件”打开系统菜单；也可选择直接下载。');
+        setDownloadError("Tap “Save file” again to open the system menu, or download directly.");
       }
     } else downloadBlob(value);
   };
@@ -48,7 +48,7 @@ export function FileAttachmentCard({ file }: { file: FileItem }) {
       // Prepared files share during this click, without another asynchronous fetch.
       if (prepared) { await saveFile(prepared); return; }
       const response = await fetch(file.url, { signal: controller.signal });
-      if (!response.ok) throw Error('文件读取失败，请重试。');
+      if (!response.ok) throw Error("Could not read the file. Please try again.");
       const bytes = await response.blob();
       if (controller.signal.aborted) return;
       const value = new File([bytes], file.name, { type: file.type || bytes.type || 'application/octet-stream' });
@@ -57,35 +57,35 @@ export function FileAttachmentCard({ file }: { file: FileItem }) {
       // Slow mobile fetch can consume activation. Keep a ready-to-save button
       // instead of opening an external URL or silently losing the download.
     } catch (reason) {
-      if (!controller.signal.aborted) setDownloadError(reason instanceof Error ? reason.message : '下载失败，请重试。');
+      if (!controller.signal.aborted) setDownloadError(reason instanceof Error ? reason.message : "Download failed. Please try again.");
     } finally { saving.current = false; if (!controller.signal.aborted) setDownloading(false); }
   };
-  const downloadLabel = downloading ? '读取中…' : prepared ? '保存文件' : '下载';
+  const downloadLabel = downloading ? "Loading…" : prepared ? "Save file" : "Download";
   const open = async () => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     setText(''); setError(''); setLoading(true); dialog.current?.showModal();
     try {
-      if (file.size > 8 * 1024 * 1024) throw Error('文件较大，请下载后查看。');
+      if (file.size > 8 * 1024 * 1024) throw Error("This file is large. Download it to view.");
       const response = await fetch(file.url, { signal: controller.signal });
-      if (!response.ok) throw Error('暂时无法读取文件，请重试或下载。');
+      if (!response.ok) throw Error("Could not read the file. Try again or download it.");
       const content = await response.text();
       if (!controller.signal.aborted) setText(content);
-    } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '文件读取失败'); }
+    } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not read file"); }
     finally { if (!controller.signal.aborted) setLoading(false); }
   };
   return <>
     <div className="vesper-file-card">
       <span className="file-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 12l-2 2 2 2M15 12l2 2-2 2M13 11l-2 6"/></svg></span>
       <span className="file-card-details"><b title={file.name}>{file.name}</b><small>{extension.toUpperCase() || 'FILE'} · {size}</small></span>
-      <span className="file-card-actions">{previewable && <button type="button" onClick={() => void open()} aria-label={`打开 ${file.name}`}>打开</button>}<button type="button" onClick={() => void download()} disabled={downloading} aria-label={`下载 ${file.name}`}>{downloadLabel}</button></span>
+      <span className="file-card-actions">{previewable && <button type="button" onClick={() => void open()} aria-label={`Open ${file.name}`}>Open</button>}<button type="button" onClick={() => void download()} disabled={downloading} aria-label={`Download ${file.name}`}>{downloadLabel}</button></span>
     </div>
-    {downloadError && <p className="file-download-status" role="alert">{downloadError}{prepared && <button type="button" onClick={() => downloadBlob(prepared)}>直接下载</button>}</p>}
-    {prepared && navigator.canShare?.({ files: [prepared] }) && !downloadError && <p className="file-download-status">可在系统菜单中选择“存储到文件”。</p>}
+    {downloadError && <p className="file-download-status" role="alert">{downloadError}{prepared && <button type="button" onClick={() => downloadBlob(prepared)}>Download directly</button>}</p>}
+    {prepared && navigator.canShare?.({ files: [prepared] }) && !downloadError && <p className="file-download-status">Choose “Save to Files” in the system menu.</p>}
     <dialog ref={dialog} className="file-preview-dialog" onCancel={event => { event.preventDefault(); close(); }}>
-      <header><b title={file.name}>{file.name}</b><button type="button" onClick={close} aria-label="关闭文件预览">×</button></header>
-      {loading ? <p role="status">正在读取文件…</p> : error ? <p role="alert">{error}</p> : html ? <iframe title={file.name} sandbox="" referrerPolicy="no-referrer" srcDoc={text} /> : <pre>{text}</pre>}
-      <footer><button type="button" onClick={() => void download()} disabled={downloading}>{downloadLabel}</button>{downloadError && <p role="alert">{downloadError}{prepared && <button type="button" onClick={() => downloadBlob(prepared)}>直接下载</button>}</p>}</footer>
+      <header><b title={file.name}>{file.name}</b><button type="button" onClick={close} aria-label="Close file preview">×</button></header>
+      {loading ? <p role="status">Reading file…</p> : error ? <p role="alert">{error}</p> : html ? <iframe title={file.name} sandbox="" referrerPolicy="no-referrer" srcDoc={text} /> : <pre>{text}</pre>}
+      <footer><button type="button" onClick={() => void download()} disabled={downloading}>{downloadLabel}</button>{downloadError && <p role="alert">{downloadError}{prepared && <button type="button" onClick={() => downloadBlob(prepared)}>Download directly</button>}</p>}</footer>
     </dialog>
   </>;
 }

@@ -1,0 +1,15 @@
+[Unit]
+Description=Vesper background wake executor (existing ChatGPT login)
+After=network-online.target vesper-codex-history.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/vesper-codex-history
+ExecStart=/usr/bin/python3 /home/ubuntu/vesper-codex-history/vesper_wake_runner.py
+TimeoutStartSec=15min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

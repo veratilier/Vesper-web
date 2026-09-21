@@ -14,6 +14,9 @@ import "./anniversary.css";
 import "./home-cards.css";
 import "./floating-interface.css";
 import "./type-scale.css";
+import "./backgrounds.css";
+import "./home-glass.css";
+import "./compact-interface.css";
 
 const pinyonScript = Pinyon_Script({
   variable: "--font-pinyon-script",
@@ -22,12 +25,12 @@ const pinyonScript = Pinyon_Script({
 });
 
 export const metadata: Metadata = {
-  title: "Vesper — 私人生活角落",
-  description: "天气、便笺、纪念日、提醒与音乐，在晚风般安静的空间里相遇。",
+  title: "Vesper — Your private corner",
+  description: "Weather, notes, meaningful dates, reminders and music in a quiet space.",
   manifest: "/manifest.webmanifest?v=11",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "Vesper",
   },
   icons: {
@@ -61,7 +64,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="en-US">
+      <head><link rel="preload" as="image" href="/opening/sky-v5.png" fetchPriority="high" /></head>
       <body className={`${pinyonScript.variable} antialiased`}>
         {children}
       </body>

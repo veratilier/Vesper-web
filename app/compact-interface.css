@@ -1,0 +1,84 @@
+/* Compact controls leave more of the conversation visible. Text still grows
+   to four lines; attachments and menus keep their existing space and behavior. */
+.app-shell .codex-chat .chat-compose {
+  min-height: 86px;
+  padding: 12px 10px 10px;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 23px;
+}
+.app-shell .codex-chat .chat-compose textarea {
+  min-height: 24px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+.app-shell .codex-chat .compose-actions {
+  height: 36px;
+  min-height: 36px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.app-shell .codex-chat .compose-actions > button {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+}
+.app-shell .codex-chat .compose-add-menu { flex: 0 0 36px; }
+.app-shell .codex-chat .compose-add-menu summary { width: 36px; height: 36px; }
+.app-shell .codex-chat .compose-add-menu summary .ui-icon,
+.app-shell .codex-chat .compose-actions > button[aria-label="Voice input"] .ui-icon,
+.app-shell .codex-chat .compose-actions > .send-message-button .ui-icon { width: 20px; height: 20px; }
+.app-shell .codex-chat .codex-model-trigger { font-size: 11px !important; }
+/* Send has a small visual disc while retaining its full button hit area. */
+.app-shell .codex-chat .compose-actions > .send-message-button {
+  background: radial-gradient(circle, var(--ui-ink) 0 15px, transparent 15.5px) !important;
+}
+/* Category navigation reuses Vesper's original surfaces, rows and icon tiles. */
+.settings-category-list { display: grid; gap: 12px; padding-bottom: 24px; }
+.settings-category-list .setting-row { height: auto; min-height: 66px; padding-block: 12px; }
+.settings-category-list .setting-row > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.settings-category-list .setting-icon,
+.settings-category-list .setting-row > .ui-icon { flex-shrink: 0; }
+.settings-category-list .setting-row:focus-visible { outline: 2px solid var(--ui-ink-secondary); outline-offset: -3px; }
+.settings-category-back { display: flex; align-items: center; gap: 6px; padding: 8px 0; margin-bottom: 12px; border: 0; background: none; color: var(--ui-muted); cursor: pointer; }
+.settings-category-back .ui-icon { width: 18px; height: 18px; transform: rotate(180deg); }
+@media (max-width: 767px) {
+  .app-shell .codex-chat .chat-compose { margin-inline: 12px; margin-bottom: 6px; }
+}
+
+/* Activity annotations sit one type step below the conversation itself. */
+.app-shell {
+  --text-chat-meta: calc(var(--text-chat) - .125rem);
+  --chat-meta-ink: color-mix(in srgb, var(--ui-muted) 88%, var(--ui-surface));
+}
+.app-shell .codex-chat :is(.wake-session-note, .turn-status, .chat-activity-inline),
+.app-shell .codex-chat :is(.wake-session-note, .turn-status) :is(b, small, p, span, time, summary, li),
+.app-shell .codex-chat .chat-activity-inline > summary,
+.app-shell .codex-chat .chat-activity-inline > summary :is(time, span),
+.app-shell .codex-chat .chat-activity-inline > section > :is(h3, p) {
+  font-size: var(--text-chat-meta) !important;
+  line-height: 1.5;
+  color: var(--chat-meta-ink) !important;
+  font-weight: 400;
+}
+.app-shell .codex-chat .execution-heading :is(button, b, small),
+.app-shell .codex-chat .execution-card > .execution-body :is(p, span, small, button, pre, code) {
+  font-size: var(--text-chat-meta) !important;
+}
+/* The terminal has its own dark surface; keep its annotations readable there. */
+.app-shell .codex-chat .execution-heading :is(button, b),
+.app-shell .codex-chat .execution-meta,
+.app-shell .codex-chat .execution-notice { color: #aeb5be; }
+
+/* iOS sees a >=16px native editor; its visual text still matches --text-chat.
+   Compensated width and field height preserve wrapping and four-line growth. */
+.app-shell .codex-chat .compose-text-field { width: 100%; min-width: 0; min-height: 21px; flex: 0 0 auto; }
+.app-shell .codex-chat .compose-text-field textarea {
+  font-size: max(16px, calc(var(--text-chat) * 8 / 7)) !important;
+  width: calc(100% * 8 / 7);
+  max-width: none;
+  max-height: none;
+  box-sizing: border-box;
+  transform: scale(.875);
+  transform-origin: top left;
+}

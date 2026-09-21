@@ -1,0 +1,116 @@
+/* The fixed stage owns one full-screen image; only its page contents scroll. */
+.stage { background-position: center; background-size: cover; background-repeat: no-repeat; }
+.stage > .app-shell { background: transparent; }
+/* An opaque, separate image prevents the main marble from bleeding into navigation. */
+.stage .app-shell .drawer {
+  background: var(--ui-surface) url('/backgrounds/vesper-sidebar-20260908.jpg') center / cover no-repeat !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Preserve readable frosted surfaces over photographs. */
+.stage .app-shell :is(.chat-compose, .mobile-navigation) {
+  background: color-mix(in srgb, var(--ui-surface) 72%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(120%) !important;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .stage .app-shell :is(.chat-compose, .mobile-navigation) { background: var(--ui-surface) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .stage .app-shell :is(.chat-compose, .mobile-navigation) {
+    background: var(--ui-surface) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* Music uses the same saved background as the rest of Vesper. */
+.stage .music-scroll-view,
+.stage .listening-player { background: transparent; }
+.stage .listening-player::before { content: none; }
+.stage .app-header.music-mode { background: transparent !important; }
+
+/* Opaque image base prevents the player showing through the music library. */
+.stage .netease-library-layer {
+  background-color: var(--ui-canvas);
+  background-image: linear-gradient(color-mix(in srgb, var(--ui-surface) 38%, transparent), color-mix(in srgb, var(--ui-surface) 58%, transparent)), var(--vesper-page-background);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+.stage .netease-library-layer::before { content: none; }
+
+/* Functional buttons use frosted surfaces; their actions and geometry stay intact. */
+.stage .app-shell :is(.listening-controls button, .listening-library-bar button,
+  .listening-empty button, .music-queue-sheet header button, .music-queue-remove,
+  .netease-library-head > button, .netease-library-tabs, .netease-shortcuts button,
+  .netease-account-fields > button, .netease-collection-head > button,
+  .netease-pending-playlist > button, .netease-search button,
+  .netease-discover-actions button, .netease-track-more, .netease-track-remove,
+  .netease-playlist-picker button) {
+  border: 1px solid color-mix(in srgb, var(--ui-line-strong) 65%, white) !important;
+  background: color-mix(in srgb, var(--ui-surface) 58%, transparent) !important;
+  color: var(--ui-ink) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), 0 4px 14px rgba(28,48,68,.07);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+}
+.stage .app-shell .listening-play {
+  background: color-mix(in srgb, var(--ui-surface-strong) 72%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 6px 20px rgba(28,48,68,.13);
+}
+.stage .app-shell .netease-library-tabs button.active {
+  background: color-mix(in srgb, var(--ui-ink-secondary) 18%, var(--ui-surface)) !important;
+  color: var(--ui-ink) !important;
+  box-shadow: inset 0 0 0 1px var(--ui-line-strong);
+}
+.stage .music-queue-sheet,
+.stage :is(.netease-account-card, .netease-search, .netease-pending-playlist, .netease-lyrics) {
+  background: color-mix(in srgb, var(--ui-surface) 76%, transparent);
+  border-color: var(--ui-line);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5);
+  backdrop-filter: blur(22px) saturate(115%);
+  -webkit-backdrop-filter: blur(22px) saturate(115%);
+}
+.stage :is(.netease-playlist-list, .netease-track-list) {
+  border-radius: 16px;
+  padding-inline: 10px;
+  background: color-mix(in srgb, var(--ui-surface) 65%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.stage .listening-controls button:focus-visible,
+.stage .netease-library-layer button:focus-visible,
+.stage .music-queue-sheet button:focus-visible { outline: 2px solid var(--ui-ink-secondary); outline-offset: 3px; }
+@supports not (backdrop-filter: blur(1px)) {
+  .stage .app-shell :is(.listening-controls button, .music-queue-sheet, .netease-library-layer button,
+    .netease-library-tabs, .netease-account-card, .netease-search, .netease-playlist-list, .netease-track-list) {
+    background-color: var(--ui-surface) !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .stage .app-shell :is(.listening-controls button, .listening-library-bar button, .listening-empty button,
+    .music-queue-sheet, .music-queue-sheet button, .netease-library-layer button,
+    .netease-library-tabs, .netease-account-card, .netease-search, .netease-pending-playlist,
+    .netease-lyrics, .netease-playlist-list, .netease-track-list) {
+    background-color: var(--ui-surface) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* Bare player controls retain their touch targets and focus outlines. */
+.stage .app-shell .listening-controls button,
+.stage .app-shell .listening-library-bar button,
+.stage .app-shell .listening-progress input {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.stage .app-shell .listening-progress input { padding: 0; border-radius: 0; }
+.stage .app-shell .listening-queue-button em { background: transparent; }
+.listening-progress input::-moz-range-track { height: 4px; border-radius: 99px; background: var(--ui-surface-strong); }
+.listening-progress input::-moz-range-progress { height: 4px; background: var(--ui-ink-secondary); }
+.listening-progress input::-moz-range-thumb { width: 9px; height: 9px; border: 2px solid var(--ui-surface); border-radius: 50%; background: var(--ui-ink-secondary); }

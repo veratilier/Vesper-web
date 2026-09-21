@@ -19,17 +19,17 @@ export async function GET(request: Request) {
       listStickerCategories(scope),
     ]);
     return response(request, { stickers, categories });
-  } catch (error) { return response(request, { error: error instanceof Error ? error.message : "无法读取表情包" }, 400); }
+  } catch (error) { return response(request, { error: error instanceof Error ? error.message : "Could not load stickers" }, 400); }
 }
 
 export async function POST(request: Request) {
   if (!(await authorizeApp(request))) return response(request, { error: "Device not paired" }, 401);
   try {
     const data = await request.formData(); const file = data.get("file");
-    if (!(file instanceof File)) return response(request, { error: "请选择图片文件" }, 400);
+    if (!(file instanceof File)) return response(request, { error: "Choose an image file." }, 400);
     const result = await uploadSticker(await memoryScopeFromRequest(request), new URL(request.url).origin, file, {
       categoryId: data.get("categoryId"), description: data.get("description"), favorite: data.get("favorite") === "true",
     });
     return response(request, result, result.created ? 201 : 200);
-  } catch (error) { return response(request, { error: error instanceof Error ? error.message : "表情包上传失败" }, 400); }
+  } catch (error) { return response(request, { error: error instanceof Error ? error.message : "Sticker upload failed" }, 400); }
 }

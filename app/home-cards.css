@@ -116,3 +116,98 @@
 .home-cards .home-quick-grid { gap: 16px; }
 .home-cards .home-quick-grid .home-panel-heading { gap: 6px; }
 .home-cards .home-letter { min-height: 72px; }
+
+.home-cards .home-reminders-heading { width: 100%; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+
+/* The sketch uses two equal-width rows with mirrored, equally sized squares.
+   Size both rows from the same container, never from their text or image contents. */
+.home-cards.home-overview {
+  container-type: inline-size;
+  width: 100%; max-width: 640px; height: auto; min-height: 0;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto;
+  align-content: start; align-items: stretch; gap: clamp(22px, 3svh, 28px); padding: 8px 0 6px;
+}
+.home-cards :is(.home-upper-grid, .home-lower-grid) {
+  --card-gap: 12px;
+  --feature-size: calc((100cqw - var(--card-gap)) * .62);
+  display: grid; width: 100%; min-width: 0; height: var(--feature-size);
+  gap: var(--card-gap); align-items: stretch;
+}
+.home-cards .home-upper-grid {
+  grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
+  grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
+}
+.home-cards .home-lower-grid {
+  grid-template-columns: minmax(0, 38fr) minmax(0, 62fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.home-cards :is(.home-desire-card, .home-usage-card, .home-notes-card,
+.home-lower-grid .home-reminders-card, .home-lower-grid .home-music-card) {
+  min-width: 0; min-height: 0; width: 100%; margin: 0; padding: 12px;
+  border: 1px solid var(--ui-line); border-radius: 20px;
+  background: var(--ui-surface); color: var(--ui-ink); overflow: hidden;
+}
+.home-cards .home-desire-card {
+  grid-column: 1; grid-row: 1 / 3; aspect-ratio: 1;
+  display: grid; grid-template-rows: auto minmax(0, 1fr);
+}
+.home-cards .home-desire-card > button { width: 100%; border: 0; padding: 0; background: transparent; }
+.home-cards .home-desire-card .desire-flower { width: 100%; height: 100%; min-height: 0; margin: 0; }
+.home-cards .home-desire-card .desire-flower svg { width: 100%; height: 100%; min-height: 0; }
+.home-cards .desire-petal-label, .home-cards .desire-selection { display: none; }
+.home-cards .home-desire-card > small { display: none; }
+.home-cards .home-usage-card { grid-column: 2; grid-row: 1; padding: 8px 10px; }
+.app-shell .home-cards .subscription-usage { margin: 0; padding: 0; border: 0; }
+.home-cards .usage-heading { align-items: center; gap: 2px; }
+.app-shell .home-cards .usage-heading .home-card-label { font-size: 1.1rem !important; line-height: 1.1; }
+.home-cards .usage-heading button { flex: 0 0 24px; width: 24px; height: 24px; min-height: 24px; padding: 0; }
+.home-cards .usage-window { margin-top: 4px; }
+.app-shell .home-cards .usage-window :is(span, b), .app-shell .home-cards .subscription-usage > p { font-size: 11px; line-height: 1.3; }
+.home-cards .usage-window > small { display: none; }
+.home-cards .home-notes-card { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 6px; padding: 10px; text-align: left; }
+.home-cards .home-note-preview, .home-cards .home-notes-card > small {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.app-shell .home-cards :is(.home-note-preview, .home-notes-card > small, .reminder-copy, .home-card-empty) { font-size: 11px !important; line-height: 1.4 !important; }
+.home-cards .home-notes-card > small { -webkit-line-clamp: 1; color: var(--ui-muted); }
+.home-cards .home-lower-grid .home-reminders-card { grid-column: 1; grid-row: 1; gap: 8px; }
+.home-cards .home-reminders-heading { gap: 2px; font-size: 1.3rem; }
+.home-cards.home-overview .reminder-row { min-height: 36px; gap: 5px; }
+.app-shell .home-cards .reminder-copy small { font-size: 10px; }
+.home-cards .home-lower-grid .home-music-card {
+  grid-column: 2; grid-row: 1; aspect-ratio: 1;
+  display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 3px;
+}
+.home-cards .home-music-card .home-panel-heading { padding: 0; }
+.home-cards .home-music-card .home-panel-heading > span:last-child { display: none; }
+.home-cards .home-music-content { display: grid; grid-template-rows: minmax(0, 1fr) 36px; gap: 2px; min-height: 0; }
+.home-cards .home-track-link { display: grid; grid-template-rows: auto auto; align-content: center; justify-items: center; gap: 3px; width: 100%; min-height: 0; padding: 0; text-align: center; }
+.home-cards .home-track-link img, .home-cards .home-track-link .home-cover-fallback {
+  display: block; width: clamp(48px, calc(var(--feature-size) - 124px), 120px); height: clamp(48px, calc(var(--feature-size) - 124px), 120px); max-width: 100%; min-height: 0;
+  aspect-ratio: 1; object-fit: cover; border-radius: 50%;
+}
+.home-cards .home-track-link > span:last-child { width: 100%; min-width: 0; gap: 0; }
+.app-shell .home-cards .home-track-link :is(strong, small) { display: block; font-size: 11px !important; line-height: 1.25; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.home-cards .home-player-controls { display: flex; align-items: center; justify-content: space-evenly; }
+.home-cards .home-player-controls button { display: grid; place-items: center; flex: 0 0 44px; min-width: 44px; width: 44px; height: 36px; min-height: 36px; padding: 6px; border: 0; background: transparent; box-shadow: none; color: var(--ui-ink); }
+.home-cards .home-player-controls .ui-icon { width: 22px; height: 22px; }
+.home-cards .home-music-empty { min-height: 0; flex-direction: column; justify-content: center; font-size: 12px; }
+@media (max-width: 767px) {
+  .home-cards.home-overview .welcome { padding: 0; margin: 0; }
+  .home-cards.home-overview .welcome h1 { margin-block: 5px; }
+  .home-cards .home-return-signal { margin-top: 2px; }
+}
+@media (max-width: 360px) {
+  .home-cards :is(.home-upper-grid, .home-lower-grid) { --card-gap: 8px; }
+  .home-cards :is(.home-desire-card, .home-lower-grid .home-music-card) { padding: 8px; }
+  .home-cards .home-card-label { font-size: 1.25rem; }
+}
+
+/* The note body scrolls independently; only its heading opens the full Notes page. */
+.home-cards .home-notes-heading { flex: 0 0 auto; width: 100%; padding: 0; border: 0; background: transparent; }
+.home-cards .home-note-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior-y: contain; touch-action: pan-y; scrollbar-width: thin; text-align: left; }
+.app-shell .home-cards .home-note-scroll :is(p, small) { font-size: 11px !important; line-height: 1.45 !important; font-style: normal; }
+.home-cards .home-note-scroll p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.home-cards .home-note-scroll small { display: block; margin-top: 6px; color: var(--ui-muted); }
+.home-cards .home-note-scroll:focus-visible { outline: 1px solid var(--ui-muted); outline-offset: -1px; }

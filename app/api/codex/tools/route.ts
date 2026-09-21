@@ -1,3 +1,4 @@
+import { readWakeHistory } from "@/lib/wake-history";
 import { authorizeApp } from "@/lib/bridge-auth";
 import { codexToolDefinitions, executeCodexTool } from "@/lib/codex-tools";
 import { memoryScopeFromRequest } from "@/lib/memory";
@@ -24,7 +25,10 @@ export async function POST(request: Request) {
     const definition = codexToolDefinitions.find((tool) => tool.name === name);
     if (!definition) return json(request, { error: "Unknown Codex tool" }, 404);
     const result = await executeCodexTool(name, body.arguments || {}, await memoryScopeFromRequest(request), { conversationId: body.conversationId, turnId: body.turnId, origin: new URL(request.url).origin });
-    return json(request, { ok: true, name, threadId: body.threadId || null, itemId: body.itemId || null, result });
+    const responseResult = name === "read_codex_task_progress" && body.conversationId
+      ? { ...result, wakeHistory: await readWakeHistory(body.conversationId, request.headers.get("x-vesper-device-token") || "") }
+      : result;
+    return json(request, { ok: true, name, threadId: body.threadId || null, itemId: body.itemId || null, result: responseResult });
   } catch (reason) {
     return json(request, { error: reason instanceof Error ? reason.message : "Codex tool failed" }, 400);
   }

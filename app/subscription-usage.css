@@ -1,0 +1,12 @@
+.app-shell .subscription-usage { margin:6px 12px 0; padding-top:10px; border-top:1px solid var(--ui-line); color:var(--ui-ink); }
+.usage-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.app-shell .usage-heading > span,.app-shell .subscription-usage > p { font-size:11px; color:var(--ui-muted); }
+.app-shell .usage-heading button { background:transparent; color:inherit; border:0; width:28px; height:28px; cursor:pointer; font-size:18px; }
+.usage-window { margin-top:6px; }
+.usage-window > div { display:flex; justify-content:space-between; gap:8px; }
+.app-shell .usage-window span,.app-shell .usage-window b { font-size:12px; font-weight:400; }
+.app-shell .usage-window small { display:block; font-size:10px; color:var(--ui-muted); margin-top:3px; }
+.usage-window progress { display:block; width:100%; height:6px; margin-top:5px; border:0; border-radius:99px; overflow:hidden; appearance:none; background:#dce7ef; }
+.usage-window progress::-webkit-progress-bar { background:#dce7ef; border-radius:99px; }
+.usage-window progress::-webkit-progress-value { background:#92b9cf; border-radius:99px; }
+.usage-window progress::-moz-progress-bar { background:#92b9cf; border-radius:99px; }

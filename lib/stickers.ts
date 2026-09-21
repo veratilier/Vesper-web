@@ -52,7 +52,7 @@ async function categoryExists(scope: MemoryScope, id: string | null) {
   if (!id) return null;
   const row = await getDb().prepare("SELECT id FROM vesper_sticker_categories WHERE id=? AND user_id=? AND character_id=?")
     .bind(id, scope.userId, scope.characterId).first<{ id: string }>();
-  if (!row) throw new Error("找不到所选分类");
+  if (!row) throw new Error("Selected category not found");
   return id;
 }
 
@@ -90,7 +90,7 @@ export async function listStickers(scope: MemoryScope, options: { query?: string
 
 export async function createStickerCategory(scope: MemoryScope, input: { name?: unknown; description?: unknown; sortOrder?: unknown }) {
   await ensureSchema();
-  const name = text(input.name, 48); if (!name) throw new Error("分类名称不能为空");
+  const name = text(input.name, 48); if (!name) throw new Error("Category name is required.");
   const timestamp = now(); const id = crypto.randomUUID();
   await getDb().prepare(`INSERT INTO vesper_sticker_categories(id,user_id,character_id,name,description,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`)
     .bind(id, scope.userId, scope.characterId, name, text(input.description, 180), Number(input.sortOrder) || 0, timestamp, timestamp).run();
@@ -99,9 +99,9 @@ export async function createStickerCategory(scope: MemoryScope, input: { name?: 
 
 export async function updateStickerCategory(scope: MemoryScope, id: string, input: { name?: unknown; description?: unknown; sortOrder?: unknown }) {
   const current = (await listStickerCategories(scope)).find((category) => category.id === id);
-  if (!current) throw new Error("找不到分类");
+  if (!current) throw new Error("Category not found");
   const name = input.name === undefined ? current.name : text(input.name, 48);
-  if (!name) throw new Error("分类名称不能为空");
+  if (!name) throw new Error("Category name is required.");
   const description = input.description === undefined ? current.description : text(input.description, 180);
   const sortOrder = input.sortOrder === undefined ? current.sortOrder : Number(input.sortOrder) || 0;
   await getDb().prepare("UPDATE vesper_sticker_categories SET name=?,description=?,sort_order=?,updated_at=? WHERE id=? AND user_id=? AND character_id=?")
@@ -111,7 +111,7 @@ export async function updateStickerCategory(scope: MemoryScope, id: string, inpu
 
 export async function uploadSticker(scope: MemoryScope, requestOrigin: string, file: File, input: { categoryId?: unknown; description?: unknown; favorite?: unknown; source?: string; sourceConversationId?: string; sourceMessageId?: string } = {}) {
   await ensureSchema();
-  if (file.size <= 0 || file.size > STICKER_CONFIG.maxBytes) throw new Error("表情包大小必须在 1B 到 12MB 之间");
+  if (file.size <= 0 || file.size > STICKER_CONFIG.maxBytes) throw new Error("Sticker size must be between 1 B and 12 MB.");
   const bytes = await file.arrayBuffer(); const image = inspectStickerImage(bytes); validateImage(image);
   const sha256 = await bytesHash(bytes);
   const categoryId = await categoryExists(scope, text(input.categoryId, 80) || null);
@@ -123,7 +123,7 @@ export async function uploadSticker(scope: MemoryScope, requestOrigin: string, f
   const existing = await getDb().prepare("SELECT a.*,c.name AS category_name FROM vesper_sticker_assets a LEFT JOIN vesper_sticker_categories c ON c.id=a.category_id WHERE a.user_id=? AND a.character_id=? AND a.sha256=?")
     .bind(scope.userId, scope.characterId, sha256).first<AssetRow>();
   if (existing?.status === "active") return { created: false, duplicate: true, sticker: assetFromRow(existing) };
-  if (existing?.status === "deleting") throw new Error("这张表情包正在删除，请稍后再试");
+  if (existing?.status === "deleting") throw new Error("This sticker is being deleted. Try again later.");
   if (existing?.status === "deleted") {
     // The unique hash is intentionally retained for deduplication. A deliberate
     // re-upload of the exact same image is the user's explicit request to restore
@@ -133,7 +133,7 @@ export async function uploadSticker(scope: MemoryScope, requestOrigin: string, f
       `${requestOrigin}/api/stickers/assets/${existing.id}`, image.width, image.height, image.mimeType, name, categoryId, description, favorite, source,
       input.sourceConversationId || null, input.sourceMessageId || null, timestamp, existing.id, scope.userId, scope.characterId,
     ).run();
-    const restored = await findAsset(scope, existing.id, true); if (!restored) throw new Error("表情包恢复失败");
+    const restored = await findAsset(scope, existing.id, true); if (!restored) throw new Error("Could not restore sticker");
     return { created: true, duplicate: false, sticker: assetFromRow(restored) };
   }
   const id = crypto.randomUUID();
@@ -148,24 +148,24 @@ export async function uploadSticker(scope: MemoryScope, requestOrigin: string, f
       input.sourceConversationId || null, input.sourceMessageId || null, "active", timestamp, timestamp,
     ).run();
   } catch (error) { await bucket().delete(key); throw error; }
-  const sticker = await findAsset(scope, id, true); if (!sticker) throw new Error("表情包保存失败");
+  const sticker = await findAsset(scope, id, true); if (!sticker) throw new Error("Could not save sticker");
   return { created: true, duplicate: false, sticker: assetFromRow(sticker) };
 }
 
 export async function updateSticker(scope: MemoryScope, id: string, input: { description?: unknown; categoryId?: unknown; favorite?: unknown; name?: unknown }) {
-  const current = await findAsset(scope, id, true); if (!current || current.status === "deleted") throw new Error("找不到表情包");
+  const current = await findAsset(scope, id, true); if (!current || current.status === "deleted") throw new Error("Sticker not found");
   const categoryId = input.categoryId === undefined ? current.category_id : await categoryExists(scope, text(input.categoryId, 80) || null);
   const name = input.name === undefined ? current.file_name : text(input.name, STICKER_CONFIG.maxNameLength);
-  if (!name) throw new Error("表情包名称不能为空");
+  if (!name) throw new Error("Sticker name is required.");
   const description = input.description === undefined ? current.description : text(input.description, STICKER_CONFIG.maxDescriptionLength);
   const favorite = input.favorite === undefined ? current.favorite : input.favorite === true ? 1 : 0;
   await getDb().prepare("UPDATE vesper_sticker_assets SET file_name=?,description=?,category_id=?,favorite=?,updated_at=? WHERE id=? AND user_id=? AND character_id=?")
     .bind(name, description, categoryId, favorite, now(), id, scope.userId, scope.characterId).run();
-  const row = await findAsset(scope, id, true); if (!row) throw new Error("表情包更新失败"); return assetFromRow(row);
+  const row = await findAsset(scope, id, true); if (!row) throw new Error("Could not update sticker"); return assetFromRow(row);
 }
 
 export async function deleteSticker(scope: MemoryScope, id: string) {
-  const current = await findAsset(scope, id, true); if (!current || current.status === "deleted") throw new Error("找不到表情包");
+  const current = await findAsset(scope, id, true); if (!current || current.status === "deleted") throw new Error("Sticker not found");
   const timestamp = now();
   await getDb().prepare("UPDATE vesper_sticker_assets SET status='deleting',updated_at=? WHERE id=? AND user_id=? AND character_id=?")
     .bind(timestamp, id, scope.userId, scope.characterId).run();
@@ -177,7 +177,7 @@ export async function deleteSticker(scope: MemoryScope, id: string) {
 }
 
 export async function stickerForUse(scope: MemoryScope, id: string, recordUse = true) {
-  const row = await findAsset(scope, id); if (!row) throw new Error("该表情包已失效或无权使用");
+  const row = await findAsset(scope, id); if (!row) throw new Error("This sticker is unavailable or you do not have access.");
   if (!recordUse) return assetFromRow(row);
   const timestamp = now();
   await getDb().prepare("UPDATE vesper_sticker_assets SET use_count=use_count+1,last_used_at=?,updated_at=? WHERE id=? AND user_id=? AND character_id=?")
@@ -195,8 +195,8 @@ export async function assetObject(id: string) {
 
 export async function importAttachmentAsSticker(scope: MemoryScope, requestOrigin: string, input: { key?: unknown; name?: unknown; type?: unknown; conversationId?: unknown; messageId?: unknown; categoryId?: unknown; description?: unknown }) {
   const key = text(input.key, 160);
-  if (!/^[a-z0-9-]+\.[a-z0-9]+$/i.test(key)) throw new Error("只能保存 Vesper 已上传的图片");
-  const source = await bucket().get(key); if (!source || !source.body) throw new Error("原图片已经不可用");
+  if (!/^[a-z0-9-]+\.[a-z0-9]+$/i.test(key)) throw new Error("Only images uploaded to Vesper can be saved.");
+  const source = await bucket().get(key); if (!source || !source.body) throw new Error("The original image is no longer available.");
   const mimeType = text(input.type, 80) || source.httpMetadata?.contentType || "application/octet-stream";
   const file = new File([await new Response(source.body).arrayBuffer()], text(input.name, STICKER_CONFIG.maxNameLength) || "chat-image", { type: mimeType });
   return uploadSticker(scope, requestOrigin, file, { categoryId: input.categoryId, description: input.description, source: "chat_manual", sourceConversationId: text(input.conversationId, 120), sourceMessageId: text(input.messageId, 120) });
@@ -221,7 +221,7 @@ export async function queueStickerCollection(scope: MemoryScope, input: { key?: 
   const settings = await readStickerSettings(scope); if (!settings.enabled) return { queued: false, reason: "disabled" };
   if (!settings.visionAvailable) return { queued: false, reason: "vision_unavailable" };
   const key = text(input.key, 160); const messageId = text(input.messageId, 120); const conversationId = text(input.conversationId, 120); const sha256 = text(input.sha256, 64);
-  if (!/^[a-z0-9-]+\.[a-z0-9]+$/i.test(key) || !messageId || !conversationId || !/^[a-f0-9]{64}$/i.test(sha256)) throw new Error("自动收集来源无效");
+  if (!/^[a-z0-9-]+\.[a-z0-9]+$/i.test(key) || !messageId || !conversationId || !/^[a-f0-9]{64}$/i.test(sha256)) throw new Error("Invalid automatic collection source");
   const timestamp = now();
   await getDb().prepare(`INSERT INTO vesper_sticker_collection_jobs(id,user_id,character_id,source_attachment_key,source_message_id,source_conversation_id,sha256,status,next_attempt_at,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,character_id,source_attachment_key,sha256) DO NOTHING`).bind(crypto.randomUUID(), scope.userId, scope.characterId, key, messageId, conversationId, sha256, "queued", timestamp, timestamp, timestamp).run();
@@ -239,7 +239,7 @@ function base64(bytes: Uint8Array) {
 
 async function classifyImage(bytes: ArrayBuffer, mimeType: string) {
   const secrets = env as unknown as Record<string, string | undefined>;
-  if (!secrets.STICKER_VISION_URL || !secrets.STICKER_VISION_KEY) throw new Error("未配置表情包视觉识别服务");
+  if (!secrets.STICKER_VISION_URL || !secrets.STICKER_VISION_KEY) throw new Error("Sticker visual recognition is not configured.");
   const response = await fetch(secrets.STICKER_VISION_URL, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${secrets.STICKER_VISION_KEY}` },
@@ -251,7 +251,7 @@ async function classifyImage(bytes: ArrayBuffer, mimeType: string) {
     }),
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) throw new Error(`视觉识别服务返回 ${response.status}`);
+  if (!response.ok) throw new Error(`Visual recognition service returned ${response.status}`);
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const content = payload.choices?.[0]?.message?.content || "{}";
   const parsed = JSON.parse(content) as { isSticker?: unknown; confidence?: unknown; description?: unknown; category?: unknown };
@@ -263,7 +263,7 @@ async function categoryForAutoCollect(scope: MemoryScope, categoryName: string) 
   const matching = categories.find((item) => item.name.toLowerCase() === categoryName.toLowerCase());
   if (matching) return matching.id;
   if (!categoryName) return null;
-  return (await createStickerCategory(scope, { name: categoryName, description: "自动收集" })).id;
+  return (await createStickerCategory(scope, { name: categoryName, description: "Automatic collection" })).id;
 }
 
 /** Processes at most one job, so a picker load cannot turn into an expensive worker loop. */
@@ -278,11 +278,11 @@ export async function processOneStickerCollection(scope: MemoryScope) {
     const since = new Date(Date.now() - 86_400_000).toISOString();
     const recent = await getDb().prepare("SELECT COUNT(*) AS count FROM vesper_sticker_assets WHERE user_id=? AND character_id=? AND source='chat_auto' AND created_at>=?")
       .bind(scope.userId, scope.characterId, since).first<{ count: number }>();
-    if (Number(recent?.count || 0) >= settings.maxPerDay) throw new Error("已达到今日自动收集上限");
+    if (Number(recent?.count || 0) >= settings.maxPerDay) throw new Error("Today’s automatic collection limit has been reached.");
     const source = await bucket().get(job.source_attachment_key);
-    if (!source || !source.body) throw new Error("原图片不可用");
+    if (!source || !source.body) throw new Error("Original image unavailable");
     const bytes = await new Response(source.body).arrayBuffer();
-    if (bytes.byteLength > STICKER_CONFIG.maxAutoCollectBytes) throw new Error("图片超过自动识别大小限制");
+    if (bytes.byteLength > STICKER_CONFIG.maxAutoCollectBytes) throw new Error("Image exceeds the recognition size limit.");
     const image = inspectStickerImage(bytes); validateImage(image);
     const decision = await classifyImage(bytes, image.mimeType);
     if (!decision.isSticker || decision.confidence < settings.minConfidence) {
@@ -299,19 +299,19 @@ export async function processOneStickerCollection(scope: MemoryScope) {
   } catch (error) {
     const attempts = Number(job.attempts || 0) + 1; const terminal = attempts >= 3;
     await getDb().prepare("UPDATE vesper_sticker_collection_jobs SET status=?,attempts=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?")
-      .bind(terminal ? "failed" : "retry", attempts, new Date(Date.now() + attempts * 60_000).toISOString(), error instanceof Error ? error.message.slice(0, 240) : "自动收集失败", timestamp, job.id).run();
+      .bind(terminal ? "failed" : "retry", attempts, new Date(Date.now() + attempts * 60_000).toISOString(), error instanceof Error ? error.message.slice(0, 240) : "Automatic collection failed", timestamp, job.id).run();
     return { processed: true, collected: false, retry: !terminal };
   }
 }
 
 export async function claimAgentSticker(scope: MemoryScope, conversationId: string, turnId: string) {
   const conversation = text(conversationId, 120); const turn = text(turnId, 120);
-  if (!conversation || !turn) throw new Error("表情包必须属于当前对话轮次");
+  if (!conversation || !turn) throw new Error("The sticker must belong to the current conversation turn.");
   const current = await getDb().prepare("SELECT last_turn_id,last_sent_at FROM vesper_sticker_agent_usage WHERE user_id=? AND character_id=? AND conversation_id=?")
     .bind(scope.userId, scope.characterId, conversation).first<{ last_turn_id: string; last_sent_at: string }>();
   const timestamp = now();
-  if (current?.last_turn_id === turn) throw new Error("这一轮已经发送过表情包");
-  if (current?.last_sent_at && Date.now() - Date.parse(current.last_sent_at) < STICKER_CONFIG.agentCooldownSeconds * 1000) throw new Error("刚发送过表情包，稍后再用更自然");
+  if (current?.last_turn_id === turn) throw new Error("A sticker has already been sent this turn.");
+  if (current?.last_sent_at && Date.now() - Date.parse(current.last_sent_at) < STICKER_CONFIG.agentCooldownSeconds * 1000) throw new Error("A sticker was just sent. Wait a little before sending another.");
   await getDb().prepare(`INSERT INTO vesper_sticker_agent_usage(user_id,character_id,conversation_id,last_turn_id,last_sent_at,sent_count,updated_at) VALUES(?,?,?,?,?,?,?)
     ON CONFLICT(user_id,character_id,conversation_id) DO UPDATE SET last_turn_id=excluded.last_turn_id,last_sent_at=excluded.last_sent_at,sent_count=vesper_sticker_agent_usage.sent_count+1,updated_at=excluded.updated_at`)
     .bind(scope.userId, scope.characterId, conversation, turn, timestamp, 1, timestamp).run();

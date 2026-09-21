@@ -24,7 +24,7 @@ export function daysUntil(item: DateItem) {
 
 export function anniversaryDayLabel(item: DateItem) {
   const days = anniversaryDays(item);
-  return days < 0 ? `过了 ${-days} 天` : `距离 ${days} 天`;
+  return days < 0 ? `${-days} days ago` : `${days} days away`;
 }
 
 export function nextAnniversary<T extends DateItem>(items: T[], now = new Date()) {

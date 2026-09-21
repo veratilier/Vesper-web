@@ -8,5 +8,5 @@ export async function GET(request: Request) { if (!(await authorizeApp(request))
 export async function POST(request: Request) {
   if (!(await authorizeApp(request))) return json(request, { error: "Device not paired" }, 401);
   try { const body = await request.json() as Record<string, unknown>; return json(request, { category: await createStickerCategory(await memoryScopeFromRequest(request), body) }, 201); }
-  catch (error) { return json(request, { error: error instanceof Error ? error.message : "无法创建分类" }, 400); }
+  catch (error) { return json(request, { error: error instanceof Error ? error.message : "Could not create category" }, 400); }
 }

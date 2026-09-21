@@ -6,17 +6,17 @@ export function ChatActivity({ busy, online, executions, summary, timestamp, dat
   timestamp: string; dateTime?: string; status?: string; expanded?: boolean; onExpandedChange?: (open: boolean) => void;
 }) {
   return <details className="chat-activity chat-activity-inline" open={expanded} onToggle={event => onExpandedChange?.(event.currentTarget.open)}>
-    <summary aria-label={`${timestamp} 工具调用与思考摘要`}>
+    <summary aria-label={`${timestamp} Tool calls and thinking summary`}>
       <i aria-hidden="true" /><time dateTime={dateTime}>{timestamp}</time>
       <svg className="activity-chevron" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 7.5 5 5 5-5" /></svg>
       {busy && status && <span className="turn-progress">{status}</span>}
     </summary>
-    <section aria-label="工具调用详情">
-      <h3>工具调用</h3>
+    <section aria-label="Tool call details">
+      <h3>Tool calls</h3>
       {executions.length ? executions.map(execution => <ExecutionCard key={execution.id} execution={execution} live={busy && online} />)
-        : <p>尚未收到本轮工具详情。</p>}
-      <h3>思考摘要</h3>
-      <p className="activity-summary">{summary || (busy ? '等待后端返回思考摘要…' : '后端没有返回本轮思考摘要。')}</p>
+        : <p>No tool details received for this turn.</p>}
+      <h3>Thinking summary</h3>
+      <p className="activity-summary">{summary || (busy ? "Waiting for a thinking summary…" : "No thinking summary was returned for this turn.")}</p>
     </section>
   </details>;
 }

@@ -36,3 +36,14 @@
 .anniversary-preview .keepsake-count b { font-size: 3.5rem; }
 .anniversary-delete { display: block; margin: 16px auto 0; background: transparent; border: 0; color: var(--ui-danger); padding: 10px; font-size: .875rem; }
 @media (max-width: 360px) { .anniversary-mini { grid-template-columns: auto minmax(0,1fr) 16px; } .anniversary-mini > span { grid-column: 2; grid-row: 2; } }
+
+.app-shell .anniversary-page .anniversary-keepsake { padding:16px 18px; gap:9px; border-radius:18px; }
+.app-shell .anniversary-page .anniversary-keepsake h2 { font-size:1.2rem !important; }
+.app-shell .anniversary-page .keepsake-count { padding-block:0; gap:8px; }
+.app-shell .anniversary-page .keepsake-count b { font-size:2.6rem !important; }
+.app-shell .anniversary-page .keepsake-count small { font-size:.75rem; }
+.app-shell .anniversary-page .anniversary-keepsake footer { padding-top:10px; gap:8px; }
+.app-shell .anniversary-page .anniversary-keepsake footer > span { font-size:.75rem; gap:3px; }
+.app-shell .anniversary-page .anniversary-mini { padding:12px 14px; gap:9px; border-radius:14px; }
+.app-shell .anniversary-page .anniversary-mini time { font-size:1rem; }
+.app-shell .anniversary-page .anniversary-mini strong { font-size:.85rem; }

@@ -9,6 +9,9 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "build:pages": "vite build --config static-vite.config.mjs && node tools/finalize-pages.mjs",
+    "preios:sync": "node tools/prepare-ios-keyboard.mjs",
+    "ios:sync": "cap sync ios",
+    "ios:open": "cap open ios",
     "preview:pages": "vite preview --config static-vite.config.mjs",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -17,6 +20,10 @@
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "^1.0.2",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/status-bar": "^8.0.3",
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@mmmike/web-push": "^1.3.0",
     "@modelcontextprotocol/server": "^2.0.0",
@@ -27,6 +34,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
     "@openai/sites-vite-plugin": "^0.1.0 || ^0.2.0",

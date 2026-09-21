@@ -6,7 +6,7 @@ The native Memory screen calls `/api/shared-memory` using the existing Vesper de
 
 The vendored shared-memory-engine is copied from veratilier/memory src/memory.ts with only local SHA-256 and environment/type adapters. Track future Memory schema/engine changes together. This endpoint currently uses keyword search; optional external embedding configuration on the independent service is not automatically inherited.
 
-Supported authenticated routes: list, search, get, save, correct. It does not proxy connections/password/token administration. The existing chat-side memory tools remain unchanged.
+Supported authenticated routes: list, search, get, save, correct. It does not proxy connections/password/token administration. Chat remember/recall/manage tools and Memory context use this same binding. The Web/PWA Memory tab lists and searches these records; Legacy Vesper memories keeps the previous UI accessible without copying or deleting its records.
 
 ## Deployment
 

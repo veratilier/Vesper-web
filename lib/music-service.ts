@@ -67,6 +67,6 @@ export async function requestNeteaseLibrary(
     body: JSON.stringify(payload),
   });
   const result = await response.json().catch(() => ({})) as MusicLibraryResult;
-  if (!response.ok) throw new Error(result.error || "网易云音乐服务暂时不可用");
+  if (!response.ok) throw new Error(result.error || "NetEase Music is unavailable.");
   return result;
 }

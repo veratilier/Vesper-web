@@ -523,3 +523,31 @@
 .app-shell .codex-chat .chat-activity-inline .activity-chevron { flex: 0 0 16px; color: var(--ui-muted); }
 .app-shell .codex-chat .chat-activity-inline[open] > summary .activity-chevron { transform: rotate(180deg); }
 .app-shell .codex-chat .chat-activity-inline > section { margin: 0 8px 12px; padding: 8px 0 8px 12px; border-left: 1px solid var(--ui-line); }
+
+/* Overlay the composer; its measured height keeps the latest message reachable. */
+.app-shell .codex-chat:not(.watch-chat) {
+  position: relative;
+  grid-template-rows: auto minmax(0, 1fr);
+  --floating-compose-height: 90px;
+  --floating-compose-gap: 10px;
+}
+.app-shell .codex-chat:not(.watch-chat) > .chat-stream {
+  padding-bottom: calc(var(--floating-compose-height) + var(--floating-compose-gap) + 20px);
+  scroll-padding-bottom: calc(var(--floating-compose-height) + var(--floating-compose-gap) + 20px);
+}
+.app-shell .codex-chat:not(.watch-chat) > .chat-compose {
+  position: absolute;
+  inset: auto 12px var(--floating-compose-gap);
+  margin: 0 !important;
+  z-index: 5;
+  border-radius: 26px;
+  box-shadow: 0 8px 26px rgba(37, 61, 80, .16), inset 0 1px 0 rgba(255,255,255,.55);
+}
+.app-shell .codex-chat:not(.watch-chat) > .chat-scroll-to-bottom {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  bottom: calc(var(--floating-compose-height) + var(--floating-compose-gap) + 12px);
+}
+html[data-mobile-keyboard="true"] .codex-chat:not(.watch-chat) { --floating-compose-gap: 6px; }

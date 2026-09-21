@@ -4,12 +4,12 @@ function json(value: unknown, status = 200) {
 
 function safeRemoteUrl(value: unknown) {
   const url = new URL(String(value || ""));
-  if (url.protocol !== "https:") throw new Error("外置记忆库必须使用 HTTPS");
+  if (url.protocol !== "https:") throw new Error("External memory storage must use HTTPS.");
   const host = url.hostname.toLowerCase();
   if (
     host === "localhost" || host === "127.0.0.1" || host === "::1" ||
     /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  ) throw new Error("不能连接本机或私网地址");
+  ) throw new Error("Local and private network addresses are not allowed.");
   return url.toString();
 }
 
@@ -25,7 +25,7 @@ async function boundedText(response: Response, limit = 2_000_000) {
     size += value.byteLength;
     if (size > limit) {
       await reader.cancel();
-      throw new Error("外置记忆数据超过 2 MB，请缩小同步范围");
+      throw new Error("External memory data exceeds 2 MB. Reduce the sync scope.");
     }
     output += decoder.decode(value, { stream: true });
   }
@@ -74,12 +74,12 @@ export async function POST(request: Request) {
         redirect: "error",
       });
     }
-    if (!response.ok) throw new Error(`外置记忆库返回 ${response.status}`);
+    if (!response.ok) throw new Error(`External memory service returned ${response.status}`);
     const items = findItems(parsePayload(await boundedText(response))).slice(0, 500).map((item, index) => {
       const record = item && typeof item === "object" ? item as Record<string, unknown> : { text: String(item) };
       return {
         id: String(record.id || record.key || `external-${index}`),
-        title: String(record.title || record.name || record.summary || record.text || `外置记忆 ${index + 1}`).slice(0, 160),
+        title: String(record.title || record.name || record.summary || record.text || `External memory ${index + 1}`).slice(0, 160),
         kind: String(record.kind || record.type || "external"),
         source: String(record.source || new URL(url).hostname),
         updatedAt: String(record.updatedAt || record.updated_at || record.createdAt || new Date().toISOString()),
@@ -87,6 +87,6 @@ export async function POST(request: Request) {
     });
     return json({ ok: true, items, count: items.length, syncedAt: new Date().toISOString() });
   } catch (reason) {
-    return json({ error: reason instanceof Error ? reason.message : "外置记忆同步失败" }, 400);
+    return json({ error: reason instanceof Error ? reason.message : "External memory sync failed" }, 400);
   }
 }

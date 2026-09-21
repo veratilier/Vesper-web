@@ -63,5 +63,5 @@ export async function startCodexTurnWithModel(rpc: Rpc, params: Record<string, u
 }
 
 export function effortLabel(effort: string | null) {
-  return effort === null ? "默认" : ({ none: "无", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "很高", max: "最高", ultra: "Ultra" } as Record<string, string>)[effort] || effort;
+  return effort === null ? "Default" : ({ none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" } as Record<string, string>)[effort] || effort;
 }

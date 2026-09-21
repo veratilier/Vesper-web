@@ -15,14 +15,14 @@ function photo(row: Row, origin: string): AlbumPhoto { return { id: row.id, key:
 export async function saveAlbumPhoto(owner: string, key: string, category: unknown, caption: unknown, origin: string) {
   await ensurePhotoAlbum();
   const row = await getDb().prepare('SELECT * FROM vesper_album_photos WHERE owner=? AND media_key=?').bind(owner, key).first<Row>();
-  if (!row) throw new Error('找不到属于此账户的照片。旧照片请先重新上传或从相册导入。');
+  if (!row) throw new Error("Photo not found for this account. Upload it again or import it into the album.");
   await getDb().prepare('UPDATE vesper_album_photos SET category=?,caption=?,saved_at=COALESCE(saved_at,?) WHERE owner=? AND media_key=?').bind(clean(category, 60) || row.category, caption === undefined ? row.caption : clean(caption, 500), new Date().toISOString(), owner, key).run();
   return getAlbumPhoto(owner, row.id, origin);
 }
 export async function getAlbumPhoto(owner: string, id: string, origin: string) {
   await ensurePhotoAlbum();
   const row = await getDb().prepare('SELECT * FROM vesper_album_photos WHERE owner=? AND id=? AND saved_at IS NOT NULL').bind(owner, id).first<Row>();
-  if (!row) throw new Error('相册中没有这张照片');
+  if (!row) throw new Error("Photo not found in album");
   return photo(row, origin);
 }
 export async function listAlbumPhotos(owner: string, input: { query?: unknown; category?: unknown; limit?: unknown; offset?: unknown }, origin: string) {

@@ -48,7 +48,7 @@ async function neteaseRequest(baseUrl: string, path: string, params: Record<stri
     body: new URLSearchParams({ ...params, ...(cookie ? { cookie } : {}) }),
   });
   const result = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || Number(result.code || 200) >= 400) throw new Error(`网易云接口返回 ${result.code || response.status}`);
+  if (!response.ok || Number(result.code || 200) >= 400) throw new Error(`NetEase API returned ${result.code || response.status}`);
   return result;
 }
 
@@ -73,29 +73,29 @@ export async function POST(request: Request) {
       bidirectional?: string | boolean;
     };
     const baseUrl = (body.baseUrl || "https://music-api.r-vera.com").trim().replace(/\/$/, "");
-    if (!/^https?:\/\//i.test(baseUrl)) throw new Error("网易云接口地址无效");
-    if (body.bidirectional === true || body.bidirectional === "true") throw new Error("双向同步暂未启用；当前只执行保留本地歌曲的一向导入");
+    if (!/^https?:\/\//i.test(baseUrl)) throw new Error("Invalid NetEase API URL");
+    if (body.bidirectional === true || body.bidirectional === "true") throw new Error("Two-way sync is not enabled. This import preserves your local songs.");
     const cookie = loginCookie(body.cookie);
     const uid = String(body.uid || "").trim();
     if (body.action === "playlists") {
-      if (!uid) throw new Error("请先填写网易云 UID");
-      if (!cookie) throw new Error("请粘贴 MUSIC_U 后再读取账号歌单");
+      if (!uid) throw new Error("Enter your NetEase UID first.");
+      if (!cookie) throw new Error("Paste MUSIC_U before loading your account playlists.");
       const result = await neteaseRequest(baseUrl, "/user/playlist", { uid, limit: "50" }, cookie);
       const playlists = ((result.playlist as Array<{ id?: string | number; name?: string; trackCount?: number }> | undefined) || [])
-        .map((item) => ({ id: String(item.id || ""), name: item.name || "未命名歌单", trackCount: item.trackCount }))
+        .map((item) => ({ id: String(item.id || ""), name: item.name || "Untitled playlist", trackCount: item.trackCount }))
         .filter((item) => item.id);
       return json(request, { playlists });
     }
-    if (body.action !== "sync") throw new Error("未知同步操作");
+    if (body.action !== "sync") throw new Error("Unknown sync action");
     let playlistId = playlistIdFrom(String(body.playlistId || ""));
     if (!playlistId && uid && cookie) {
       const result = await neteaseRequest(baseUrl, "/user/playlist", { uid, limit: "50" }, cookie);
       playlistId = String(((result.playlist as Array<{ id?: string | number }> | undefined) || [])[0]?.id || "");
     }
-    if (!playlistId) throw new Error("请填写网易云歌单 ID");
+    if (!playlistId) throw new Error("Enter a NetEase playlist ID.");
     const detail = await neteaseRequest(baseUrl, "/playlist/track/all", { id: playlistId, limit: "500", offset: "0" }, cookie);
     const songs = (detail.songs as Array<{ id: number | string; name: string; dt?: number; ar?: Array<{ name?: string }>; al?: { name?: string; picUrl?: string } }> | undefined) || [];
-    if (!songs.length) throw new Error("歌单中没有可同步歌曲");
+    if (!songs.length) throw new Error("No songs to sync in this playlist.");
     const urlMap = new Map<string, string>();
     for (let offset = 0; offset < songs.length; offset += 100) {
       const ids = songs.slice(offset, offset + 100).map((song) => song.id).join(",");
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     const incoming: MusicTrack[] = songs.map((song) => {
       const neteaseId = String(song.id);
       const url = urlMap.get(neteaseId) || "";
-      return { id: `netease-${neteaseId}`, neteaseId, title: song.name, artist: song.ar?.map((artist) => artist.name).filter(Boolean).join(" / ") || "未知歌手", album: song.al?.name || "", duration: song.dt ? `${Math.floor(song.dt / 60000)}:${String(Math.floor(song.dt / 1000) % 60).padStart(2, "0")}` : undefined, cover: song.al?.picUrl || "", url, playable: Boolean(url) };
+      return { id: `netease-${neteaseId}`, neteaseId, title: song.name, artist: song.ar?.map((artist) => artist.name).filter(Boolean).join(" / ") || "Unknown artist", album: song.al?.name || "", duration: song.dt ? `${Math.floor(song.dt / 60000)}:${String(Math.floor(song.dt / 1000) % 60).padStart(2, "0")}` : undefined, cover: song.al?.picUrl || "", url, playable: Boolean(url) };
     });
     const existing = await readDocument<MusicTrack[]>("music", []);
     const existingQueue = await readDocument<MusicTrack[]>("musicQueue", []);
@@ -129,8 +129,8 @@ export async function POST(request: Request) {
     await writeDocument("music", merged);
     await writeDocument("musicQueue", queue);
     const syncedAt = new Date().toISOString();
-    return json(request, { ok: true, tracks: merged, queue, meta: { baseUrl, uid, playlistId, lastSyncAt: syncedAt }, summary: `同步完成：${incoming.length} 首已按歌单顺序更新到当前播放列表，并刷新可播放链接` });
+    return json(request, { ok: true, tracks: merged, queue, meta: { baseUrl, uid, playlistId, lastSyncAt: syncedAt }, summary: `Synced ${incoming.length} tracks in playlist order and refreshed playback URLs.` });
   } catch (reason) {
-    return json(request, { error: reason instanceof Error ? reason.message : "网易云同步失败" }, 400);
+    return json(request, { error: reason instanceof Error ? reason.message : "NetEase sync failed" }, 400);
   }
 }

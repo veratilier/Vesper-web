@@ -75,7 +75,7 @@ export function executionEvent(method: string, params: Record<string, unknown>, 
   // A late start/delta must not turn a completed item back into a running one.
   const terminal = previous && !['inProgress', 'running', 'unknown'].includes(previous.status);
   const status = terminal && method !== 'item/completed' ? previous.status : String(item.status || (method === 'item/completed' ? 'completed' : previous?.status || 'inProgress'));
-  const result: Execution = { id, type, command, title: command || display(item.tool || item.name).slice(0, 500) || (type === 'fileChange' ? '文件修改' : type === 'commandExecution' ? '终端' : type), cwd: display(item.cwd).slice(0, 1000) || previous?.cwd,
+  const result: Execution = { id, type, command, title: command || display(item.tool || item.name).slice(0, 500) || (type === 'fileChange' ? "File changes" : type === 'commandExecution' ? "Terminal" : type), cwd: display(item.cwd).slice(0, 1000) || previous?.cwd,
     status: item.success === false || (exitCode != null && exitCode !== 0 && status === 'completed') ? 'failed' : status,
     ...changes, output: boundedOutput, truncated: boundedOutput.length < output.length || previous?.truncated,
     exitCode, durationMs: typeof item.durationMs === 'number' ? item.durationMs : previous?.durationMs, updatedAt: new Date().toISOString() };
@@ -89,6 +89,6 @@ export function executionEvent(method: string, params: Record<string, unknown>, 
 export function workspaceOptions(value: unknown) {
   const cwd = typeof value === 'string' ? value.trim() : '';
   if (!cwd) return {};
-  if (!cwd.startsWith('/') || /[\r\n\0]/.test(cwd)) throw new Error('工作目录必须是 app-server 上的绝对路径');
+  if (!cwd.startsWith('/') || /[\r\n\0]/.test(cwd)) throw new Error("The workspace must be an absolute path on the app-server machine.");
   return { cwd };
 }

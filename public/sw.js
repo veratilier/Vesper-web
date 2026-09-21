@@ -1,4 +1,4 @@
-const CACHE = "vesper-shell-v27-static-only";
+const CACHE = "vesper-shell-v29-reconciled-memory";
 const SHELL = [
   "./",
   "./manifest.webmanifest?v=11",
@@ -63,15 +63,25 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
-      .then((windows) => {
-        const existing = windows[0];
-        return existing ? existing.focus() : self.clients.openWindow("./");
+      .then(async (windows) => {
+        const home = new URL('./', self.registration.scope);
+        let target = home;
+        try {
+          const requested = new URL(event.notification.data?.url || './', home);
+          if (requested.origin === home.origin) target = requested;
+        } catch {}
+        const existing = windows.find(window => new URL(window.url).origin === home.origin);
+        if (!existing) return self.clients.openWindow(target.href);
+        // Route Desire without reloading a running conversation or playback session.
+        if (target.searchParams.get('section') === 'chat') existing.postMessage({type:'vesper-open-section',section:'chat',conversationId:target.searchParams.get('conversation')});
+        if (target.searchParams.get('section') === 'desire') existing.postMessage({ type: 'vesper-open-section', section: 'desire' });
+        return existing.focus();
       }),
   );
 });
 
 self.addEventListener("push", (event) => {
-  let payload = { title: "Vesper", body: "你有一条新消息", url: "/" };
+  let payload = { title: "Vesper", body: "You have a new message", url: "/" };
   try {
     if (event.data) payload = { ...payload, ...event.data.json() };
   } catch {}

@@ -1,0 +1,22 @@
+.window-opening{position:fixed;inset:0;margin:0;border:0;padding:0;width:100%;height:100dvh;max-width:none;max-height:none;overflow:hidden;background:#eaf0f5;color:#f2f6ff;z-index:2147483000;}
+.window-opening::backdrop{background:transparent}
+.opening-art{position:absolute;inset:0;overflow:hidden}
+.opening-plate{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;pointer-events:none;opacity:1}
+/* Composite the scene first, then fade one parent instead of five delayed layers. */
+.opening-art{opacity:0}
+.opening-ready .opening-art{animation:opening-appear .85s ease-out both}
+.opening-hold .opening-art{opacity:1;animation:none}
+.window-opening .opening-dedication{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);width:84%;text-align:center;pointer-events:none;opacity:0;transition:opacity .35s ease-out;color:#f6f4ef;text-shadow:0 2px 14px #253b6238}
+.window-opening .opening-title{margin:0;font-family:var(--font-pinyon-script),"Pinyon Script",cursive!important;font-size:clamp(64px,19vw,100px);font-weight:400;font-style:normal;line-height:1.2;letter-spacing:0}
+.window-opening .opening-subtitle{margin:12px 0 0;font-family:Georgia,"Times New Roman",serif!important;font-size:clamp(13px,3.5vw,17px);font-weight:400;font-style:italic;line-height:1.5;letter-spacing:.055em;color:inherit}
+.opening-hold .opening-dedication{opacity:1}
+.window-opening .opening-enter{position:absolute;left:50%;bottom:calc(8% + env(safe-area-inset-bottom,0px));transform:translateX(-50%);margin:0;padding:13px 30px;border:1px solid #ebf5ff70;border-radius:40px;background:#e2efff20;box-shadow:0 4px 24px #1d385928,inset 0 1px 0 #ffffff30;backdrop-filter:blur(10px);color:#f4f8ff;font:italic 20px Georgia,serif;letter-spacing:.05em;white-space:nowrap;opacity:0;visibility:hidden;transition:opacity .55s;cursor:pointer}
+.opening-hold .opening-enter{opacity:1;visibility:visible}
+.opening-enter span{margin-left:15px;font-style:normal}
+.opening-enter:focus-visible{outline:2px solid white;outline-offset:5px}
+.opening-leaving{animation:opening-exit .35s ease-out forwards}
+.opening-reduced .opening-art{opacity:1;animation:none!important}
+.opening-reduced .opening-enter{transition:none}
+.opening-reduced .opening-dedication{transition:none}
+@keyframes opening-appear{from{opacity:0}to{opacity:1}}
+@keyframes opening-exit{from{opacity:1}to{opacity:0}}

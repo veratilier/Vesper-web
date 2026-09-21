@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse, parse_qs
+import vesper_activity as activity
+import vesper_wake_store as wake_store
+import vesper_conversation_delete as conversation_delete
+import vesper_watch as watch
 
 
 DB_PATH = Path(os.environ.get("VESPER_HISTORY_DB", "/home/ubuntu/.vesper/chat-history.sqlite3"))
@@ -18,10 +22,6 @@ TOKEN_PATH = Path(os.environ.get("CODEX_TOKEN_FILE", "/home/ubuntu/.codex/app-se
 ALLOWED_ORIGINS = {"https://vesper.r-vera.com", "http://localhost:3000", "http://localhost:5173"}
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS conversation_tombstones (
-  vesper_conversation_id TEXT PRIMARY KEY,
-  deleted_at TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS conversations (
   vesper_conversation_id TEXT PRIMARY KEY,
   codex_thread_id TEXT UNIQUE,
@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS message_tombstones (
 );
 CREATE INDEX IF NOT EXISTS message_tombstones_lookup
   ON message_tombstones(vesper_conversation_id, stable_id);
+CREATE TABLE IF NOT EXISTS deleted_conversations (
+  conversation_hash TEXT PRIMARY KEY, thread_hash TEXT, deleted_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS deleted_conversations_thread
+  ON deleted_conversations(thread_hash) WHERE thread_hash IS NOT NULL;
 """
 
 
@@ -142,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: object) -> None:
         # Never log query strings because the WebSocket capability token is passed there.
-        print(f'{self.address_string()} {self.command} {urlparse(self.path).path} {fmt % args}')
+        print(f'{self.address_string()} {self.command} {urlparse(self.path).path}')
 
     def origin(self) -> str | None:
         value = self.headers.get("Origin")
@@ -182,22 +187,65 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Vary", "Origin")
         self.end_headers()
 
+    def watch_secret(self):
+        return TOKEN_PATH.read_text(encoding="utf-8").strip()
+
     def dispatch(self) -> None:
         try:
             self.dispatch_request()
         except (ValueError, UnicodeDecodeError):
             self.send_json(400, {"error": "Invalid request body"})
-        except sqlite3.Error as error:
-            # Do not log SQL parameters, which may contain private chat content.
-            self.log_message("History database failure: %s", type(error).__name__)
+        except sqlite3.Error:
             self.send_json(503, {"error": "History storage unavailable; operation not confirmed"})
 
     def dispatch_request(self) -> None:
+        parts = urlparse(self.path).path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "watch" and parts[2] == "stream" and self.command == "GET":
+            watch.serve(self, parts[1])
+            return
         if not self.authenticated():
             self.send_json(401, {"error": "Unauthorized"})
             return
         path = [unquote(part) for part in urlparse(self.path).path.strip("/").split("/") if part]
-        if path == ["health"] and self.command == "GET":
+        if path and path[0] == "watch":
+            try:
+                if path == ["watch"] and self.command == "POST":
+                    self.send_json(202, watch.start(self.body().get("url")))
+                elif len(path) == 2 and self.command == "GET":
+                    data = watch.read(path[1])
+                    if data["status"] == "ready":
+                        expiry = int(data["created"] + watch.TTL)
+                        data["streamPath"] = f'/watch/{path[1]}/stream?expires={expiry}&ticket={watch.ticket(path[1], expiry, self.watch_secret())}'
+                    self.send_json(200, data)
+                else: self.send_json(405, {"error": "Method not allowed"})
+            except (ValueError, OSError):
+                self.send_json(400, {"error": "导入不可用：请确认完整 B 站链接，且没有其他视频正在准备或缓存已满。"})
+        elif path == ["wake"] and self.command == "GET":
+            self.send_json(200, wake_store.status())
+        elif path == ["wake"] and self.command == "POST":
+            body = self.body()
+            if body.get("action") == "presence":
+                wake_store.presence(body.get("deviceId", "web"), body.get("busy", False))
+                self.send_json(200, {"ok": True})
+            elif body.get("action") == "configure":
+                try:
+                    self.send_json(200, wake_store.configure(body))
+                except ValueError as error:
+                    self.send_json(400, {"error": str(error)})
+            elif body.get("action") == "request":
+                ident = wake_store.request(body.get("requestId"))
+                self.send_json(202, {"ok": True, "requestId": ident, "conversationId": None})
+            else:
+                self.send_json(400, {"error": "Unknown wake action"})
+        elif path == ["activity"] and self.command == "GET":
+            try:
+                month = parse_qs(urlparse(self.path).query).get("month", [""])[0]
+                with db() as connection:
+                    result = activity.month_activity(connection, month)
+                self.send_json(200, result)
+            except ValueError:
+                self.send_json(400, {"error": "Expected month YYYY-MM"})
+        elif path == ["health"] and self.command == "GET":
             self.send_json(200, {"ok": True})
         elif path == ["search"] and self.command == "GET":
             self.search_messages()
@@ -208,6 +256,14 @@ class Handler(BaseHTTPRequestHandler):
             elif self.command in {"POST", "PATCH"}: self.upsert_conversation(path[1])
             elif self.command == "DELETE": self.delete_conversation(path[1])
             else: self.send_json(405, {"error": "Method not allowed"})
+        elif len(path) == 3 and path[0] == "conversations" and path[2] == "wake-history" and self.command == "GET":
+            with db() as connection:
+                rows = connection.execute("""SELECT * FROM messages
+                  WHERE vesper_conversation_id = ?
+                    AND (json_extract(metadata_json, '$.wakeRunId') IS NOT NULL
+                         OR json_extract(metadata_json, '$.wake') IS NOT NULL)
+                  ORDER BY created_at DESC, rowid DESC LIMIT 100""", (path[1],)).fetchall()
+            self.send_json(200, {"messages": [message(row) for row in rows], "limit": 100})
         elif len(path) == 3 and path[0] == "conversations" and path[2] == "messages" and self.command == "POST":
             self.upsert_message(path[1])
         elif len(path) == 4 and path[0] == "conversations" and path[2] == "messages" and self.command == "DELETE":
@@ -224,70 +280,70 @@ class Handler(BaseHTTPRequestHandler):
 
     def list_conversations(self) -> None:
         with db() as connection:
-            rows = connection.execute("""SELECT c.*, COUNT(m.id) AS message_count
+            rows = connection.execute("""SELECT c.*, COUNT(m.id) AS message_count,
+              (SELECT content FROM messages p WHERE p.vesper_conversation_id=c.vesper_conversation_id AND p.role IN ('user','agent') ORDER BY p.created_at DESC,p.rowid DESC LIMIT 1) AS preview
               FROM conversations c LEFT JOIN messages m ON m.vesper_conversation_id = c.vesper_conversation_id
               WHERE c.archived_at IS NULL GROUP BY c.vesper_conversation_id
               ORDER BY c.updated_at DESC LIMIT 100""").fetchall()
-        self.send_json(200, {"conversations": [conversation(row, row["message_count"]) for row in rows]})
+        self.send_json(200, {"conversations": [dict(conversation(row, row["message_count"]), preview=row["preview"] or "") for row in rows]})
 
     def search_messages(self) -> None:
         query = parse_qs(urlparse(self.path).query)
-        text = query.get("q", [""])[0].strip()
+        text = query.get("q", [""])[0].strip()[:300]
+        conversation_id = query.get("conversationId", [""])[0]
+        try: offset = min(100000, max(0, int(query.get("offset", ["0"])[0])))
+        except ValueError: offset = 0
         if not text:
-            self.send_json(200, {"results": [], "hasMore": False})
-            return
-        if len(text) > 500:
-            self.send_json(400, {"error": "Search text is too long"})
-            return
-        offset = max(0, int(query.get("offset", ["0"])[0]))
-        limit = min(100, max(1, int(query.get("limit", ["50"])[0])))
-        cid = query.get("conversationId", [""])[0]
-        # instr treats %, _ and apostrophes literally; Chinese single characters work.
-        where = "c.archived_at IS NULL AND m.role IN ('user', 'agent') AND instr(lower(m.content), lower(?)) > 0"
-        params = [text]
-        if cid:
-            where += " AND m.vesper_conversation_id = ?"
-            params.append(cid)
+            self.send_json(200, {"results": [], "hasMore": False}); return
         with db() as connection:
-            rows = connection.execute("SELECT m.*, c.title FROM messages m JOIN conversations c ON c.vesper_conversation_id = m.vesper_conversation_id WHERE " + where + " ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?", (*params, limit + 1, offset)).fetchall()
-        self.send_json(200, {"results": [dict(message(row), title=row["title"]) for row in rows[:limit]], "hasMore": len(rows) > limit})
+            rows = connection.execute("""SELECT m.*, c.title FROM messages m JOIN conversations c
+              ON c.vesper_conversation_id=m.vesper_conversation_id
+              WHERE c.archived_at IS NULL AND m.role IN ('user','agent')
+              AND (?='' OR m.vesper_conversation_id=?) AND instr(lower(m.content),lower(?))>0
+              AND coalesce(json_extract(m.metadata_json,'$.blockType'),'') IN ('','agentMessage','assistantMessage','userMessage','text')
+              ORDER BY m.created_at DESC,m.rowid DESC LIMIT 61 OFFSET ?""", (conversation_id,conversation_id,text,offset)).fetchall()
+        self.send_json(200, {"results": [dict(message(row), title=row["title"]) for row in rows[:60]], "hasMore": len(rows)>60})
 
     def get_conversation(self, conversation_id: str) -> None:
         with db() as connection:
+            if conversation_delete.is_deleted(connection, conversation_id):
+                self.send_json(404, {"error": "Conversation not found"}); return
             row = connection.execute("SELECT * FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone()
             query = parse_qs(urlparse(self.path).query)
-            limit = min(1000, max(1, int(query.get("limit", ["200"])[0])))
-            around = query.get("around", [""])[0]
+            paginated = query.get("latest", [""])[0] == "1"
+            try: limit = min(500, max(1, int(query.get("limit", ["200"])[0])))
+            except ValueError: limit = 200
             before = query.get("before", [""])[0]
+            cursor = connection.execute("SELECT created_at,rowid FROM messages WHERE id=? AND vesper_conversation_id=?", (before, conversation_id)).fetchone() if before else None
+            around = query.get("around", [""])[0]
+            if before and not cursor:
+                self.send_json(400, {"error": "Invalid history cursor"}); return
             if around:
-                target = connection.execute("SELECT created_at, id FROM messages WHERE vesper_conversation_id = ? AND id = ?", (conversation_id, around)).fetchone()
+                target = connection.execute("SELECT created_at,rowid FROM messages WHERE id=? AND vesper_conversation_id=?", (around, conversation_id)).fetchone()
                 if not target:
-                    self.send_json(404, {"error": "Message not found"})
-                    return
-                older = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ? AND (created_at, id) <= (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?", (conversation_id, target["created_at"], target["id"], limit // 2 + 1)).fetchall()
-                newer = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ? AND (created_at, id) > (?, ?) ORDER BY created_at, id LIMIT ?", (conversation_id, target["created_at"], target["id"], limit // 2)).fetchall()
+                    self.send_json(404, {"error": "Message not found"}); return
+                args = (conversation_id, target["created_at"], target["rowid"])
+                older = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=? AND (created_at,rowid) <= (?,?) ORDER BY created_at DESC,rowid DESC LIMIT ?", (*args, (limit+1)//2)).fetchall()
+                newer = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=? AND (created_at,rowid) > (?,?) ORDER BY created_at,rowid LIMIT ?", (*args, limit//2)).fetchall()
                 messages = list(reversed(older)) + list(newer)
-            elif query.get("latest") == ["1"]:
-                boundary = ""
-                args = [conversation_id]
-                if before:
-                    cursor = connection.execute("SELECT created_at, id FROM messages WHERE vesper_conversation_id = ? AND id = ?", (conversation_id, before)).fetchone()
-                    if not cursor:
-                        self.send_json(400, {"error": "Invalid history cursor"})
-                        return
-                    boundary = " AND (created_at, id) < (?, ?)"
-                    args.extend([cursor["created_at"], cursor["id"]])
-                messages = list(reversed(connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ?" + boundary + " ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit)).fetchall()))
+                first = connection.execute("SELECT created_at,rowid FROM messages WHERE id=?", (messages[0]["id"],)).fetchone()
+                has_more = bool(connection.execute("SELECT 1 FROM messages WHERE vesper_conversation_id=? AND (created_at,rowid) < (?,?) LIMIT 1", (conversation_id, first["created_at"], first["rowid"])).fetchone())
+            elif paginated:
+                clause = " AND (created_at,rowid) < (?,?)" if cursor else ""
+                args = (conversation_id,) + ((cursor["created_at"], cursor["rowid"]) if cursor else ()) + (limit+1,)
+                batch = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=?" + clause + " ORDER BY created_at DESC,rowid DESC LIMIT ?", args).fetchall()
+                has_more = len(batch) > limit
+                messages = list(reversed(batch[:limit]))
             else:
-                messages = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id = ? ORDER BY created_at, id LIMIT 1000", (conversation_id,)).fetchall()
-            has_more = bool(messages and connection.execute("SELECT 1 FROM messages WHERE vesper_conversation_id = ? AND (created_at, id) < (?, ?) LIMIT 1", (conversation_id, messages[0]["created_at"], messages[0]["id"])).fetchone())
+                messages = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=? ORDER BY created_at ASC,rowid ASC LIMIT 1000", (conversation_id,)).fetchall()
+                has_more = False
             tombstones = connection.execute("""SELECT codex_thread_id, stable_id, deleted_at
               FROM message_tombstones WHERE vesper_conversation_id = ?""", (conversation_id,)).fetchall()
         self.send_json(200, {
             "conversation": conversation(row) if row else None,
             "messages": [message(item) for item in messages],
             "hasMore": has_more,
-            "before": messages[0]["id"] if messages else "",
+            "before": messages[0]["id"] if messages else None,
             "tombstones": [{"threadId": item["codex_thread_id"], "stableId": item["stable_id"],
                             "messageId": item["stable_id"], "deletedAt": item["deleted_at"]}
                            for item in tombstones],
@@ -304,10 +360,8 @@ class Handler(BaseHTTPRequestHandler):
         created_at = str(body.get("createdAt") or timestamp)
         updated_at = str(body.get("updatedAt") or timestamp)
         with db() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            if connection.execute("SELECT 1 FROM conversation_tombstones WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone():
-                self.send_json(410, {"error": "Conversation was deleted"})
-                return
+            if conversation_delete.is_deleted(connection, conversation_id, thread_id):
+                self.send_json(410, {"error": "Conversation was permanently deleted"}); return
             connection.execute("""INSERT INTO conversations
               (vesper_conversation_id, codex_thread_id, title, created_at, updated_at, archived_at, source)
               VALUES (?, ?, ?, ?, ?, NULL, ?)
@@ -354,9 +408,19 @@ class Handler(BaseHTTPRequestHandler):
         time_source = str(body.get("timeSource") or metadata.get("timeSource") or ("message" if created_at else "unknown"))[:32]
         with db() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            if connection.execute("SELECT 1 FROM conversation_tombstones WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone():
-                self.send_json(410, {"error": "Conversation was deleted"})
-                return
+            existing_conversation = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone()
+            if conversation_delete.is_deleted(connection, conversation_id, existing_conversation["codex_thread_id"] if existing_conversation else None):
+                self.send_json(410, {"error": "Conversation was permanently deleted"}); return
+            if body.get("wakeTargetUserId"):
+                # Serialize with archive/delete: background output must never recreate a window.
+                target = connection.execute("""SELECT 1 FROM conversations c JOIN messages m
+                  ON m.vesper_conversation_id=c.vesper_conversation_id
+                  WHERE c.vesper_conversation_id=? AND c.archived_at IS NULL AND m.id=? AND m.role='user'""",
+                  (conversation_id, body["wakeTargetUserId"])).fetchone()
+                if not target:
+                    self.send_json(409, {"error": "Wake target no longer available"})
+                    return
+
             connection.execute("""INSERT INTO conversations
               (vesper_conversation_id, title, created_at, updated_at, archived_at, source)
               VALUES (?, ?, ?, ?, NULL, ?)
@@ -392,23 +456,33 @@ class Handler(BaseHTTPRequestHandler):
     def delete_conversation(self, conversation_id: str) -> None:
         with db() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute("""INSERT INTO conversation_tombstones
-              (vesper_conversation_id, deleted_at) VALUES (?, ?)
-              ON CONFLICT(vesper_conversation_id) DO NOTHING""", (conversation_id, now()))
-            # Children must be removed first with foreign keys enabled.
-            connection.execute("DELETE FROM message_tombstones WHERE vesper_conversation_id = ?", (conversation_id,))
-            connection.execute("DELETE FROM messages WHERE vesper_conversation_id = ?", (conversation_id,))
-            cursor = connection.execute("DELETE FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,))
-        self.send_json(200, {"ok": True, "deleted": cursor.rowcount, "permanent": True,
-                             "scope": "vesper_history"})
+            row = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone()
+            if not row:
+                if conversation_delete.is_deleted(connection, conversation_id):
+                    self.send_json(200, {"ok": True, "permanent": True, "permanentlyDeleted": True, "deleted": 0}); return
+                self.send_json(404, {"error": "Conversation not found"}); return
+            thread_id=row["codex_thread_id"]
+            if conversation_delete.thread_is_shared(thread_id):
+                self.send_json(409, {"error": "Conversation belongs to a shared Codex thread and was retained"}); return
+            conversation_delete.block(connection, conversation_id, thread_id)
+        try:source=conversation_delete.delete_codex_thread(thread_id)
+        except Exception:
+            self.send_json(502, {"error": "Codex source deletion failed; conversation is blocked pending retry"}); return
+        wake_jobs=conversation_delete.purge_wake(conversation_id)
+        with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM message_tombstones WHERE vesper_conversation_id=?",(conversation_id,))
+            messages=connection.execute("DELETE FROM messages WHERE vesper_conversation_id=?",(conversation_id,)).rowcount
+            deleted=connection.execute("DELETE FROM conversations WHERE vesper_conversation_id=?",(conversation_id,)).rowcount
+        self.send_json(200,{"ok":True,"permanent":True,"permanentlyDeleted":True,"deleted":deleted,"messagesDeleted":messages,
+                            "wakeJobsDeleted":wake_jobs,"source":source})
 
     def delete_message(self, conversation_id: str, message_id: str) -> None:
         body = self.body()
         with db() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            if not connection.execute("SELECT 1 FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone():
-                self.send_json(200, {"ok": True, "deleted": 0})
-                return
+            if not connection.execute("SELECT 1 FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone():
+                self.send_json(200, {"ok": True, "deleted": 0}); return
             row = connection.execute(
                 "SELECT item_id, metadata_json FROM messages WHERE vesper_conversation_id = ? AND id = ?",
                 (conversation_id, message_id),
@@ -458,4 +532,3 @@ if __name__ == "__main__":
         pass
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("VESPER_HISTORY_PORT", "4510"))), Handler)
     server.serve_forever()
-

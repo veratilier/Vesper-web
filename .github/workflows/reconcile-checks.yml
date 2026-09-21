@@ -1,0 +1,33 @@
+name: Vesper mainline checks
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run test:desire
+      - run: npm run test:codex
+      - run: node tools/test-reconcile.mjs
+      - run: node --test tests/service-worker.test.mjs
+      - name: VPS isolated regression tests
+        run: |
+          for test in vps/test_*.py; do
+            python3 "$test" || exit 1
+          done
+      - run: npm run build
+      - run: npx wrangler deploy --config wrangler.production.jsonc --dry-run --keep-vars
+      - run: npm run build:pages

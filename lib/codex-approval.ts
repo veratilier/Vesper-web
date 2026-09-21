@@ -43,16 +43,16 @@ function describePermissions(permissions: Record<string, unknown>) {
   const read = Array.isArray(fileSystem.read) ? fileSystem.read.filter((item): item is string => typeof item === "string") : [];
   const write = Array.isArray(fileSystem.write) ? fileSystem.write.filter((item): item is string => typeof item === "string") : [];
   const entries = Array.isArray(fileSystem.entries) ? fileSystem.entries : [];
-  if (read.length) lines.push(`读取文件：${read.join("、")}`);
-  if (write.length) lines.push(`写入文件：${write.join("、")}`);
+  if (read.length) lines.push(`Read files: ${read.join("、")}`);
+  if (write.length) lines.push(`Write files: ${write.join("、")}`);
   for (const entry of entries) {
     const candidate = record(entry);
     const path = record(candidate.path);
     const location = text(path.path) || text(path.pattern) || text(record(path.value).path) || text(record(path.value).kind);
-    if (location) lines.push(`${text(candidate.access) || "访问"}：${location}`);
+    if (location) lines.push(`${text(candidate.access) || "Access"}：${location}`);
   }
-  if (network.enabled === true) lines.push("网络访问");
-  return lines.length ? lines.join("\n") : "未提供可显示的权限范围";
+  if (network.enabled === true) lines.push("Network access");
+  return lines.length ? lines.join("\n") : "No permission scope provided";
 }
 
 function describeCommandActions(actions: unknown) {
@@ -87,7 +87,7 @@ export function createCodexApprovalRequest(request: CodexApprovalRequest): Pendi
     const network = record(params.networkApprovalContext);
     const cwd = text(params.cwd);
     const networkTarget = text(network.host) ? `${text(network.protocol) || "https"}://${text(network.host)}` : "";
-    const commandKind = text(params.kind) === "writeStdin" ? "向现有终端输入" : "执行命令";
+    const commandKind = text(params.kind) === "writeStdin" ? "Write to an existing terminal" : "Run command";
     return {
       requestKey,
       rpcIds: [request.id],
@@ -96,12 +96,12 @@ export function createCodexApprovalRequest(request: CodexApprovalRequest): Pendi
       threadId,
       turnId,
       itemId,
-      title: `允许${commandKind}？`,
-      summary: reason || "Codex 请求在本机运行这项操作。",
-      targetLabel: networkTarget ? "网络目标" : "工作目录",
-      target: networkTarget || cwd || "未提供",
+      title: `Allow ${commandKind}?`,
+      summary: reason || "Codex requests to run this action on your machine.",
+      targetLabel: networkTarget ? "Network destination" : "Working directory",
+      target: networkTarget || cwd || "Not provided",
       detailLabel: commandKind,
-      detail: command || actionDetail || "未提供命令内容",
+      detail: command || actionDetail || "No command provided",
     };
   }
 
@@ -115,12 +115,12 @@ export function createCodexApprovalRequest(request: CodexApprovalRequest): Pendi
       threadId,
       turnId,
       itemId,
-      title: "允许修改文件？",
-      summary: reason || "Codex 请求在本机修改文件。",
-      targetLabel: "可写范围",
-      target: grantRoot || "当前工作区（范围未提供）",
-      detailLabel: "说明",
-      detail: reason || "未提供更具体的文件变更说明",
+      title: "Allow file changes?",
+      summary: reason || "Codex requests to modify files on your machine.",
+      targetLabel: "Writable scope",
+      target: grantRoot || "Current workspace (scope not provided)",
+      detailLabel: "Description",
+      detail: reason || "No further file change details provided",
     };
   }
 
@@ -133,11 +133,11 @@ export function createCodexApprovalRequest(request: CodexApprovalRequest): Pendi
     threadId,
     turnId,
     itemId,
-    title: "允许额外权限？",
-    summary: reason || "Codex 请求在本轮临时获得额外权限。",
-    targetLabel: "工作目录",
-    target: text(params.cwd) || "未提供",
-    detailLabel: "请求的权限",
+    title: "Allow additional permissions?",
+    summary: reason || "Codex requests temporary additional permissions for this turn.",
+    targetLabel: "Working directory",
+    target: text(params.cwd) || "Not provided",
+    detailLabel: "Requested permissions",
     detail: describePermissions(permissions),
     permissions,
   };

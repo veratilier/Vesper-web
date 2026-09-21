@@ -10,7 +10,7 @@ function json(request: Request, value: unknown, status = 200) {
 }
 
 function message(reason: unknown) {
-  return reason instanceof Error ? reason.message : "MCP 连接暂时不可用";
+  return reason instanceof Error ? reason.message : "MCP connection unavailable";
 }
 
 export const OPTIONS = optionsResponse;

@@ -1,6 +1,6 @@
-/* Interface slant is independent of message content and the signature face. */
+/* Upright interface copy; retain the existing display titles and signatures. */
 .app-shell :where(h1,h2,h3,h4,p,span,small,b,strong,label,button,a,time,input,textarea,select,option) {
-  font-style: italic !important;
+  font-style: normal !important;
 }
 .app-shell :is(.message, .chat-compose, .chat-empty, pre, code, kbd),
 .app-shell :is(.message, .chat-compose, .chat-empty, pre, code, kbd) * {
@@ -11,6 +11,7 @@
 .app-shell :is(.wordmark > b, .drawer-brand b, .welcome h1, .home-card-label) {
   font-style: normal !important;
 }
+.app-shell :is(.page-name, .page-intro h1, .anniversary-heading h1, .desire-heading h1) { font-style: italic !important; }
 .app-shell .ui-icon { filter: none !important; }
 .app-shell .ui-icon .icon-depth { display: none; }
 .app-shell :is(.ui-icon, .nav-icon) {
@@ -54,3 +55,9 @@
   .app-shell .drawer-head { margin-bottom: 8px; }
   .app-shell .drawer-footer { padding-top: 8px; }
 }
+
+.app-shell .drawer nav { gap:1px; }
+.app-shell .drawer .nav-row { height:38px; min-height:38px; gap:10px; }
+.app-shell .drawer .nav-row span { font-size:14px; }
+.app-shell .drawer .nav-row > .nav-icon { width:21px; height:21px; flex-basis:21px; }
+.app-shell .drawer-bottom { padding-top:6px; }

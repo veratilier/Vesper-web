@@ -39,3 +39,6 @@ next-env.d.ts
 /work/
 /github-pages-spa/
 *.tsbuildinfo
+
+# Python test bytecode
+__pycache__/

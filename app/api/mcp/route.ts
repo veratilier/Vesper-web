@@ -4,7 +4,7 @@ function json(value: unknown, status = 200) {
 
 function safeRemoteUrl(value: unknown) {
   const url = new URL(String(value || ""));
-  if (url.protocol !== "https:") throw new Error("MCP 地址必须使用 HTTPS");
+  if (url.protocol !== "https:") throw new Error("The MCP URL must use HTTPS.");
   const host = url.hostname.toLowerCase();
   if (
     host === "localhost" ||
@@ -13,7 +13,7 @@ function safeRemoteUrl(value: unknown) {
     /^10\./.test(host) ||
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  ) throw new Error("不能测试本机或私网地址");
+  ) throw new Error("Local and private network addresses cannot be tested.");
   return url.toString();
 }
 
@@ -52,8 +52,8 @@ export async function POST(request: Request) {
     });
     if (!initialize.ok) {
       if (initialize.status === 401)
-        return json({ error: "MCP 需要授权，请配置 Bearer Token 或 OAuth" }, 401);
-      return json({ error: `MCP 初始化返回 ${initialize.status}` }, 502);
+        return json({ error: "MCP authorization required. Configure a Bearer Token or OAuth." }, 401);
+      return json({ error: `MCP initialization returned ${initialize.status}` }, 502);
     }
     const initialized = parsePayload(await initialize.text()) as {
       result?: { serverInfo?: { name?: string } };
@@ -88,6 +88,6 @@ export async function POST(request: Request) {
       toolCount,
     });
   } catch (reason) {
-    return json({ error: reason instanceof Error ? reason.message : "MCP 连接失败" }, 400);
+    return json({ error: reason instanceof Error ? reason.message : "MCP connection failed" }, 400);
   }
 }

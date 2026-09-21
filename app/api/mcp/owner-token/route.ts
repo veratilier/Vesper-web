@@ -7,13 +7,13 @@ export const OPTIONS = optionsResponse;
 export async function POST(request: Request) {
   const headers = corsHeaders(request);
   headers.set('cache-control', 'no-store');
-  if (!await authorizeApp(request)) return Response.json({ error: '设备配对已失效，请先重新配对 Vesper，再恢复 MCP 令牌。' }, { status: 401, headers });
+  if (!await authorizeApp(request)) return Response.json({ error: "Device pairing expired. Pair Vesper again before recovering the MCP token." }, { status: 401, headers });
   try {
-    if (!request.headers.get('content-type')?.startsWith('application/json')) return Response.json({ error: '需要 JSON 请求' }, { status: 415, headers });
+    if (!request.headers.get('content-type')?.startsWith('application/json')) return Response.json({ error: "A JSON request is required." }, { status: 415, headers });
     const raw = await request.text();
-    if (raw.length > 2048) return Response.json({ error: '请求过大' }, { status: 413, headers });
+    if (raw.length > 2048) return Response.json({ error: "Request too large" }, { status: 413, headers });
     const body = JSON.parse(raw) as { token?: unknown };
-    if (typeof body?.token !== 'string' || !/^[A-Za-z0-9_-]{16,256}$/.test(body.token)) return Response.json({ error: '请填写 16–256 位访问令牌，仅含字母、数字、下划线或短横线，不要包含 Bearer。' }, { status: 400, headers });
+    if (typeof body?.token !== 'string' || !/^[A-Za-z0-9_-]{16,256}$/.test(body.token)) return Response.json({ error: "Enter a 16–256 character token using only letters, numbers, underscores or hyphens, without “Bearer”." }, { status: 400, headers });
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.token));
     const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
     const db = getDb();
@@ -21,6 +21,6 @@ export async function POST(request: Request) {
     await db.prepare("INSERT INTO vesper_mcp_config(key,value,updated_at) VALUES('access_token_hash',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(hash, new Date().toISOString()).run();
     return Response.json({ ok: true }, { headers });
   } catch {
-    return Response.json({ error: '令牌未能保存，请稍后重试。' }, { status: 400, headers });
+    return Response.json({ error: "Could not save the token. Please try again." }, { status: 400, headers });
   }
 }

@@ -28,7 +28,7 @@ export function createOAuth<Env extends OAuthEnv>(api: ExportedHandler<Env>, fal
           const nonce = crypto.randomUUID() + crypto.randomUUID();
           await env.OAUTH_KV.put(`consent:${nonce}`, request.url, { expirationTtl: 600 });
           const client = await env.OAUTH_PROVIDER.lookupClient(auth.clientId);
-          return page(`<h1>Connect Vesper</h1><p>允许 ${escape(client?.clientName || 'ChatGPT')} 访问你的小窝？</p><p>可读取和写入便笺、日记、提醒、记忆与相册，并发送通知。</p><form method="post" action="/authorize"><input type="hidden" name="csrf" value="${nonce}"><label>Vesper MCP 访问令牌<input type="password" name="token" autocomplete="off" required minlength="16"></label><small>使用 Vesper 设置中已有的访问令牌；不需要发到聊天里。</small><button name="decision" value="allow">确认并连接</button><button name="decision" value="deny" formnovalidate>取消</button></form>`, `__Host-vesper-oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
+          return page(`<h1>Connect Vesper</h1><p>允许 ${escape(client?.clientName || 'ChatGPT')} 访问你的小窝？</p><p>可读取和写入便笺、日记、提醒、记忆、相册与 Desire 状态及小记，并发送通知。</p><form method="post" action="/authorize"><input type="hidden" name="csrf" value="${nonce}"><label>Vesper MCP 访问令牌<input type="password" name="token" autocomplete="off" required minlength="16"></label><small>使用 Vesper 设置中已有的访问令牌；不需要发到聊天里。</small><button name="decision" value="allow">确认并连接</button><button name="decision" value="deny" formnovalidate>取消</button></form>`, `__Host-vesper-oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
         }
         if (request.method !== 'POST') return page('Method not allowed', undefined, 405);
         if (request.headers.get('origin') !== OAUTH_ORIGIN) return page('授权请求来源无效。', undefined, 403);

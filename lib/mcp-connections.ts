@@ -1,3 +1,4 @@
+import { isDesireTool } from './desire/routing.js';
 import { env } from "cloudflare:workers";
 import { ensureSchema, getDb } from "@/lib/db";
 import type { MemoryScope } from "@/lib/memory";
@@ -71,7 +72,7 @@ function base64ToBytes(value: string) {
 
 async function credentialKey() {
   const secret = (env as unknown as SecretEnv).MCP_CREDENTIALS_KEY?.trim();
-  if (!secret) throw new Error("MCP 凭证服务暂未配置");
+  if (!secret) throw new Error("MCP credential storage is not configured.");
   const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`vesper-mcp-credentials:v1:${secret}`));
   return crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
@@ -86,7 +87,7 @@ async function encryptCredential(value: string) {
 async function decryptCredential(value: string) {
   if (!value) return "";
   const [encodedIv, encodedPayload, extra] = value.split(".");
-  if (!encodedIv || !encodedPayload || extra) throw new Error("保存的 MCP 凭证无效，请重新授权");
+  if (!encodedIv || !encodedPayload || extra) throw new Error("Saved MCP credentials are invalid. Authorize again.");
   try {
     const decrypted = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: base64ToBytes(encodedIv) },
@@ -95,14 +96,14 @@ async function decryptCredential(value: string) {
     );
     return new TextDecoder().decode(decrypted);
   } catch {
-    throw new Error("无法读取 MCP 凭证，请重新授权");
+    throw new Error("Could not read MCP credentials. Authorize again.");
   }
 }
 
 function safeMcpUrl(value: unknown) {
   const url = new URL(String(value || ""));
   if (url.protocol !== "https:" || url.username || url.password)
-    throw new Error("MCP 地址必须是公开的 HTTPS 地址");
+    throw new Error("The MCP URL must be a public HTTPS address.");
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (
     host === "localhost" || host === "::1" || host === "0.0.0.0" ||
@@ -110,7 +111,7 @@ function safeMcpUrl(value: unknown) {
     /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
     /^169\.254\./.test(host) || /^(fc|fd|fe8|fe9|fea|feb)/.test(host) ||
     host.endsWith(".local") || host.endsWith(".internal")
-  ) throw new Error("不能连接本机或私网 MCP 地址");
+  ) throw new Error("Local and private MCP addresses are not allowed.");
   return url;
 }
 
@@ -187,8 +188,8 @@ async function beginMcpSession(url: URL, token: string) {
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
-    if (response.status === 401) throw new Error("MCP 授权已失效，请在 Vesper 设置中重新授权");
-    throw new Error(`MCP 初始化失败（HTTP ${response.status}）`);
+    if (response.status === 401) throw new Error("MCP authorization expired. Authorize again in Vesper Settings.");
+    throw new Error(`MCP initialization failed (HTTP ${response.status})`);
   }
   const payload = parseMcpPayload(await response.text());
   const error = payload.error as { message?: unknown } | undefined;
@@ -218,7 +219,7 @@ async function inspectMcp(url: URL, token: string) {
     redirect: "manual",
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error(`MCP 工具目录读取失败（HTTP ${response.status}）`);
+  if (!response.ok) throw new Error(`Could not load MCP tool catalog (HTTP ${response.status})`);
   const payload = parseMcpPayload(await response.text());
   const error = payload.error as { message?: unknown } | undefined;
   if (error?.message) throw new Error(cleanText(error.message, 240));
@@ -242,7 +243,7 @@ export async function listMcpConnections(scope: MemoryScope) {
 export async function syncMcpConnection(scope: MemoryScope, input: McpConnectionInput) {
   await ensureSchema();
   const id = cleanText(input.id, 160);
-  if (!id || !/^[a-zA-Z0-9_-]{1,160}$/.test(id)) throw new Error("MCP 连接标识无效");
+  if (!id || !/^[a-zA-Z0-9_-]{1,160}$/.test(id)) throw new Error("Invalid MCP connection ID");
   const url = safeMcpUrl(input.url);
   const name = cleanText(input.name, 120) || url.hostname;
   const authMode = input.authMode === "oauth" ? "oauth" : input.authMode === "bearer" ? "bearer" : "none";
@@ -254,7 +255,7 @@ export async function syncMcpConnection(scope: MemoryScope, input: McpConnection
     : rawToken ? await encryptCredential(rawToken)
       : existing?.token_ciphertext || "";
   const enabled = input.enabled !== false;
-  if (authMode !== "none" && !tokenCiphertext) throw new Error("请先完成 MCP 授权，再同步给 Codex");
+  if (authMode !== "none" && !tokenCiphertext) throw new Error("Complete MCP authorization before syncing to Codex.");
   const inspected = await inspectMcp(url, tokenCiphertext ? await decryptCredential(tokenCiphertext) : "");
   const timestamp = now();
   await getDb().prepare(`INSERT INTO vesper_mcp_connections
@@ -268,7 +269,7 @@ export async function syncMcpConnection(scope: MemoryScope, input: McpConnection
     .bind(id, scope.userId, name, url.toString(), authMode, tokenCiphertext, enabled ? 1 : 0,
       JSON.stringify(inspected.tools), timestamp, existing?.created_at || timestamp, timestamp).run();
   const saved = await scopedConnection(scope, id);
-  if (!saved) throw new Error("MCP 连接未能保存");
+  if (!saved) throw new Error("Could not save MCP connection");
   return { connection: publicConnection(saved), serverName: inspected.serverName, toolCount: inspected.tools.length };
 }
 
@@ -287,8 +288,8 @@ export async function configuredMcpTools(scope: MemoryScope) {
     connectionId: connection.id,
     connectionName: connection.name,
     authorized: connection.authorized,
-    tools: connection.tools.map((tool) => ({ ...tool })),
-  }));
+    tools: connection.tools.filter((tool) => !isDesireTool(tool.name)).map((tool) => ({ ...tool })),
+  })).filter((connection) => connection.tools.length > 0);
 }
 
 function boundedResult(value: unknown) {
@@ -300,16 +301,17 @@ function boundedResult(value: unknown) {
 export async function callConfiguredMcpTool(scope: MemoryScope, input: { connectionId?: unknown; toolName?: unknown; arguments?: unknown }) {
   const id = cleanText(input.connectionId, 160);
   const toolName = cleanText(input.toolName, 128);
+  if (isDesireTool(toolName)) throw new Error("External Desire tools are disabled in Vesper; use the native Desire tools.");
   const connection = await scopedConnection(scope, id);
-  if (!connection || Number(connection.enabled) !== 1) throw new Error("这个 MCP 连接不存在或尚未启用");
+  if (!connection || Number(connection.enabled) !== 1) throw new Error("This MCP connection does not exist or is disabled.");
   const tool = rowTools(connection).find((candidate) => candidate.name === toolName);
-  if (!tool) throw new Error("该工具不在已同步的 MCP 目录中，请先在设置中重新测试 MCP");
+  if (!tool) throw new Error("This tool is not in the synced MCP catalog. Test the MCP connection in Settings first.");
   const argumentsValue = input.arguments && typeof input.arguments === "object" && !Array.isArray(input.arguments)
     ? input.arguments as Record<string, unknown> : {};
-  if (JSON.stringify(argumentsValue).length > 30_000) throw new Error("MCP 工具参数过大");
+  if (JSON.stringify(argumentsValue).length > 30_000) throw new Error("MCP tool arguments are too large.");
   const url = safeMcpUrl(connection.url);
   const token = await decryptCredential(connection.token_ciphertext);
-  if (connection.auth_mode !== "none" && !token) throw new Error("MCP 尚未授权，请在 Vesper 设置中重新授权");
+  if (connection.auth_mode !== "none" && !token) throw new Error("MCP is not authorized. Authorize it in Vesper Settings.");
   const session = await beginMcpSession(url, token);
   const response = await fetch(url.toString(), {
     method: "POST",
@@ -319,8 +321,8 @@ export async function callConfiguredMcpTool(scope: MemoryScope, input: { connect
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    if (response.status === 401) throw new Error("MCP 授权已失效，请在设置中重新授权");
-    throw new Error(`MCP 工具调用失败（HTTP ${response.status}）`);
+    if (response.status === 401) throw new Error("MCP authorization expired. Authorize again in Settings.");
+    throw new Error(`MCP tool call failed (HTTP ${response.status})`);
   }
   const payload = parseMcpPayload(await response.text());
   const error = payload.error as { message?: unknown } | undefined;

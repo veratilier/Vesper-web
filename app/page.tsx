@@ -1,4 +1,21 @@
 "use client";
+import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/desire/routing.js";
+import { Capacitor } from "@capacitor/core";
+import { Keyboard } from "@capacitor/keyboard";
+import { nativeMcpOAuth } from "./native-mcp-oauth";
+import { nativeOAuthCode, NATIVE_OAUTH_PREFIX } from "@/lib/mcp-oauth-callback";
+import { documentSyncAction } from "@/lib/document-sync";
+import { NotificationSettings } from "./notification-settings";
+import { WindowOpening } from "./window-opening";
+import { WatchPlayer } from "./watch-player";
+import type { WatchFrame } from "./watch-context";
+import { ReadingRoom, type ReadingBook } from "./reading-room";
+import { SubscriptionUsage } from "./subscription-usage";
+import { SharedMemoryLibrary } from "./shared-memory-library";
+import { AppCenter } from "./app-center";
+import { DesirePanel, HomeDesire } from "./desire-panel";
+import { WakeCard } from "./wake-card";
+import type { WakeRecord } from "./wake-summary";
 import { executionEvent, workspaceOptions, type Execution } from './codex-execution';
 import { ChatActivity, type TurnActivity } from './chat-activity';
 import { ExecutionCard } from './execution-card';
@@ -55,27 +72,27 @@ function Notes() {
     <div className="page-body">
       <PageIntro
         eyebrow="QUICK NOTES"
-        title="便笺"
-        text="用户与 Agent 都可以在这里留下内容。"
+        title="Notes"
+        text="You and Rowan can both leave something here."
       />
       <div className="note-toolbar">
-        <span>{notes.length} 张便笺</span>
+        <span>{notes.length}  notes</span>
         <button onClick={add}>
           <Icon name="plus" />
-          新便笺
+          New note
         </button>
       </div>
       {!notes.length ? (
-        <EmptyState text="还没有便笺，点击“新便笺”开始。" />
+        <EmptyState text="No notes yet. Select “New note” to begin." />
       ) : (
         <div className="sticky-wall">
           {notes.map((note) => (
             <article className={`sticky ${note.tone}`} key={note.id}>
               <div className="tape" />
               <div className="sticky-meta">
-                <span>{note.kind === "agent" ? "VESPER" : "我"}</span>
+                <span>{note.kind === "agent" ? "ROWAN" : "VERA"}</span>
                 <button
-                  aria-label="删除便笺"
+                  aria-label="Delete note"
                   onClick={() =>
                     setNotes((items) =>
                       items.filter((item) => item.id !== note.id),
@@ -88,8 +105,8 @@ function Notes() {
               {note.kind === "user" ? (
                 <textarea
                   className="sticky-editor"
-                  aria-label="编辑便笺"
-                  placeholder="写下便笺…"
+                  aria-label="Edit note"
+                  placeholder="Write a note…"
                   value={note.text}
                   onChange={(event) =>
                     setNotes((items) =>
@@ -108,12 +125,12 @@ function Notes() {
                 {note.kind === "agent" ? (
                   <>
                     <Icon name="sparkles" />
-                    Agent 留言
+                    Rowan’s notes
                   </>
                 ) : (
                   <>
                     <Icon name="edit" />
-                    可编辑 · 自动保存
+                    Editable · Saved automatically
                   </>
                 )}
               </footer>
@@ -125,7 +142,8 @@ function Notes() {
   );
 }
 const VESPER_API_ORIGIN = "https://api.vesper.r-vera.com";
-const DEFAULT_APP_BACKGROUND = "#eaf0f5";
+const DEFAULT_CANVAS_COLOR = "#eaf0f5";
+const DEFAULT_APP_BACKGROUND = 'url("/backgrounds/vesper-marble-20260908.jpg")';
 const NEUTRAL_ACCENTS = new Set(["#647e94", "#8299ad", "#4a4a48", "#6b6b68", "#878783", "#a3a39f"]);
 
 function normalizeNeutralAccent(value?: string) {
@@ -134,10 +152,10 @@ function normalizeNeutralAccent(value?: string) {
 
 function normalizeAppBackground(value?: string) {
   const candidate = value?.trim() || "";
-  if (["#f5f5f3", "#f0f2ef"].includes(candidate.toLowerCase())) return DEFAULT_APP_BACKGROUND;
+  if (["#f5f5f3", "#f0f2ef", "#eaf0f5"].includes(candidate.toLowerCase())) return DEFAULT_APP_BACKGROUND;
   if (/^#[\da-f]{6}$/i.test(candidate)) return candidate;
   // Uploaded photographs remain user content. Former colour/gradient presets and
-  // the old blue marble default become the new ice-blue canvas.
+  // obsolete default presets become the bundled marble background.
   return candidate.includes("url(") && !candidate.includes("vesper-default-bg.webp")
     ? candidate
     : DEFAULT_APP_BACKGROUND;
@@ -160,9 +178,9 @@ function AnniversaryCard({ item }: { item: AnniversaryItem }) {
   return (
     <article className="surface anniversary">
       <div className="days">
-        <small>{days >= 0 ? "距离" : "过了"}</small>
+        <small>{days >= 0 ? "Until" : "Since"}</small>
         <b>{days >= 0 ? daysUntil(item) : -days}</b>
-        <small>天</small>
+        <small> days</small>
       </div>
       <div className="anniversary-copy">
         <span>
@@ -170,7 +188,7 @@ function AnniversaryCard({ item }: { item: AnniversaryItem }) {
           {String(target.getDate()).padStart(2, "0")}
         </span>
         <h2>{item.title}</h2>
-        <p>{target.toLocaleDateString("zh-CN")}</p>
+        <p>{target.toLocaleDateString("en-US")}</p>
       </div>
     </article>
   );
@@ -213,11 +231,11 @@ function Anniversaries() {
   };
   const uploadBackground = async (file?: File) => {
     if (!file) return;
-    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type) || file.size > 10 * 1024 * 1024) { setUploadError("请选择 10 MB 以内的 JPG、PNG、WebP 或 GIF 图片。"); return; }
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type) || file.size > 10 * 1024 * 1024) { setUploadError("Choose a JPG, PNG, WebP or GIF under 10 MB."); return; }
     const generation = ++uploadGeneration.current;
     setUploading(true); setUploadError("");
     try { const { url } = await uploadImage(file); if (generation === uploadGeneration.current) setDraft((current) => ({ ...current, background: { ...current.background, mode: "image", image: url } })); }
-    catch (reason) { if (generation === uploadGeneration.current) setUploadError(reason instanceof Error ? reason.message : "上传失败，请重试。"); }
+    catch (reason) { if (generation === uploadGeneration.current) setUploadError(reason instanceof Error ? reason.message : "Upload failed. Please try again."); }
     finally { if (generation === uploadGeneration.current) setUploading(false); }
   };
   const featured = items.find((item) => item.id === selectedId) || nextAnniversary(items);
@@ -226,31 +244,31 @@ function Anniversaries() {
     const past = days < 0;
     const count = Math.abs(days);
     return <article className="anniversary-keepsake" style={anniversaryBackgroundStyle(item.background)}>
-      <span className="keepsake-label">{past ? "Days remembered · 日子在累积" : days === 0 ? "Today is the day · 就是今天" : "Counting down · 距离这一天"}</span>
-      <h2>{item.title || "纪念日名称"}</h2>
-      <div className="keepsake-count"><small>{past ? "已经走过" : days === 0 ? "就在今天" : "还有"}</small><b>{count}</b><small>天</small></div>
-      <footer><span>{past ? "始于" : "日期"} {item.date}<small>{item.repeats ? "每年纪念" : "记录这一天"}</small></span>{!preview && <button onClick={() => openEditor(item)}><Icon name="edit" />编辑与背景</button>}</footer>
+      <span className="keepsake-label">{past ? "Days remembered" : days === 0 ? "Today is the day" : "Counting down"}</span>
+      <h2>{item.title || "Anniversary name"}</h2>
+      <div className="keepsake-count"><small>{past ? "Days together" : days === 0 ? "Today is the day" : "Remaining"}</small><b>{count}</b><small> days</small></div>
+      <footer><span>{past ? "Since" : "Date"} {item.date}<small>{item.repeats ? "Repeat annually" : "Remember this day"}</small></span>{!preview && <button onClick={() => openEditor(item)}><Icon name="edit" />Edit and background</button>}</footer>
     </article>;
   };
   return <div className="page-body anniversary-page">
-    <header className="anniversary-heading"><span>OUR DAYS</span><h1>值得记住的日子</h1></header>
-    {featured ? card(featured) : <EmptyState text="把第一个重要的日子留在这里。" />}
+    <header className="anniversary-heading"><span>OUR DAYS</span><h1>Days worth remembering</h1></header>
+    {featured ? card(featured) : <EmptyState text="Save your first meaningful date here." />}
     {items.length > 1 && <div className="anniv-list">{items.filter((item) => item.id !== featured?.id).map((item) => <button className="anniversary-mini" key={item.id} onClick={() => setSelectedId(item.id)}><time>{item.date.slice(5).replace("-", ".")}</time><strong>{item.title}</strong><span>{anniversaryDayLabel(item)}</span><Icon name="chevron" /></button>)}</div>}
-    <div className="anniversary-add-actions"><button className="primary-action anniversary-add" onClick={() => openEditor()}><Icon name="plus" />添加纪念日</button><button className="primary-action anniversary-add" onClick={openCountdown}><Icon name="clock" />添加倒计时</button></div>
-    {editing && <div className="modal-layer"><button className="modal-scrim" aria-label="关闭" onClick={closeEditor} /><section className="connection-modal anniversary-editor" role="dialog" aria-modal="true" aria-labelledby="anniversary-editor-title">
-      <div className="modal-head"><h2 id="anniversary-editor-title">{draft.id ? "编辑纪念日" : addingCountdown ? "添加倒计时" : "添加纪念日"}</h2><button aria-label="关闭" onClick={closeEditor}><Icon name="close" /></button></div>
-      <label className="profile-field"><span>名称</span><input autoFocus value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-      <label className="profile-field"><span>{addingCountdown ? "目标日期" : "日期"}</span><input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></label>
-      {addingCountdown && <p className="settings-hint">选好想期待的日子，卡片会自动显示还有多少天；当天显示“就在今天”，之后显示已经走过的天数。</p>}
-      <button className={draft.repeats ? "repeat-choice selected" : "repeat-choice"} aria-pressed={draft.repeats} onClick={() => setDraft({ ...draft, repeats: !draft.repeats })}><span>每年重复</span><b>{draft.repeats ? "✓" : ""}</b></button>
-      <fieldset className="anniversary-background-options"><legend>卡片背景</legend><div>{([ ["theme", "跟随主题"], ["color", "纯色"], ["image", "图片"] ] as const).map(([mode, label]) => <button key={mode} aria-pressed={(draft.background?.mode || "theme") === mode} onClick={() => { uploadGeneration.current++; setUploading(false); setUploadError(""); setDraft({ ...draft, background: { color: "#466b7b", ...draft.background, mode } }); }}>{label}</button>)}</div>
-      {draft.background?.mode === "color" && <label>选择颜色<input type="color" value={draft.background.color || "#466b7b"} onChange={(event) => setDraft({ ...draft, background: { ...draft.background, mode: "color", color: event.target.value } })} /></label>}
-      {draft.background?.mode === "image" && <label>上传背景图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploading} onChange={(event) => { void uploadBackground(event.target.files?.[0]); event.target.value = ""; }} /></label>}
-      <p>选择“跟随主题”即可恢复默认背景。</p></fieldset>
-      {uploading && <p role="status">正在上传图片…</p>}{uploadError && <p role="alert">{uploadError}</p>}
+    <div className="anniversary-add-actions"><button className="primary-action anniversary-add" onClick={() => openEditor()}><Icon name="plus" />Add anniversary</button><button className="primary-action anniversary-add" onClick={openCountdown}><Icon name="clock" />Add countdown</button></div>
+    {editing && <div className="modal-layer"><button className="modal-scrim" aria-label="Close" onClick={closeEditor} /><section className="connection-modal anniversary-editor" role="dialog" aria-modal="true" aria-labelledby="anniversary-editor-title">
+      <div className="modal-head"><h2 id="anniversary-editor-title">{draft.id ? "Edit anniversary" : addingCountdown ? "Add countdown" : "Add anniversary"}</h2><button aria-label="Close" onClick={closeEditor}><Icon name="close" /></button></div>
+      <label className="profile-field"><span>Name</span><input autoFocus value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
+      <label className="profile-field"><span>{addingCountdown ? "Target date" : "Date"}</span><input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></label>
+      {addingCountdown && <p className="settings-hint">Choose a date to count down to. On the day, the card says “Today is the day”; afterward, it shows days elapsed.</p>}
+      <button className={draft.repeats ? "repeat-choice selected" : "repeat-choice"} aria-pressed={draft.repeats} onClick={() => setDraft({ ...draft, repeats: !draft.repeats })}><span>Repeat annually</span><b>{draft.repeats ? "✓" : ""}</b></button>
+      <fieldset className="anniversary-background-options"><legend>Card background</legend><div>{([ ["theme", "Use theme"], ["color", "Solid color"], ["image", "Image"] ] as const).map(([mode, label]) => <button key={mode} aria-pressed={(draft.background?.mode || "theme") === mode} onClick={() => { uploadGeneration.current++; setUploading(false); setUploadError(""); setDraft({ ...draft, background: { color: "#466b7b", ...draft.background, mode } }); }}>{label}</button>)}</div>
+      {draft.background?.mode === "color" && <label>Choose color<input type="color" value={draft.background.color || "#466b7b"} onChange={(event) => setDraft({ ...draft, background: { ...draft.background, mode: "color", color: event.target.value } })} /></label>}
+      {draft.background?.mode === "image" && <label>Upload background<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploading} onChange={(event) => { void uploadBackground(event.target.files?.[0]); event.target.value = ""; }} /></label>}
+      <p>Choose “Use theme” to restore the default background.</p></fieldset>
+      {uploading && <p role="status">Uploading image…</p>}{uploadError && <p role="alert">{uploadError}</p>}
       {draft.date && <div className="anniversary-preview">{card(draft, true)}</div>}
-      <button className="save-profile" disabled={!draft.title.trim() || !draft.date || uploading || (draft.background?.mode === "image" && !draft.background.image)} onClick={saveDate}>保存纪念日</button>
-      {draft.id && <button className="anniversary-delete" onClick={() => { if (window.confirm("删除这个纪念日？")) { setItems((current) => current.filter((item) => item.id !== draft.id)); closeEditor(); } }}>删除纪念日</button>}
+      <button className="save-profile" disabled={!draft.title.trim() || !draft.date || uploading || (draft.background?.mode === "image" && !draft.background.image)} onClick={saveDate}>Save anniversary</button>
+      {draft.id && <button className="anniversary-delete" onClick={() => { if (window.confirm("Delete this anniversary?")) { setItems((current) => current.filter((item) => item.id !== draft.id)); closeEditor(); } }}>Delete anniversary</button>}
     </section></div>}
   </div>;
 }
@@ -489,16 +507,30 @@ const navIconPaths: Record<string, string[]> = {
 function NavIcon({ name }: { name: string }) {
   return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">{(brokenIconPaths[name] || iconPaths[name] || []).map((d, i) => <path d={d} key={i} />)}</svg>;
 }
+// Display labels only; persisted section and connection keys remain unchanged.
+const uiLabels: Record<string, string> = {
+  "今日": "Today", "聊天": "Chat", "日记": "Journal", "便笺": "Notes",
+  "提醒": "Reminders", "纪念日": "Dates", "音乐": "Music", "相册": "Album",
+  "记忆库": "Memory", "欲望": "Desire", "设置": "Settings",
+  "Agent 声音": "Agent Voice", "MCP 工具": "MCP Tools",
+  "通知偏好": "Notification Preferences", "记忆权限": "Memory Permissions",
+  "导出与备份": "Export & Backup", "关心频率": "Care Frequency",
+  "AI 连接": "AI Connection", "MCP 服务": "MCP Service",
+  "定位与环境": "Location & Environment"
+};
+const uiLabel = (key: string) => uiLabels[key] || key;
 const nav = [
   { label: "今日", english: "Today", icon: "home" },
   { label: "聊天", english: "Chat", icon: "chat" },
+  { label: "欲望", english: "Desire", icon: "heart" },
   { label: "日记", english: "Journal", icon: "diary" },
   { label: "便笺", english: "Notes", icon: "note" },
   { label: "提醒", english: "Reminders", icon: "check" },
   { label: "纪念日", english: "Dates", icon: "calendar" },
   { label: "音乐", english: "Music", icon: "music" },
-  { label: "相册", english: "Photos", icon: "image" },
+  { label: "相册", english: "Album", icon: "image" },
   { label: "记忆库", english: "Memory", icon: "library" },
+  { label: "Pandora", english: "Pandora", icon: "box" },
   { label: "设置", english: "Settings", icon: "settings" },
 ];
 type NoteItem = {
@@ -668,6 +700,19 @@ export default function Home() {
     () => true,
     () => false,
   );
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) document.documentElement.dataset.native = "true";
+    if (Capacitor.getPlatform() !== "ios") return;
+    const hideAccessory = () => {
+      if (!Capacitor.isPluginAvailable("Keyboard")) return;
+      void Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(error => {
+        console.warn("Could not hide the keyboard accessory bar", error);
+      });
+    };
+    hideAccessory();
+    document.addEventListener("focusin", hideAccessory);
+    return () => document.removeEventListener("focusin", hideAccessory);
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [desktopNavigation, setDesktopNavigation] = useState(false);
   useEffect(() => {
@@ -687,19 +732,20 @@ export default function Home() {
     setActiveSection(section);
   }, []);
   useMobileViewport();
-  const [profileOpen, setProfileOpen] = useState(false);
+
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
   const [conversationId, setConversationId] = useState(() => latestLocalConversationId());
+  const [watchConversationId, setWatchConversationId] = useLocalDocument("watch-conversation", "watch-together");
   const [focusMessageId, setFocusMessageId] = useState("");
-  const initialProfile = readLocalValue("vesper-local-profile", { userName: "我", agentName: "Vesper", userAvatar: "", agentAvatar: "" });
+  const initialProfile = readLocalValue("vesper-local-profile", { userName: "Vera", agentName: "Rowan", userAvatar: "", agentAvatar: "" });
   const storedAppearance = readLocalValue("vesper-local-appearance", { accent: "#647e94", background: DEFAULT_APP_BACKGROUND });
   const initialAppearance = {
     accent: normalizeNeutralAccent(storedAppearance.accent),
     background: normalizeAppBackground(storedAppearance.background),
   };
-  const [userName, setUserName] = useState(initialProfile.userName);
-  const [agentName, setAgentName] = useState(initialProfile.agentName);
+  const [userName, setUserName] = useState(!initialProfile.userName || initialProfile.userName === "我" ? "Vera" : initialProfile.userName);
+  const [agentName, setAgentName] = useState(!initialProfile.agentName || initialProfile.agentName === "Vesper" ? "Rowan" : initialProfile.agentName);
   const [userAvatar, setUserAvatar] = useState(initialProfile.userAvatar);
   const [agentAvatar, setAgentAvatar] = useState(initialProfile.agentAvatar);
   const [accent, setAccent] = useState(initialAppearance.accent);
@@ -710,6 +756,16 @@ export default function Home() {
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [tracks, setTracks] = usePersistentDocument<Track[]>("music", []);
   const [queue, setQueue] = usePersistentDocument<Track[]>("musicQueue", []);
+  const avatarInput = useRef<HTMLInputElement>(null);
+  const agentAvatarInput = useRef<HTMLInputElement>(null);
+  const changeAvatar = async (file: File | undefined, setter: (photo: string) => void) => {
+    if (!file) return;
+    try {
+      const preview = await localImage(file, 640, 0.88);
+      setter(preview);
+      try { const { url } = await uploadImage(file); setter(url); } catch { /* Keep the local preview for profile sync. */ }
+    } catch { window.alert("Could not read the image. Please select it again."); }
+  };
   const [favorites, setFavorites] = usePersistentDocument<FavoriteItem[]>("favorites", []);
   const [musicControl, setMusicControl] = usePersistentDocument<MusicControl | null>("musicControl", null);
   const [, setMusicPlayback] = usePersistentDocument<MusicPlaybackState>("musicPlayback", {});
@@ -760,7 +816,7 @@ export default function Home() {
       if (target?.url && target.playable !== false) setPlaying(true);
       else {
         setPlaying(false);
-        const message = "这首歌暂时没有可播放音源";
+        const message = "No playable source is available for this song.";
         setMusicToast(message);
         window.setTimeout(() => setMusicToast((current) => current === message ? "" : current), 1800);
       }
@@ -814,7 +870,7 @@ export default function Home() {
   useEffect(() => {
     const refreshLibrary = () => {
       void fetch(apiUrl("/api/state?key=music"), { cache: "no-store", headers: appHeaders() })
-        .then((response) => response.ok ? response.json() : Promise.reject())
+        .then((response) => response.ok ? response.json() as Promise<{ value?: Track[] | null }> : Promise.reject())
         .then((result: { value?: Track[] | null }) => {
           if (!Array.isArray(result.value)) return;
           window.dispatchEvent(new CustomEvent("vesper-document-change", { detail: { key: "music", value: result.value } }));
@@ -826,19 +882,19 @@ export default function Home() {
   }, []);
   const playerAdapter: PlayerAdapter = {
     play: () => {
-      if (!currentTrack?.url || currentTrack.playable === false) return showMusicToast("当前歌曲没有可播放音频");
+      if (!currentTrack?.url || currentTrack.playable === false) return showMusicToast("No playable audio is available for this song.");
       setPlaying(true);
     },
     pause: () => setPlaying(false),
     toggle: () => {
       if (playing) setPlaying(false);
       else {
-        if (!currentTrack?.url || currentTrack.playable === false) return showMusicToast("当前歌曲没有可播放音频");
+        if (!currentTrack?.url || currentTrack.playable === false) return showMusicToast("No playable audio is available for this song.");
         setPlaying(true);
       }
     },
     seek: (time) => {
-      if (!Number.isFinite(playbackDuration) || playbackDuration <= 0) return showMusicToast("音频时长尚未就绪");
+      if (!Number.isFinite(playbackDuration) || playbackDuration <= 0) return showMusicToast("Audio duration is not available yet.");
       const nextTime = Math.max(0, Math.min(playbackDuration, time));
       if (globalPlayer.current) globalPlayer.current.currentTime = nextTime;
       setPlaybackTime(nextTime);
@@ -854,7 +910,7 @@ export default function Home() {
     select: (index) => {
       const track = activeTracks[index];
       if (!track) return;
-      if (!track.url || track.playable === false) return showMusicToast("这首歌没有可播放音频");
+      if (!track.url || track.playable === false) return showMusicToast("No playable audio is available for this song.");
       setTrackIndex(index);
       setPlaying(true);
     },
@@ -910,7 +966,8 @@ export default function Home() {
     const timer = window.setInterval(publish, 10_000);
     return () => window.clearInterval(timer);
   }, [activeTracks.length, currentTrack?.id, playbackDuration, playing, setMusicPlayback]);
-  useAutonomousWake(agentName);
+  const [wakeRequest, setWakeRequest] = useState<string | null>(null);
+
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.has("vesper-pwa")) {
@@ -929,17 +986,46 @@ export default function Home() {
   }, []);
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js?v=27", { scope: "/", updateViaCache: "none" }).then((registration) => registration.update());
+      void navigator.serviceWorker.register("/sw.js?v=29", { scope: "/", updateViaCache: "none" }).then((registration) => registration.update());
     }
   }, []);
   useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const openSection = (event: MessageEvent) => {
+      if (event.data?.type !== 'vesper-open-section') return;
+      if (event.data.section === 'chat' && typeof event.data.conversationId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(event.data.conversationId)) {
+        setVisitedSections(sections => sections.includes('聊天') ? sections : [...sections, '聊天']);
+        setConversationId(event.data.conversationId); setActive('聊天'); return;
+      }
+      if (event.data.section !== 'desire') return;
+      setVisitedSections(sections => sections.includes('欲望') ? sections : [...sections, '欲望']);
+      setActive('欲望');
+    };
+    navigator.serviceWorker.addEventListener('message', openSection);
+    return () => navigator.serviceWorker.removeEventListener('message', openSection);
+  }, []);
+  useEffect(() => {
     const query = new URLSearchParams(window.location.search);
+    if (query.get('section') === 'chat' && /^[a-zA-Z0-9:_-]{1,128}$/.test(query.get('conversation') || '')) {
+      setVisitedSections(sections => sections.includes('聊天') ? sections : [...sections, '聊天']);
+      setConversationId(query.get('conversation')!); setActive('聊天');
+    }
+    if (query.get('section') === 'desire') {
+      setVisitedSections(sections => sections.includes('欲望') ? sections : [...sections, '欲望']);
+      setActive('欲望');
+    }
     const code = query.get("code");
     const state = query.get("state");
     const oauthError = query.get("error");
     const oauthErrorDescription = query.get("error_description");
     const raw = window.sessionStorage.getItem("vesper-mcp-oauth-pending");
     if (!raw || (!code && !oauthError)) return;
+    const returnToDesire = () => {
+      if (window.sessionStorage.getItem("vesper-mcp-return") !== "desire") return;
+      window.sessionStorage.removeItem("vesper-mcp-return");
+      setVisitedSections(sections => sections.includes("欲望") ? sections : [...sections, "欲望"]);
+      setActive("欲望");
+    };
     try {
       const pending = JSON.parse(raw) as {
         serverId: string;
@@ -951,7 +1037,7 @@ export default function Home() {
         redirectUri: string;
         resource?: string;
       };
-      if (pending.state !== state) throw new Error("OAuth state 不匹配");
+      if (pending.state !== state) throw new Error("OAuth state mismatch");
       if (oauthError) {
         const detail = oauthErrorDescription?.trim() || oauthError;
         const key = "vesper-local-external-mcp-servers";
@@ -960,12 +1046,13 @@ export default function Home() {
           key,
           JSON.stringify(servers.map((server) => server.id === pending.serverId ? { ...server, oauthStatus: undefined } : server)),
         );
-        window.sessionStorage.setItem("vesper-mcp-oauth-result", `OAuth 授权未完成：${detail.slice(0, 180)}`);
+        window.sessionStorage.setItem("vesper-mcp-oauth-result", `OAuth authorization incomplete: ${detail.slice(0, 180)}`);
         window.sessionStorage.removeItem("vesper-mcp-oauth-pending");
         window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
+        returnToDesire();
         return;
       }
-      if (!code) throw new Error("OAuth 回调中缺少授权码");
+      if (!code) throw new Error("The OAuth callback is missing an authorization code.");
       void fetch("/api/mcp/oauth", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -974,7 +1061,7 @@ export default function Home() {
         .then(async (response) => {
           const result = (await response.json()) as { accessToken?: string; error?: string };
           if (!response.ok || !result.accessToken)
-            throw new Error(result.error || "OAuth 授权失败");
+            throw new Error(result.error || "OAuth authorization failed");
           const key = "vesper-local-external-mcp-servers";
           const servers = readLocalValue<ExternalMcpEntry[]>(key, []);
           window.localStorage.setItem(
@@ -987,23 +1074,25 @@ export default function Home() {
               ),
             ),
           );
-          window.sessionStorage.setItem("vesper-mcp-oauth-result", "授权成功");
+          window.sessionStorage.setItem("vesper-mcp-oauth-result", "Authorized");
         })
         .catch((reason) =>
           window.sessionStorage.setItem(
             "vesper-mcp-oauth-result",
-            reason instanceof Error ? reason.message : "OAuth 授权失败",
+            reason instanceof Error ? reason.message : "OAuth authorization failed",
           ),
         )
         .finally(() => {
           window.sessionStorage.removeItem("vesper-mcp-oauth-pending");
           window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
+          returnToDesire();
         });
     } catch (reason) {
       window.sessionStorage.setItem(
         "vesper-mcp-oauth-result",
-        reason instanceof Error ? reason.message : "OAuth 授权失败",
+        reason instanceof Error ? reason.message : "OAuth authorization failed",
       );
+      returnToDesire();
     }
   }, []);
   useEffect(() => {
@@ -1109,17 +1198,17 @@ export default function Home() {
     const play = (event: Event) => {
       const trackId = (event as CustomEvent<{ trackId?: string }>).detail?.trackId;
       const index = activeTracks.findIndex((track) => track.id === trackId || track.neteaseId === trackId);
-      if (index < 0) return showToast("这首歌不在当前队列");
-      if (!activeTracks[index].url) return showToast("这首歌暂时没有可播放音源");
+      if (index < 0) return showToast("This song is not in the current queue.");
+      if (!activeTracks[index].url) return showToast("No playable source is available for this song.");
       setTrackIndex(index); setPlaying(true);
     };
     const add = (event: Event) => {
       const trackId = (event as CustomEvent<{ trackId?: string }>).detail?.trackId;
       const track = tracks.find((item) => item.id === trackId || item.neteaseId === trackId);
-      if (!track) return showToast("找不到这首歌");
-      if (activeTracks.some((item) => item.id === track.id || item.neteaseId === track.neteaseId)) return showToast("已经在播放队列");
+      if (!track) return showToast("Song not found");
+      if (activeTracks.some((item) => item.id === track.id || item.neteaseId === track.neteaseId)) return showToast("Already in the queue");
       replaceMusicQueue([...activeTracks, track]);
-      showToast("已加入播放队列");
+      showToast("Added to queue");
     };
     const open = () => setActive("音乐");
     window.addEventListener("vesper-music-play", play);
@@ -1136,13 +1225,12 @@ export default function Home() {
     const next = modes[(modes.indexOf(playMode) + 1) % modes.length];
     setPlayMode(next);
     window.localStorage.setItem("vesper-music-play-mode", next);
-    const labels: Record<MusicPlayMode, string> = { order: "顺序播放", repeat: "列表循环", single: "单曲循环", random: "随机播放" };
+    const labels: Record<MusicPlayMode, string> = { order: "Play in order", repeat: "Repeat queue", single: "Repeat one", random: "Shuffle" };
     setMusicToast(labels[next]);
     window.setTimeout(() => setMusicToast(""), 1600);
   };
   const isPhotoBackground = customBackground.includes("url(");
-  const canvasColor = isPhotoBackground ? DEFAULT_APP_BACKGROUND : customBackground || DEFAULT_APP_BACKGROUND;
-  const defaultCanvas = canvasColor === DEFAULT_APP_BACKGROUND && !isPhotoBackground;
+  const canvasColor = isPhotoBackground ? DEFAULT_CANVAS_COLOR : customBackground || DEFAULT_CANVAS_COLOR;
   // Keep Safari chrome and the overscroll canvas in step with the saved appearance.
   useEffect(() => {
     const root = document.documentElement;
@@ -1160,7 +1248,8 @@ export default function Home() {
   const shellStyle = {
     "--theme-accent": accent,
     backgroundColor: canvasColor,
-    backgroundImage: isPhotoBackground ? customBackground : defaultCanvas ? "var(--vesper-mist)" : "none",
+    backgroundImage: isPhotoBackground ? customBackground : "none",
+    "--vesper-page-background": isPhotoBackground ? customBackground : "none",
   } as CSSProperties;
   const navigateTo = (label: string) => {
     setDrawerOpen(false);
@@ -1207,8 +1296,8 @@ export default function Home() {
         const appearance = docs.appearance?.value as
           { accent?: string; background?: string } | undefined;
         if (profile && !hasLocalProfile) {
-          setUserName(profile.userName || "我");
-          setAgentName(profile.agentName || "Vesper");
+          setUserName(!profile.userName || profile.userName === "我" ? "Vera" : profile.userName);
+          setAgentName(!profile.agentName || profile.agentName === "Vesper" ? "Rowan" : profile.agentName);
           setUserAvatar(profile.userAvatar || "");
           setAgentAvatar(profile.agentAvatar || "");
         }
@@ -1273,6 +1362,9 @@ export default function Home() {
     );
   return (
     <main className="stage" style={shellStyle}>
+      <WindowOpening />
+      <input ref={avatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], setUserAvatar); e.target.value = ""; }} />
+      <input ref={agentAvatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], setAgentAvatar); e.target.value = ""; }} />
       <audio
         ref={globalPlayer}
         src={currentTrack?.url}
@@ -1281,16 +1373,16 @@ export default function Home() {
         onError={() => {
           setPlaying(false);
           setPlaybackDuration(0);
-          showMusicToast("此音频当前无法在网页播放");
+          showMusicToast("This audio cannot be played in the browser.");
         }}
       />
-      <section className="app-shell" style={shellStyle}>
+      <section className="app-shell" style={{ "--theme-accent": accent } as CSSProperties}>
         <header
           className={`${active === "聊天" ? "app-header chat-mode" : active === "音乐" ? "app-header music-mode" : "app-header"}${historyOpen ? " history-host-shift" : ""}`}
         >
           <button
             className="icon-button"
-            aria-label="打开目录"
+            aria-label="Open navigation"
             onClick={() => setDrawerOpen(true)}
           >
             <Icon name="menu" />
@@ -1305,10 +1397,10 @@ export default function Home() {
           ) : active === "聊天" ? (
             <div
               className="chat-identity"
-              aria-label={`${userName} 与 ${agentName}`}
+              aria-label={`${userName} and ${agentName}`}
             >
-              <AvatarMark src={userAvatar} label={userName} kind="user" />
-              <AvatarMark src={agentAvatar} label={agentName} kind="agent" />
+              <button className="identity-avatar" aria-label="Change Vera’s avatar" onClick={() => avatarInput.current?.click()}><AvatarMark src={userAvatar} label={userName} kind="user" /></button>
+              <button className="identity-avatar" aria-label="Change Rowan’s avatar" onClick={() => agentAvatarInput.current?.click()}><AvatarMark src={agentAvatar} label={agentName} kind="agent" /></button>
             </div>
           ) : (
             <h1 className="page-name">{nav.find((item) => item.label === active)?.english || active}</h1>
@@ -1316,23 +1408,23 @@ export default function Home() {
           {active === "聊天" ? (
             <div className="chat-header-actions">
               <button
-                aria-label="新建对话"
+                aria-label="New conversation"
                 onClick={() => {
                   const id = `chat-${Date.now()}-${crypto.randomUUID()}`;
-                  rememberConversation(id, "新对话");
+                  rememberConversation(id, "New conversation");
                   setConversationId(id);
                 }}
               >
                 <Icon name="plus" />
               </button>
               <button
-                aria-label="语音通话"
+                aria-label="Voice call"
                 onClick={() => setVoiceCallOpen(true)}
               >
                 <Icon name="phone" />
               </button>
               <button
-                aria-label="历史聊天记录"
+                aria-label="Chat history"
                 onClick={() => setHistoryOpen(true)}
               >
                 <Icon name="archive" />
@@ -1343,7 +1435,7 @@ export default function Home() {
           ) : (
             <button
               className="avatar-button"
-              onClick={() => setProfileOpen(true)}
+              onClick={() => avatarInput.current?.click()}
             >
               {userAvatar ? (
                 <AvatarMark src={userAvatar} label={userName} kind="user" />
@@ -1357,15 +1449,19 @@ export default function Home() {
         <div className={`scroll-view${section === "音乐" ? " music-scroll-view" : ""}${historyOpen ? " history-host-shift" : ""}`} key={section} hidden={active !== section} data-section={section}>
           {section === "今日" ? (
             <Today
+              active={active === "今日"}
+              onPrevious={() => { if (activeTracks.length) setTrackIndex(index => (index - 1 + activeTracks.length) % activeTracks.length); }}
+              onNext={() => { if (activeTracks.length) setTrackIndex(index => (index + 1) % activeTracks.length); }}
               track={currentTrack}
               playing={playing}
               onToggle={() => setPlaying(!playing)}
-              environment={environment}
               userName={userName}
               onOpenSection={(section) => setActive(section)}
             />
           ) : section === "聊天" ? (
-              <ConnectedChat
+              active === "Pandora" && conversationId === watchConversationId ? null : <ConnectedChat
+                wakeRequest={wakeRequest}
+                onWakeHandled={() => setWakeRequest(null)}
                 key={conversationId}
                 conversationId={conversationId}
                 onSelectConversation={setConversationId}
@@ -1423,11 +1519,15 @@ export default function Home() {
           ) : section === "相册" ? (
             <PhotoAlbum apiUrl={apiUrl} headers={appHeaders} active={active === "相册"} />
           ) : section === "记忆库" ? (
-            <MemoryLibrary />
+            <SharedMemoryLibrary apiUrl={apiUrl} headers={appHeaders} legacy={<MemoryLibrary />} />
+          ) : section === "Pandora" ? (
+            <AppCenter renderReading={() => <InternalReadingRoom />} renderWatch={() => conversationId === watchConversationId && active !== "Pandora" ? null : <ConnectedChat key={watchConversationId} watchMode watchActive={active === "Pandora"} conversationId={watchConversationId} onSelectConversation={setWatchConversationId} agentName={agentName} userName={userName} favorites={favorites} setFavorites={setFavorites} playing={playing} onToggleMusic={() => setPlaying(value => !value)} onNextMusic={() => { if (activeTracks.length) setTrackIndex(index => (index + 1) % activeTracks.length); }} onOpenMusic={() => navigateTo("音乐")} onAddMusicToPlaylist={card => { setMusicPlaylistIntent(card); navigateTo("音乐"); }} />} onDesire={() => navigateTo("欲望")} onWake={() => { setWakeRequest(crypto.randomUUID()); navigateTo("聊天"); }} />
+          ) : section === "欲望" ? (
+            <DesirePanel agentName={agentName} apiUrl={apiUrl} headers={appHeaders} active={active === "欲望"} />
           ) : section === "设置" ? (
             <SettingsPage
+              onOpenSection={navigateTo}
               accent={accent}
-              background={customBackground}
               onAccent={(value) => setAccent(normalizeNeutralAccent(value))}
               onBackground={(value) => setCustomBackground(normalizeAppBackground(value))}
               environment={environment}
@@ -1438,7 +1538,7 @@ export default function Home() {
           )}
         </div>
         ))}
-        <nav className="mobile-navigation" aria-label="常用导航">
+        <nav className="mobile-navigation" aria-label="Navigation">
           {nav.filter(({ label }) => ["今日", "聊天", "音乐", "设置"].includes(label)).map(({ label, english, icon }) => (
             <button key={label} type="button" aria-current={active === label ? "page" : undefined}
               onClick={() => navigateTo(label)}>
@@ -1453,10 +1553,10 @@ export default function Home() {
         >
           <button
             className="scrim"
-            aria-label="关闭目录"
+            aria-label="Close navigation"
             onClick={() => setDrawerOpen(false)}
           />
-          <aside className="drawer" aria-label="主导航">
+          <aside className="drawer" aria-label="Main navigation">
             <div className="drawer-head">
               <div className="drawer-brand">
                 <span className="drawer-app-mark">
@@ -1498,39 +1598,10 @@ export default function Home() {
                 <span>Settings</span>
                 {active === "设置" && <i />}
               </button>
-            <button
-              className="drawer-footer"
-              onClick={() => {
-                setDrawerOpen(false);
-                window.setTimeout(() => setProfileOpen(true), 290);
-              }}
-            >
-              <span className="footer-avatar">{userName.slice(0, 1)}</span>
-              <span>
-                <b>Vesper</b>
-                <small>编辑用户与 Agent 名称</small>
-              </span>
-              <Icon name="chevron" />
-            </button>
+              <SubscriptionUsage active={desktopNavigation || drawerOpen} socketUrl={codexSocketUrl} />
             </div>
           </aside>
         </div>
-        {profileOpen && (
-          <ProfileModal
-            userName={userName}
-            agentName={agentName}
-            userAvatar={userAvatar}
-            agentAvatar={agentAvatar}
-            onSave={(user, agent, userPhoto, agentPhoto) => {
-              setUserName(user || "我");
-              setAgentName(agent || "Vesper");
-              setUserAvatar(userPhoto);
-              setAgentAvatar(agentPhoto);
-              setProfileOpen(false);
-            }}
-            onClose={() => setProfileOpen(false)}
-          />
-        )}{" "}
         {historyOpen && (
           <HistoryModal
             activeId={conversationId}
@@ -1592,7 +1663,7 @@ async function uploadImage(file: File) {
     headers: appHeaders(),
     body: data,
   });
-  if (!response.ok) throw new Error("图片上传失败");
+  if (!response.ok) throw new Error("Image upload failed");
   return (await response.json()) as { key: string; url: string };
 }
 async function localImage(file: File, maxSize = 1200, quality = 0.86) {
@@ -1605,7 +1676,7 @@ async function localImage(file: File, maxSize = 1200, quality = 0.86) {
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("无法读取图片"));
+      reject(new Error("Could not read image"));
     };
     image.src = url;
   });
@@ -1624,7 +1695,7 @@ async function uploadMedia(file: File) {
     headers: appHeaders(),
     body: data,
   });
-  if (!response.ok) throw new Error("附件上传失败");
+  if (!response.ok) throw new Error("Attachment upload failed");
   return (await response.json()) as ChatAttachment;
 }
 async function fileSha256(file: File) {
@@ -1637,11 +1708,14 @@ function usePersistentDocument<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => readLocalValue<T>(storageKey, initial));
   const [ready, setReady] = useState(false);
   const lastSerialized = useRef(
-    typeof window === "undefined" ? "" : window.localStorage.getItem(storageKey) || "",
+    JSON.stringify(readLocalValue<T>(storageKey, initial)),
   );
   useEffect(() => {
     let live = true;
+    let syncing = false;
     const reconcile = async (initialLoad = false) => {
+      if (syncing) return;
+      syncing = true;
       const localRaw = window.localStorage.getItem(storageKey);
       const localMeta = readLocalValue<{ updatedAt?: string }>(metaKey, {});
       try {
@@ -1651,15 +1725,37 @@ function usePersistentDocument<T>(key: string, initial: T) {
         });
         if (!response.ok) throw new Error("sync unavailable");
         const remote = (await response.json()) as { value: T | null; updatedAt?: string };
-        const remoteTime = remote.updatedAt ? Date.parse(remote.updatedAt) : 0;
-        const localTime = localMeta.updatedAt ? Date.parse(localMeta.updatedAt) : 0;
-        if (remote.value !== null && (localRaw === null || (localTime > 0 && remoteTime > localTime))) {
+        if (!live || window.localStorage.getItem(storageKey) !== localRaw) return;
+        // One-time recovery of favorites kept in the old PWA before empty-state sync was fixed.
+        const migrationKey = "vesper-favorites-sync-v2";
+        if (key === "favorites" && !window.localStorage.getItem(migrationKey)) {
+          const localItems = localRaw ? JSON.parse(localRaw) as FavoriteItem[] : [];
+          const remoteItems = Array.isArray(remote.value) ? remote.value as FavoriteItem[] : [];
+          if (Array.isArray(localItems) && localItems.length) {
+            window.localStorage.setItem("vesper-favorites-before-sync-v2", localRaw!);
+            const merged = [...new Map([...remoteItems, ...localItems].map(item => [`${item.conversationId}:${item.messageId}`, item])).values()];
+            const upload = await fetch(apiUrl("/api/state"), { method: "PUT", headers: appHeaders(true), body: JSON.stringify({ key, value: merged }) });
+            if (!upload.ok) throw new Error("favorites recovery pending");
+            const result = await upload.json() as { updatedAt: string };
+            if (!live || window.localStorage.getItem(storageKey) !== localRaw) return;
+            const serialized = JSON.stringify(merged);
+            window.localStorage.setItem(storageKey, serialized);
+            window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt, source: "remote" }));
+            lastSerialized.current = serialized;
+            setValue(merged as T);
+            window.localStorage.setItem(migrationKey, "done");
+            return;
+          }
+          window.localStorage.setItem(migrationKey, "done");
+        }
+        const action = documentSyncAction(localRaw, localMeta.updatedAt, remote.value, remote.updatedAt);
+        if (action === "download") {
           const serialized = JSON.stringify(remote.value);
           lastSerialized.current = serialized;
           window.localStorage.setItem(storageKey, serialized);
           window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: remote.updatedAt, source: "remote" }));
-          if (live) setValue(remote.value);
-        } else if (localRaw !== null && (!remote.updatedAt || localTime === 0)) {
+          if (live) setValue(remote.value as T);
+        } else if (action === "upload" && localRaw !== null) {
           const upload = await fetch(apiUrl("/api/state"), {
             method: "PUT",
             headers: appHeaders(true),
@@ -1667,12 +1763,13 @@ function usePersistentDocument<T>(key: string, initial: T) {
           });
           if (upload.ok) {
             const result = (await upload.json()) as { updatedAt?: string };
-            window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
+            if (window.localStorage.getItem(storageKey) === localRaw) window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
           }
         }
       } catch {
         // Local data remains authoritative while offline or when cloud sync is unavailable.
       } finally {
+        syncing = false;
         if (live && initialLoad) setReady(true);
       }
     };
@@ -1680,11 +1777,13 @@ function usePersistentDocument<T>(key: string, initial: T) {
     const refresh = () => {
       if (document.visibilityState === "visible") void reconcile(false);
     };
+    const refreshTimer = window.setInterval(refresh, 15000);
     window.addEventListener("focus", refresh);
     window.addEventListener("online", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
       live = false;
+      window.clearInterval(refreshTimer);
       window.removeEventListener("focus", refresh);
       window.removeEventListener("online", refresh);
       document.removeEventListener("visibilitychange", refresh);
@@ -1720,7 +1819,7 @@ function usePersistentDocument<T>(key: string, initial: T) {
         .then(async (response) => {
           if (!response.ok) return;
           const result = (await response.json()) as { updatedAt?: string };
-          window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
+          if (window.localStorage.getItem(storageKey) === serialized) window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
         })
         .catch(() => {});
     }, 260);
@@ -1781,129 +1880,26 @@ async function sendAutonomousPush(
   return response.ok;
 }
 
-function useAutonomousWake(agentName: string) {
-  const [preferences] = usePersistentDocument<VesperPreferences>("settings", defaultPreferences);
-  const [, setNotes] = usePersistentDocument<NoteItem[]>("notes", []);
-  useEffect(() => {
-    if (preferences.careFrequency === "off") return;
-    let running = false;
-    const key = "vesper-wake-runtime-v1";
-    const check = async () => {
-      if (running || document.visibilityState !== "visible") return;
-      const now = Date.now();
-      const hour = new Date(now).getHours();
-      if (hour >= 23 || hour < 8) return;
-      const state = readLocalValue(key, {
-        checkedAt: now,
-        cumulative: 0,
-        threshold: wakeThreshold(),
-        lastWakeAt: 0,
-        generation: 0,
-      });
-      const elapsedHours = Math.min(6, Math.max(0, now - state.checkedAt) / 3_600_000);
-      const rate = preferences.careFrequency === "daily" ? 1 / 14 : 1 / 72;
-      const cumulative = state.cumulative + elapsedHours * rate;
-      const minimumGap = preferences.careFrequency === "daily" ? 8 : 36;
-      const gapHours = (now - state.lastWakeAt) / 3_600_000;
-      if (cumulative < state.threshold || gapHours < minimumGap) {
-        window.localStorage.setItem(key, JSON.stringify({ ...state, checkedAt: now, cumulative }));
-        return;
-      }
-      const generation = state.generation + 1;
-      window.localStorage.setItem(key, JSON.stringify({
-        checkedAt: now,
-        cumulative: 0,
-        threshold: wakeThreshold(),
-        lastWakeAt: now,
-        generation,
-      }));
-      running = true;
-      try {
-        const connections = readLocalValue<AiConnectionStore>("vesper-local-ai-connections-v1", {
-          active: "api", api: {}, mcp: {}, cyberboss: {},
-        });
-        if (connections.active === "cyberboss") return;
-        const configured = connections.active === "api"
-          ? Boolean(connections.api.baseUrl && connections.api.apiKey && connections.api.model)
-          : Boolean(connections.mcp.url);
-        if (!configured) return;
-        const response = await fetch("/api/ai", {
-          method: "POST",
-          headers: deviceHeaders(),
-          body: JSON.stringify({
-            mode: connections.active,
-            connection: connections[connections.active],
-            conversationId: "autonomous-wake",
-            messages: [{
-              role: "user",
-              content: "你是 Vesper。现在是一次自主关心机会。请结合当前时段，用一句自然、克制、不重复的中文留下关心，不要提系统、算法或提醒。",
-            }],
-          }),
-        });
-        const result = (await response.json()) as { content?: string };
-        const latest = readLocalValue<typeof state>(key, state);
-        if (!response.ok || !result.content || latest.generation !== generation) return;
-        const text = result.content.trim().slice(0, 240);
-        setNotes((items) => [{
-          id: crypto.randomUUID(),
-          text,
-          kind: "agent",
-          tone: "mist",
-          createdAt: new Date().toISOString(),
-        }, ...items]);
-        const delivered = await sendAutonomousPush(
-          "note",
-          agentName || "Vesper",
-          `给你留了一张便笺：${text}`,
-          "/?view=notes",
-        );
-        if (!delivered && Notification.permission === "granted") {
-          const registration = await navigator.serviceWorker?.ready;
-          await registration?.showNotification(agentName || "Vesper", {
-            body: `给你留了一张便笺：${text}`,
-            tag: `vesper-wake-${generation}`,
-            icon: "/icon-192-20260901-v1.png",
-          });
-        }
-      } finally {
-        running = false;
-      }
-    };
-    void check();
-    const timer = window.setInterval(() => void check(), 60_000);
-    const visible = () => void check();
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [agentName, preferences.careFrequency, setNotes]);
-}
 
 function Today({
+  active, onPrevious, onNext,
   track,
   playing,
   onToggle,
-  environment,
   userName,
   onOpenSection,
 }: {
+  active: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
   track?: Track;
   playing: boolean;
   onToggle: () => void;
-  environment: EnvironmentSnapshot;
   userName: string;
-  onOpenSection: (section: "便笺" | "提醒" | "纪念日" | "音乐" | "日记") => void;
+  onOpenSection: (section: "便笺" | "提醒" | "纪念日" | "音乐" | "日记" | "欲望") => void;
 }) {
   const [notes] = usePersistentDocument<NoteItem[]>("notes", []);
   const [todos, setTodos] = usePersistentDocument<TodoItem[]>("todos", []);
-  const [anniversaries] = usePersistentDocument<AnniversaryItem[]>(
-    "anniversaries",
-    [],
-  );
-  const [diary] = usePersistentDocument<DiaryDocument>("diary", {});
-  const latestDiary = Object.entries(diary).filter(([, entry]) => entry.user?.trim() || entry.agent?.trim()).sort(([a], [b]) => b.localeCompare(a))[0];
-  const diaryPreview = latestDiary ? (latestDiary[1].user?.trim() || latestDiary[1].agent?.trim() || "").split(/\n/)[0] : "留下一点今天的事。";
   const now = new Date();
   const dateText = new Intl.DateTimeFormat("en-US", {
     month: "long",
@@ -1921,19 +1917,14 @@ function Today({
           : hour < 18
             ? "Good afternoon"
             : "Good evening";
-  const weather =
-    environment.permission === "granted" &&
-    environment.temperature !== undefined
-      ? `${Math.round(environment.temperature)}°`
-      : "--°";
   const homeSignal =
     hour < 6
-      ? "夜里慢一点。"
+      ? "Take the night slowly."
       : hour < 11
-        ? "灯还亮着。"
+        ? "The light is still on."
         : hour < 18
-          ? "今天也住在这里。"
-          : "你回来了。";
+          ? "A place for today, too."
+          : "Welcome back.";
   const realNotes = [...notes]
     .filter((note) => note.text.trim().length > 0)
     .sort((left, right) => {
@@ -1943,73 +1934,59 @@ function Today({
         (Number.isFinite(leftTime) ? leftTime : 0);
     });
   const latestNote = realNotes[0];
-  const latestNoteLines = latestNote
-    ? latestNote.text
-        .trim()
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    : [];
-  const latestNoteTitle = latestNoteLines[0] || "";
-  const latestNoteSummary = latestNoteLines.slice(1).join(" ").trim();
   const latestNoteTimestamp = latestNote
-    ? new Intl.DateTimeFormat("zh-CN", {
+    ? new Intl.DateTimeFormat("en-US", {
         month: "numeric",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
       }).format(new Date(latestNote.createdAt))
     : "";
-  const featuredDate = nextAnniversary(anniversaries, now);
-  const featured = featuredDate ? { item: featuredDate, target: anniversaryTarget(featuredDate, now), days: anniversaryDays(featuredDate, now) } : undefined;
-  const pendingTodos = todos.filter((item) => !item.done);
-  const featuredIsPast = featured ? featured.days < 0 : false;
-  const featuredDays = featured ? Math.abs(featured.days) : null;
+  const pendingTodos = todos.filter(item => !item.done);
   return (
     <div className="today-home home-overview home-cards">
       <section className="welcome">
-        <div className="date-row"><span>{dateText}</span><span className="weather-pill"><Icon name="cloud" />{weather}</span></div>
+        <div className="date-row"><span>{dateText}</span></div>
         <h1>{greeting}, {userName}</h1>
         <p className="home-return-signal">{homeSignal}</p>
       </section>
-      <button className="home-letter" onClick={() => onOpenSection("便笺")}>
-        <span className="letter-mark"><Icon name="note" /></span>
-        <span className="letter-copy"><small>最近便笺</small><b>{latestNoteTitle || "今天的第一句话，留在这里。"}</b><span>{latestNoteSummary || (latestNote ? latestNoteTimestamp : "打开便笺，写一点想记住的事。")}</span></span>
-        <Icon name="chevron" />
-      </button>
-      <button className="home-date-hero" onClick={() => onOpenSection("纪念日")}>
-        <span className="home-card-label">{featuredIsPast ? "Days since" : "Next anniversary"}</span>
-        <span className="home-date-number">{featuredDays ?? "—"}<small>{featuredIsPast ? "天过去了" : "天后"}</small><Icon name="calendar" /></span>
-        <strong>{featuredDate?.title || "留一个值得期待的日子"}</strong>
-        <span className="home-date-footer">{featured ? featured.target.toLocaleDateString("zh-CN") : "添加纪念日"}<Icon name="chevron" /></span>
-      </button>
-      <div className="home-quick-grid">
-        <button className="home-stat home-diary" onClick={() => onOpenSection("日记")}>
-          <span className="home-card-label">Diary<Icon name="chevron" /></span>
-          <b>{latestDiary ? latestDiary[0].slice(5).replace("-", ".") : "今天"}</b>
-          <span className="home-diary-preview">{diaryPreview}</span>
-        </button>
+      <div className="home-upper-grid">
+        <HomeDesire active={active} apiUrl={apiUrl} headers={appHeaders} onOpen={() => onOpenSection("欲望")} />
+        <section className="home-usage-card"><SubscriptionUsage active={active} socketUrl={codexSocketUrl} weeklyOnly /></section>
+        <section className="home-notes-card">
+          <button className="home-card-label home-notes-heading" onClick={() => onOpenSection("便笺")}>Notes<Icon name="chevron" /></button>
+          <div className="home-note-scroll" tabIndex={0} role="region" aria-label="Latest note preview">
+            <p>{latestNote?.text || "Leave today’s first words here."}</p>
+            {latestNoteTimestamp && <small>{latestNoteTimestamp}</small>}
+          </div>
+        </section>
+      </div>
+      <div className="home-lower-grid">
       <section className="home-reminders-card">
-        <button className="home-panel-heading" onClick={() => onOpenSection("提醒")}><span className="home-card-label">Little things</span><span>全部提醒<Icon name="chevron" /></span></button>
-        {pendingTodos.slice(0, 1).map((item) => (
+        <button className="home-card-label home-reminders-heading" onClick={() => onOpenSection("提醒")}>Reminders<Icon name="chevron" /></button>
+        {pendingTodos.slice(0, 3).map((item) => (
           <button className="reminder-row" key={item.id} aria-pressed={item.done} onClick={() => setTodos((items) => items.map((x) => x.id === item.id ? { ...x, done: !x.done } : x))}>
             <span className={item.done ? "round-check checked" : "round-check"}>{item.done && <Icon name="check" />}</span>
-            <span className={item.done ? "reminder-copy crossed" : "reminder-copy"}>{item.title}<small>{item.done ? "已完成" : item.due || item.tag}</small></span>
+            <span className={item.done ? "reminder-copy crossed" : "reminder-copy"}>{item.title}<small>{item.done ? "Completed" : item.due || item.tag}</small></span>
           </button>
         ))}
-        {!pendingTodos.length && <p className="home-card-empty">今天想做什么？留一件小事给自己。</p>}
+        {!pendingTodos.length && <p className="home-card-empty">Something you want to do today? Leave yourself a reminder.</p>}
       </section>
-      </div>
       <section className="home-music-card">
-        <button className="home-panel-heading" onClick={() => onOpenSection("音乐")}><span className="home-card-label">Vesper FM</span><span>{playing ? "正在播放" : "一起听"}<Icon name="chevron" /></span></button>
+        <button className="home-panel-heading" onClick={() => onOpenSection("音乐")}><span className="home-card-label">Music</span><span>{playing ? "Now playing" : "Listen together"}<Icon name="chevron" /></span></button>
         {track ? <div className="home-music-content">
           <button className="home-track-link" onClick={() => onOpenSection("音乐")}>
             {track.cover ? <img src={track.cover} alt="" /> : <span className="home-cover-fallback"><Icon name="music" /></span>}
-            <span><strong>{track.title}</strong><small>{track.artist || "未知歌手"}</small></span>
+            <span><strong>{track.title}</strong><small>{track.artist || "Unknown artist"}</small></span>
           </button>
-          <button className="home-play" onClick={onToggle} aria-label={playing ? "暂停播放" : "开始播放"}><Icon name={playing ? "pause" : "play"} /></button>
-        </div> : <button className="home-music-empty" onClick={() => onOpenSection("音乐")}><Icon name="music" /><span>选一首歌，陪你待一会儿。</span></button>}
+          <div className="home-player-controls">
+          <button onClick={onPrevious} aria-label="Previous track"><Icon name="back" /></button>
+          <button className="home-play" onClick={onToggle} aria-label={playing ? "Pause playback" : "Start playback"}><Icon name={playing ? "pause" : "play"} /></button>
+          <button onClick={onNext} aria-label="Next track"><Icon name="forward" /></button>
+          </div>
+        </div> : <button className="home-music-empty" onClick={() => onOpenSection("音乐")}><Icon name="music" /><span>Choose a song to keep you company.</span></button>}
       </section>
+      </div>
     </div>
   );
 }
@@ -2061,7 +2038,7 @@ async function resolveLatestConversationId() {
   }
 }
 
-function rememberConversation(id: string, title = "新对话", messageCount?: number) {
+function rememberConversation(id: string, title = "New conversation", messageCount?: number) {
   if (typeof window === "undefined") return;
   const key = "vesper-local-conversation-index";
   const current = readLocalValue<ConversationSummary[]>(key, []);
@@ -2069,7 +2046,7 @@ function rememberConversation(id: string, title = "新对话", messageCount?: nu
   const next = [
     {
       id,
-      title: title || existing?.title || "新对话",
+      title: title || existing?.title || "New conversation",
       updatedAt: new Date().toISOString(),
       messageCount: messageCount ?? Math.max(1, (existing?.messageCount || 0) + 1),
     },
@@ -2111,7 +2088,7 @@ function HistoryModal({
       if (!response.ok) return;
       const data = await response.json() as { conversations?: ConversationSummary[] };
       setConversations(data.conversations || []);
-    }).catch((reason) => setHistoryError(reason instanceof Error ? reason.message : "旧历史迁移失败"));
+    }).catch((reason) => setHistoryError(reason instanceof Error ? reason.message : "Could not migrate old history"));
     fetch(codexHistoryUrl("/conversations"), {
       headers: codexHistoryHeaders(),
       cache: "no-store",
@@ -2129,18 +2106,25 @@ function HistoryModal({
     String(item.title || "未命名对话").toLowerCase().includes(query.trim().toLowerCase()),
   );
   const remove = async (item: ConversationSummary) => {
-    if (!window.confirm(`删除“${item.title || "未命名对话"}”？此操作无法撤销。`)) return;
+    if (!window.confirm(`Delete “${item.title || "Untitled conversation"}”? This cannot be undone.`)) return;
     const token = deviceToken();
-    if (token) {
+    if (!token) {
+      setHistoryError("Delete failed: this device is not connected to the server");
+      return;
+    }
+    try {
       const response = await fetch(
         codexHistoryUrl(`/conversations/${encodeURIComponent(item.id)}`),
         { method: "DELETE", headers: codexHistoryHeaders() },
       );
-      if (!response.ok && response.status !== 404) {
-        const payload = await response.json().catch(() => ({})) as { error?: string };
-        setHistoryError(payload.error || `删除失败（HTTP ${response.status}）`);
+      const payload = await response.json().catch(() => ({})) as { error?: string; ok?: boolean; permanentlyDeleted?: boolean };
+      if (!response.ok || !payload.ok || !payload.permanentlyDeleted) {
+        setHistoryError(payload.error || `Delete failed (HTTP ${response.status})`);
         return;
       }
+    } catch (reason) {
+      setHistoryError(reason instanceof Error ? reason.message : "Delete failed");
+      return;
     }
     for (const key of Object.keys(window.localStorage)) {
       if ((key.startsWith("vesper-local-chat-") || key.startsWith("vesper-codex-chat-")) && key.endsWith(`-${item.id}`))
@@ -2153,12 +2137,12 @@ function HistoryModal({
     setMenuId("");
   };
   const rename = async (item: ConversationSummary) => {
-    const title = window.prompt("重命名对话", item.title || "对话")?.trim();
+    const title = window.prompt("Rename conversation", item.title || "Conversations")?.trim();
     if (!title || title === item.title) return;
     try {
       await persistCodexConversation(item.id, { title });
     } catch (reason) {
-      setHistoryError(reason instanceof Error ? reason.message : "云端标题同步失败");
+      setHistoryError(reason instanceof Error ? reason.message : "Could not sync the title");
       return;
     }
     const next = conversations.map((entry) => entry.id === item.id ? { ...entry, title, updatedAt: new Date().toISOString() } : entry);
@@ -2168,37 +2152,37 @@ function HistoryModal({
   };
   const nowMs = new Date().getTime();
   const groups = [
-    ["今天", visible.filter((item) => new Date(item.updatedAt).toDateString() === new Date().toDateString())],
+    ["Today", visible.filter((item) => new Date(item.updatedAt).toDateString() === new Date().toDateString())],
     
-    ["过去 7 天", visible.filter((item) => {
+    ["Past 7 days", visible.filter((item) => {
       const age = nowMs - new Date(item.updatedAt).getTime();
       return age >= 86_400_000 && age <= 7 * 86_400_000;
     })],
-    ["更早", visible.filter((item) => nowMs - new Date(item.updatedAt).getTime() > 7 * 86_400_000)],
+    ["Earlier", visible.filter((item) => nowMs - new Date(item.updatedAt).getTime() > 7 * 86_400_000)],
   ] as const;
   const visibleFavorites = favorites.filter((item) => `${item.content} ${item.conversationTitle}`.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <div className="modal-layer history-layer">
       <button className="modal-scrim" onClick={onClose} />
-      <section className="history-modal history-drawer" aria-label="对话导航">
+      <section className="history-modal history-drawer" aria-label="Conversation navigation">
         <header className="history-drawer-head">
-          <div className="history-drawer-title"><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}>对话</button><button className={tab === "favorites" ? "active" : ""} onClick={() => setTab("favorites")}>收藏</button></div>
-          <div className="history-drawer-actions"><button aria-label="搜索" onClick={() => setSearchOpen((value) => !value)}><Icon name="search" /></button><button aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div>
+          <div className="history-drawer-title"><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}>Conversations</button><button className={tab === "favorites" ? "active" : ""} onClick={() => setTab("favorites")}>Favorites</button></div>
+          <div className="history-drawer-actions"><button aria-label="Search" onClick={() => setSearchOpen((value) => !value)}><Icon name="search" /></button><button aria-label="Close" onClick={onClose}><Icon name="close" /></button></div>
         </header>
-        {searchOpen && <label className="history-search compact"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "favorites" ? "搜索收藏" : "搜索对话"} /></label>}
+        {searchOpen && <label className="history-search compact"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "favorites" ? "Search favorites" : "Search conversations"} /></label>}
         {historyError && <div className="history-error" role="alert">{historyError}</div>}
         {tab === "conversations" ? (
           <div className="history-list drawer-list">
-            {groups.map(([label, items]) => items.length ? <section className="history-group" key={label}><h3>{label}</h3>{items.map((item) => <article className={item.id === activeId ? "history-item-row selected" : "history-item-row"} key={item.id}><button className="history-open" onClick={() => onSelect(item.id)}><b>{item.title || "未命名对话"}</b><span>{item.messageCount} 条 · {new Date(item.updatedAt).toLocaleDateString("zh-CN")}</span></button><button className="history-delete" aria-label={`${item.title || "对话"}的更多操作`} aria-expanded={menuId === item.id} onClick={() => setMenuId((current) => current === item.id ? "" : item.id)}><Icon name="more" /></button>{menuId === item.id && <div className="history-item-menu" role="menu"><button role="menuitem" onClick={() => void rename(item)}><Icon name="edit" />重命名</button><button role="menuitem" className="danger" onClick={() => void remove(item)}><Icon name="trash" />删除会话</button></div>}</article>)}</section> : null)}
-            {!visible.length && <EmptyState text="还没有聊天记录。" />}
+            {groups.map(([label, items]) => items.length ? <section className="history-group" key={label}><h3>{label}</h3>{items.map((item) => <article className={item.id === activeId ? "history-item-row selected" : "history-item-row"} key={item.id}><button className="history-open" onClick={() => onSelect(item.id)}><b>{item.title || "Untitled conversation"}</b><span>{item.messageCount}  messages · {new Date(item.updatedAt).toLocaleDateString("en-US")}</span></button><button className="history-delete" aria-label={`More actions for ${item.title || "Conversation"}`} aria-expanded={menuId === item.id} onClick={() => setMenuId((current) => current === item.id ? "" : item.id)}><Icon name="more" /></button>{menuId === item.id && <div className="history-item-menu" role="menu"><button role="menuitem" onClick={() => void rename(item)}><Icon name="edit" />Rename</button><button role="menuitem" className="danger" onClick={() => void remove(item)}><Icon name="trash" />Delete conversation</button></div>}</article>)}</section> : null)}
+            {!visible.length && <EmptyState text="No conversations yet." />}
           </div>
         ) : (
           <div className="history-list drawer-list favorites-list">
-            {visibleFavorites.map((item) => <article className="favorite-row" key={item.id}><button onClick={() => onSelectFavorite(item)}><b>{item.content.split("\n").slice(0, 2).join(" ").slice(0, 100)}</b><span>{item.conversationTitle} · {new Date(item.createdAt).toLocaleDateString("zh-CN")}</span></button><button aria-label="删除收藏" onClick={() => onRemoveFavorite(item.id)}><Icon name="trash" /></button></article>)}
-            {!visibleFavorites.length && <EmptyState text="还没有收藏。" />}
+            {visibleFavorites.map((item) => <article className="favorite-row" key={item.id}><button onClick={() => onSelectFavorite(item)}><b>{item.content.split("\n").slice(0, 2).join(" ").slice(0, 100)}</b><span>{item.conversationTitle} · {new Date(item.createdAt).toLocaleDateString("en-US")}</span></button><button aria-label="Remove favorite" onClick={() => onRemoveFavorite(item.id)}><Icon name="trash" /></button></article>)}
+            {!visibleFavorites.length && <EmptyState text="No favorites yet." />}
           </div>
         )}
-        {tab === "conversations" && <button className="history-new" onClick={() => { const id = `chat-${Date.now()}-${crypto.randomUUID()}`; rememberConversation(id, "新对话"); onSelect(id); }}><Icon name="plus" />新建对话</button>}
+        {tab === "conversations" && <button className="history-new" onClick={() => { const id = `chat-${Date.now()}-${crypto.randomUUID()}`; rememberConversation(id, "New conversation"); onSelect(id); }}><Icon name="plus" />New conversation</button>}
       </section>
     </div>
   );
@@ -2269,7 +2253,7 @@ function VoiceCallModal({
     }
     try {
       if (!ttsSettings.baseUrl || !ttsSettings.apiKey)
-        throw new Error("请先在设置 → Agent 声音中配置 TTS");
+        throw new Error("Configure TTS in Settings → Agent Voice first.");
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2277,7 +2261,7 @@ function VoiceCallModal({
       });
       if (!response.ok) {
         const result = (await response.json()) as { error?: string };
-        throw new Error(result.error || "TTS 请求失败");
+        throw new Error(result.error || "TTS request failed");
       }
       if (generation.current !== id) return;
       stopPlayback();
@@ -2300,14 +2284,14 @@ function VoiceCallModal({
       };
       audio.onerror = () => {
         stopPlayback();
-        setCaption("TTS 音频播放失败");
+        setCaption("Could not play TTS audio");
         stateRef.current = "listening";
         setState("listening");
         restartRecognition();
       };
       await audio.play();
     } catch (reason) {
-      setCaption(reason instanceof Error ? reason.message : "TTS 播放失败");
+      setCaption(reason instanceof Error ? reason.message : "TTS playback failed");
       stateRef.current = "listening";
       setState("listening");
       restartRecognition();
@@ -2329,9 +2313,9 @@ function VoiceCallModal({
           headers: deviceHeaders(),
           body: JSON.stringify({ conversationId, content: clean }),
         });
-        if (!response.ok) throw new Error("AI 运行端暂时没有响应");
+        if (!response.ok) throw new Error("The AI service is not responding.");
         if (generation.current === id) {
-          setCaption("消息已交给 AI 运行端，等待回复");
+          setCaption("Message sent to the AI service. Waiting for a reply.");
           stateRef.current = "listening";
           setState("listening");
           restartRecognition();
@@ -2349,14 +2333,14 @@ function VoiceCallModal({
         }),
       });
       const result = (await response.json()) as { content?: string; error?: string };
-      if (!response.ok) throw new Error(result.error || "语音通话请求失败");
+      if (!response.ok) throw new Error(result.error || "Voice call request failed");
       if (generation.current !== id) return;
-      const answer = result.content || "我在。";
+      const answer = result.content || "I’m here.";
       setCaption(answer);
       void speak(answer, id);
     } catch (reason) {
       if (generation.current !== id) return;
-      setCaption(reason instanceof Error ? reason.message : "语音通话连接失败");
+      setCaption(reason instanceof Error ? reason.message : "Voice call connection failed");
       stateRef.current = "error";
       setState("error");
     }
@@ -2405,9 +2389,9 @@ function VoiceCallModal({
           start: () => void;
           stop: () => void;
         } }).webkitSpeechRecognition;
-      if (!Speech) throw new Error("当前浏览器不支持实时语音识别");
+      if (!Speech) throw new Error("Live speech recognition is not supported in this browser.");
       const session = new Speech();
-      session.lang = "zh-CN";
+      session.lang = "en-US";
       session.continuous = false;
       session.interimResults = true;
       session.onresult = (event) => {
@@ -2436,11 +2420,11 @@ function VoiceCallModal({
       recognition.current = session;
       stateRef.current = "listening";
       setState("listening");
-      setCaption("我在听");
+      setCaption("Listening");
       session.start();
     } catch (reason) {
       setState("error");
-      setCaption(reason instanceof Error ? reason.message : "无法开始通话，请检查麦克风与语音识别权限");
+      setCaption(reason instanceof Error ? reason.message : "Could not start the call. Check microphone and speech recognition permissions.");
     }
   };
   const finish = () => {
@@ -2480,150 +2464,40 @@ function VoiceCallModal({
         <h2>{agentName}</h2>
         <p>
           {["listening", "thinking", "speaking"].includes(state)
-            ? `${state === "listening" ? "我在听" : state === "thinking" ? "正在思考" : "正在回应"} · ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+            ? `${state === "listening" ? "Listening" : state === "thinking" ? "Thinking" : "Responding"} · ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
             : state === "connecting"
-              ? "正在请求麦克风…"
+              ? "Requesting microphone access…"
               : state === "error"
                 ? caption
-                : "通过当前 AI 连接开始语音通话"}
+                : "Start a voice call with the current AI connection"}
         </p>
         {caption && !["idle", "error"].includes(state) && <blockquote>{caption}</blockquote>}
         {state === "idle" || state === "error" ? (
           <button className="call-start" onClick={() => void start()}>
             <Icon name="phone" />
-            开始通话
+            Start call
           </button>
         ) : (
           <div className="call-actions">
-            <button onClick={toggleMute} aria-label={muted ? "打开麦克风" : "静音"}>
+            <button onClick={toggleMute} aria-label={muted ? "Enable microphone" : "Mute"}>
               <Icon name="mic" />
-              <small>{muted ? "取消静音" : "静音"}</small>
+              <small>{muted ? "Unmute" : "Mute"}</small>
             </button>
             <button onClick={() => {
               const next = !speakerRef.current;
               speakerRef.current = next;
               setSpeaker(next);
               if (!next) stopPlayback();
-            }} aria-label="扬声器">
+            }} aria-label="Speaker">
               <Icon name="volume" />
-              <small>{speaker ? "扬声器" : "听筒"}</small>
+              <small>{speaker ? "Speaker" : "Earpiece"}</small>
             </button>
-            <button className="call-end" onClick={finish} aria-label="结束通话">
+            <button className="call-end" onClick={finish} aria-label="End call">
               <Icon name="phone" />
-              <small>挂断</small>
+              <small>End call</small>
             </button>
           </div>
         )}
-      </section>
-    </div>
-  );
-}
-
-function ProfileModal({
-  userName,
-  agentName,
-  userAvatar,
-  agentAvatar,
-  onSave,
-  onClose,
-}: {
-  userName: string;
-  agentName: string;
-  userAvatar: string;
-  agentAvatar: string;
-  onSave: (
-    user: string,
-    agent: string,
-    userPhoto: string,
-    agentPhoto: string,
-  ) => void;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState(userName === "我" ? "" : userName);
-  const [agent, setAgent] = useState(agentName);
-  const [userPhoto, setUserPhoto] = useState(userAvatar);
-  const [agentPhoto, setAgentPhoto] = useState(agentAvatar);
-  const [birthday, setBirthday] = useState("");
-  const loadPhoto = async (
-    file: File | undefined,
-    setter: (value: string) => void,
-  ) => {
-    if (!file) return;
-    const preview = await localImage(file, 640, 0.88);
-    setter(preview);
-    try {
-      const { url } = await uploadImage(file);
-      setter(url);
-    } catch {}
-  };
-  return (
-    <div className="modal-layer profile-layer">
-      <button className="modal-scrim" onClick={onClose} />
-      <section className="profile-modal">
-        <div className="modal-head">
-          <div>
-            <small>USER & AGENT</small>
-            <h2>我的 Vesper</h2>
-          </div>
-          <button onClick={onClose}>
-            <Icon name="close" />
-          </button>
-        </div>
-        <div className="avatar-editor-pair">
-          <label>
-            <AvatarMark src={userPhoto} label={name || "我"} kind="user" />
-            <i>
-              <Icon name="edit" />
-            </i>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => loadPhoto(e.target.files?.[0], setUserPhoto)}
-            />
-            <small>User 头像</small>
-          </label>
-          <label>
-            <AvatarMark src={agentPhoto} label={agent || "V"} kind="agent" />
-            <i>
-              <Icon name="edit" />
-            </i>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => loadPhoto(e.target.files?.[0], setAgentPhoto)}
-            />
-            <small>Agent 头像</small>
-          </label>
-        </div>
-        <label className="profile-field">
-          <span>用户名称</span>
-          <input
-            placeholder="未填写时显示“我”"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <label className="profile-field">
-          <span>Agent 昵称</span>
-          <input value={agent} onChange={(e) => setAgent(e.target.value)} />
-        </label>
-        <label className="profile-field">
-          <span>生日</span>
-          <input
-            type="date"
-            value={birthday}
-            onChange={(e) => setBirthday(e.target.value)}
-          />
-        </label>
-        <p className="profile-note">
-          头像和名称会同步显示在聊天顶部与消息中；生日只用于纪念日和个性化陪伴。
-        </p>
-        <button
-          className="save-profile"
-          onClick={() => onSave(name, agent, userPhoto, agentPhoto)}
-        >
-          保存资料
-        </button>
       </section>
     </div>
   );
@@ -2637,6 +2511,7 @@ type BridgeChatMessage = {
   status: string;
   metadata?: {
     execution?: Execution;
+    wake?: WakeRecord;
     thoughtSummary?: string;
     durationMs?: number;
     tools?: string[];
@@ -2713,7 +2588,7 @@ function LegacyConnectedChat({
     });
   };
   const editMessage = async (item: BridgeChatMessage) => {
-    const content = window.prompt("编辑消息", item.content)?.trim();
+    const content = window.prompt("Edit message", item.content)?.trim();
     if (!content || content === item.content) return;
     if (connections.active === "cyberboss") {
       const response = await fetch(apiUrl("/api/chat"), {
@@ -2722,7 +2597,7 @@ function LegacyConnectedChat({
         body: JSON.stringify({ id: item.id, content }),
       });
       if (!response.ok) {
-        setError("消息编辑失败");
+        setError("Could not edit message");
         return;
       }
       await refresh();
@@ -2749,15 +2624,13 @@ function LegacyConnectedChat({
       setError(
         configured
           ? ""
-          : `请先在设置 → AI 连接中配置${
-              connections.active === "api" ? " API Key" : " MCP"
-            }`,
+          : `Configure ${connections.active === "api" ? "API Key" : "MCP"} in Settings → AI Connection first.`,
       );
       return;
     }
     const token = deviceToken();
     if (!token) {
-      setError("请先在设置 → AI 连接中配置连接方式");
+      setError("Configure a connection in Settings → AI Connection first.");
       return;
     }
     try {
@@ -2768,12 +2641,12 @@ function LegacyConnectedChat({
         cache: "no-store",
         },
       );
-      if (response.status === 401) throw new Error("当前 AI 连接尚未授权");
-      if (!response.ok) throw new Error("暂时无法读取对话");
+      if (response.status === 401) throw new Error("This AI connection is not authorized.");
+      if (!response.ok) throw new Error("Could not load conversation");
       setData((await response.json()) as BridgeSnapshot);
       setError("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "连接失败");
+      setError(reason instanceof Error ? reason.message : "Connection failed");
     }
   };
   const send = async () => {
@@ -2791,7 +2664,7 @@ function LegacyConnectedChat({
           id: crypto.randomUUID(),
           conversationId,
           role: "user",
-          content: content || "附件",
+          content: content || "Attachments",
           status: "delivered",
           metadata: { attachments },
           createdAt,
@@ -2826,7 +2699,7 @@ function LegacyConnectedChat({
           changedDocuments?: Record<string, unknown>;
           error?: string;
         };
-        if (!response.ok) throw new Error(result.error || "AI 连接请求失败");
+        if (!response.ok) throw new Error(result.error || "AI connection request failed");
         for (const [key, value] of Object.entries(result.changedDocuments || {})) {
           window.localStorage.setItem(`vesper-document-${key}`, JSON.stringify(value));
           window.dispatchEvent(new CustomEvent("vesper-document-change", { detail: { key, value } }));
@@ -2835,7 +2708,7 @@ function LegacyConnectedChat({
           id: crypto.randomUUID(),
           conversationId,
           role: "agent",
-          content: result.content || "AI 没有返回内容",
+          content: result.content || "The AI returned no content.",
           status: "delivered",
           metadata: {
             // eslint-disable-next-line react-hooks/purity
@@ -2845,7 +2718,7 @@ function LegacyConnectedChat({
           createdAt: new Date().toISOString(),
         };
         saveLocalMessages([...current, userMessage, agentMessage]);
-        rememberConversation(conversationId, content.slice(0, 28) || "附件");
+        rememberConversation(conversationId, content.slice(0, 28) || "Attachments");
         pending.forEach((item) => URL.revokeObjectURL(item.preview));
         setPending([]);
         setError("");
@@ -2856,20 +2729,20 @@ function LegacyConnectedChat({
         headers: deviceHeaders(),
         body: JSON.stringify({
           conversationId,
-          content: content || (attachments.length ? "附件" : ""),
+          content: content || (attachments.length ? "Attachments" : ""),
           attachments,
         }),
       });
       if (response.status === 401)
-        throw new Error("请先在设置 → AI 连接中完成授权");
-      if (!response.ok) throw new Error("消息发送失败");
-      rememberConversation(conversationId, content.slice(0, 28) || "附件");
+        throw new Error("Complete authorization in Settings → AI Connection first.");
+      if (!response.ok) throw new Error("Could not send message");
+      rememberConversation(conversationId, content.slice(0, 28) || "Attachments");
       pending.forEach((item) => URL.revokeObjectURL(item.preview));
       setPending([]);
       await refresh();
     } catch (reason) {
       setDraft(content);
-      setError(reason instanceof Error ? reason.message : "消息发送失败");
+      setError(reason instanceof Error ? reason.message : "Could not send message");
     } finally {
       setBusy(false);
     }
@@ -2893,7 +2766,7 @@ function LegacyConnectedChat({
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [data.messages.length]);
   const stamp = (value: string) =>
-    new Intl.DateTimeFormat("zh-CN", {
+    new Intl.DateTimeFormat("en-US", {
       year: "numeric",
       month: "long",
       day: "numeric",
@@ -2945,18 +2818,18 @@ function LegacyConnectedChat({
         }
       ).webkitSpeechRecognition;
     if (!Speech) {
-      setError("当前浏览器不支持语音转文字");
+      setError("Speech-to-text is not supported in this browser.");
       return;
     }
     const recognition = new Speech();
-    recognition.lang = "zh-CN";
+    recognition.lang = "en-US";
     recognition.interimResults = false;
     recognition.onresult = (event) =>
       setDraft((value) => `${value}${value ? " " : ""}${event.results[0][0].transcript}`);
     recognition.onend = () => setListening(false);
     recognition.onerror = () => {
       setListening(false);
-      setError("语音识别失败，请检查麦克风权限");
+      setError("Speech recognition failed. Check microphone permission.");
     };
     setListening(true);
     recognition.start();
@@ -2995,11 +2868,11 @@ function LegacyConnectedChat({
               headers: deviceHeaders(),
               body: JSON.stringify({
                 conversationId,
-                content: "语音消息",
+                content: "Voice message",
                 attachments: [attachment],
               }),
             });
-            if (!response.ok) throw new Error("语音消息发送失败");
+            if (!response.ok) throw new Error("Could not send voice message");
             URL.revokeObjectURL(preview);
             setPending((current) =>
               current.filter((item) => item.preview !== preview),
@@ -3007,14 +2880,14 @@ function LegacyConnectedChat({
             await refresh();
           })
           .catch((reason) =>
-            setError(reason instanceof Error ? reason.message : "语音消息发送失败"),
+            setError(reason instanceof Error ? reason.message : "Could not send voice message"),
           )
           .finally(() => setBusy(false));
       };
       mediaRecorder.start();
       setRecording(true);
     } catch {
-      setError("无法录音，请检查麦克风权限");
+      setError("Could not record. Check microphone permission.");
     }
   };
   return (
@@ -3022,18 +2895,18 @@ function LegacyConnectedChat({
       <div className="bridge-presence">
         <i className={data.bridge.online ? "online" : ""} />
         <span>
-          {data.bridge.online ? "AI 运行端已连接" : "AI 运行端离线"}
+          {data.bridge.online ? "AI service connected" : "AI service offline"}
         </span>
       </div>
       <div className="chat-stream">
         {!data.messages.length && (
           <div className="chat-empty">
             <Icon name="chat" />
-            <b>{error || "还没有对话"}</b>
+            <b>{error || "No conversation yet"}</b>
             <span>
               {error
-                ? "前往设置 → AI 连接"
-                : "从这里开始与 Vesper 对话"}
+                ? "Go to Settings → AI Connection"
+                : "Start a conversation with Rowan here"}
             </span>
           </div>
         )}
@@ -3052,8 +2925,8 @@ function LegacyConnectedChat({
                       <Icon name="clock" />
                       <span>
                         {item.metadata.durationMs
-                          ? `思考了 ${Math.max(1, Math.round(item.metadata.durationMs / 1000))} 秒`
-                          : "查看过程摘要"}
+                          ? `Thought for ${Math.max(1, Math.round(item.metadata.durationMs / 1000))}s`
+                          : "View activity summary"}
                       </span>
                       <Icon name="chevron" />
                     </button>
@@ -3079,9 +2952,9 @@ function LegacyConnectedChat({
           ),
         )}
         {busy && (
-          <div className="agent-typing" aria-label={`${agentName} 正在输入`}>
+          <div className="agent-typing" aria-label={`${agentName} is typing`}>
             <AvatarMark src={agentAvatar} label={agentName} kind="agent" />
-            <div><i /><i /><i /><span>{agentName} 正在输入</span></div>
+            <div><i /><i /><i /><span>{agentName} Typing</span></div>
           </div>
         )}
         <div ref={streamEnd} />
@@ -3101,7 +2974,7 @@ function LegacyConnectedChat({
                   <span><Icon name="archive" />{item.file.name}</span>
                 )}
                 <button
-                  aria-label="移除附件"
+                  aria-label="Remove attachment"
                   onClick={() =>
                     setPending((current) =>
                       current.filter((_, itemIndex) => itemIndex !== index),
@@ -3115,7 +2988,7 @@ function LegacyConnectedChat({
           </div>
         )}
         <textarea
-          placeholder={`回复 ${agentName}`}
+          placeholder={`Reply to ${agentName}`}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -3126,7 +2999,7 @@ function LegacyConnectedChat({
           }}
         />
         <div className="compose-actions">
-          <button aria-label="添加附件" onClick={() => fileInput.current?.click()}>
+          <button aria-label="Add attachment" onClick={() => fileInput.current?.click()}>
             <Icon name="plus" />
           </button>
           <input
@@ -3140,7 +3013,7 @@ function LegacyConnectedChat({
               event.target.value = "";
             }}
           />
-          <label className="compose-connection" aria-label="选择 AI 连接方式">
+          <label className="compose-connection" aria-label="Choose AI connection">
             <i className={`connection-dot ${connections.active}`} />
             <select
               value={connections.active}
@@ -3158,10 +3031,10 @@ function LegacyConnectedChat({
             </select>
             <Icon name="chevron" />
           </label>
-          <span>{busy ? "发送中…" : recording ? "录音中，再点一次结束" : ""}</span>
+          <span>{busy ? "Sending…" : recording ? "Recording. Tap again to stop." : ""}</span>
           <button
             className={listening ? "active" : ""}
-            aria-label="语音转文字"
+            aria-label="Speech-to-text"
             onClick={startStt}
           >
             <Icon name="mic" />
@@ -3169,7 +3042,7 @@ function LegacyConnectedChat({
           {draft.trim() || pending.length ? (
             <button
               className="send-message-button"
-              aria-label="发送消息"
+              aria-label="Send message"
               onClick={() => void send()}
             >
               <Icon name="send" />
@@ -3177,7 +3050,7 @@ function LegacyConnectedChat({
           ) : (
             <button
               className={recording ? "voice recording" : "voice"}
-              aria-label={recording ? "结束并发送语音" : "发送语音"}
+              aria-label={recording ? "Stop and send recording" : "Send voice message"}
               onClick={() => void toggleVoiceMessage()}
             >
               <i />
@@ -3192,12 +3065,12 @@ function LegacyConnectedChat({
         <div className="thought-sheet-layer">
           <button
             className="thought-scrim"
-            aria-label="关闭过程摘要"
+            aria-label="Close activity summary"
             onClick={() => setThought(null)}
           />
           <section className="thought-sheet">
             <div className="thought-sheet-head">
-              <button aria-label="关闭" onClick={() => setThought(null)}>
+              <button aria-label="Close" onClick={() => setThought(null)}>
                 <Icon name="close" />
               </button>
               <h2>Thought process</h2>
@@ -3261,7 +3134,7 @@ function isVesperInternalContextText(value: unknown) {
 }
 
 function vesperDeveloperInstructions(memoryBackground = "") {
-  return [VESPER_CONVERSATIONAL_STYLE, memoryBackground.trim()].filter(Boolean).join("\n\n");
+  return [VESPER_CONVERSATIONAL_STYLE, VESPER_DESIRE_INSTRUCTIONS, memoryBackground.trim()].filter(Boolean).join("\n\n");
 }
 
 const CODEX_ASSISTANT_ITEM_TYPES = new Set(["agentMessage", "assistantMessage", "outputMessage"]);
@@ -3455,7 +3328,7 @@ async function removeLeakedInternalHistoryMessages(conversationId: string, messa
         threadId: item.metadata?.threadId || null,
       }),
     });
-    if (!response.ok) throw new Error("无法清理内部上下文记录");
+    if (!response.ok) throw new Error("Could not clear internal context records");
   }));
 }
 
@@ -3485,12 +3358,12 @@ function migrateLegacyHistory() {
       const list = await listResponse.json() as { conversations?: ConversationSummary[] };
       for (const summary of list.conversations || []) {
         const detail = await fetch(apiUrl(`/api/chat?conversationId=${encodeURIComponent(summary.id)}`), { headers: deviceHeaders(), cache: "no-store" });
-        if (!detail.ok) throw new Error(`旧 D1 会话 ${summary.id} 读取失败`);
+        if (!detail.ok) throw new Error(`Could not load old D1 conversation ${summary.id}`);
         const payload = await detail.json() as { messages?: BridgeChatMessage[] };
         ensureConversation(summary.id, summary.title, summary.updatedAt).messages.push(...(payload.messages || []).map((message) => ({ ...message, source: "legacy-vesper" as const })));
       }
     } else if (listResponse.status !== 404) {
-      throw new Error("旧 D1 历史读取失败");
+      throw new Error("Could not load old D1 history");
     }
 
     for (const key of Object.keys(window.localStorage)) {
@@ -3563,8 +3436,8 @@ async function videoPoster(file: File) {
 
 function StickerImage({ sticker, className = "" }: { sticker: StickerMessageData; className?: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <div className={`sticker-image-placeholder ${className}`} role="img" aria-label="表情包已不可用"><Icon name="sticker" /><span>表情包已不可用</span></div>;
-  return <img className={`sticker-image ${className}`} src={sticker.url} alt={sticker.alt || "表情包"} loading="lazy" onError={() => setFailed(true)} />;
+  if (failed) return <div className={`sticker-image-placeholder ${className}`} role="img" aria-label="Sticker no longer available"><Icon name="sticker" /><span>Sticker no longer available</span></div>;
+  return <img className={`sticker-image ${className}`} src={sticker.url} alt={sticker.alt || "Stickers"} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function StickerPickerSheet({ open, onClose, onSelect, onManage }: { open: boolean; onClose: () => void; onSelect: (sticker: StickerCatalogItem) => void; onManage: () => void }) {
@@ -3584,19 +3457,19 @@ function StickerPickerSheet({ open, onClose, onSelect, onManage }: { open: boole
       if (category) search.set("category", category);
       const response = await fetch(apiUrl(`/api/stickers?${search}`), { headers: appHeaders(), cache: "no-store" });
       const payload = await response.json().catch(() => ({})) as { stickers?: StickerCatalogItem[]; categories?: StickerCategoryItem[]; error?: string };
-      if (!response.ok) throw new Error(payload.error || "无法读取表情包");
+      if (!response.ok) throw new Error(payload.error || "Could not load stickers");
       setStickers(payload.stickers || []); setCategories(payload.categories || []);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "无法读取表情包"); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load stickers"); }
   };
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [open, view, category]);
   useEffect(() => { if (!open) return; const timer = window.setTimeout(() => void load(), 220); return () => window.clearTimeout(timer); }, [query]);
   if (!open) return null;
-  return <div className="sticker-sheet-layer" role="presentation"><button className="sticker-sheet-scrim" aria-label="关闭表情包" onClick={onClose} /><section className="sticker-sheet" role="dialog" aria-modal="true" aria-label="表情包">
+  return <div className="sticker-sheet-layer" role="presentation"><button className="sticker-sheet-scrim" aria-label="Close stickers" onClick={onClose} /><section className="sticker-sheet" role="dialog" aria-modal="true" aria-label="Stickers">
     <div className="sticker-sheet-handle" />
-    <header><div><h2>表情包</h2><p>只发送给这段对话</p></div><button className="sticker-manage-trigger" onClick={onManage}>管理</button><button className="sticker-close" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></header>
-    <div className="sticker-picker-controls"><label><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索表情或场景" /></label><div className="sticker-picker-tabs"><button className={view === "recent" ? "active" : ""} onClick={() => setView("recent")}>最近</button><button className={view === "favorites" ? "active" : ""} onClick={() => setView("favorites")}>收藏</button><button className={view === "all" ? "active" : ""} onClick={() => setView("all")}>全部</button></div></div>
-    {categories.length > 0 && <div className="sticker-category-strip"><button className={!category ? "active" : ""} onClick={() => setCategory("")}>全部</button>{categories.map((item) => <button key={item.id} className={category === item.id ? "active" : ""} onClick={() => setCategory(item.id)}>{item.name}</button>)}</div>}
-    {error ? <p className="sticker-sheet-error">{error}</p> : stickers.length ? <div className="sticker-grid">{stickers.map((sticker) => <button key={sticker.assetId} className="sticker-grid-item" title={sticker.description || sticker.name || "表情包"} onClick={() => onSelect(sticker)}><StickerImage sticker={sticker} /><span>{sticker.description || sticker.category || "表情包"}</span></button>)}</div> : <div className="sticker-empty"><Icon name="sticker" /><p>这里还没有表情包。</p><button onClick={onManage}>去添加</button></div>}
+    <header><div><h2>Stickers</h2><p>Send only to this conversation</p></div><button className="sticker-manage-trigger" onClick={onManage}>Manage</button><button className="sticker-close" aria-label="Close" onClick={onClose}><Icon name="close" /></button></header>
+    <div className="sticker-picker-controls"><label><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search stickers or situations" /></label><div className="sticker-picker-tabs"><button className={view === "recent" ? "active" : ""} onClick={() => setView("recent")}>Recent</button><button className={view === "favorites" ? "active" : ""} onClick={() => setView("favorites")}>Favorites</button><button className={view === "all" ? "active" : ""} onClick={() => setView("all")}>All</button></div></div>
+    {categories.length > 0 && <div className="sticker-category-strip"><button className={!category ? "active" : ""} onClick={() => setCategory("")}>All</button>{categories.map((item) => <button key={item.id} className={category === item.id ? "active" : ""} onClick={() => setCategory(item.id)}>{item.name}</button>)}</div>}
+    {error ? <p className="sticker-sheet-error">{error}</p> : stickers.length ? <div className="sticker-grid">{stickers.map((sticker) => <button key={sticker.assetId} className="sticker-grid-item" title={sticker.description || sticker.name || "Stickers"} onClick={() => onSelect(sticker)}><StickerImage sticker={sticker} /><span>{sticker.description || sticker.category || "Stickers"}</span></button>)}</div> : <div className="sticker-empty"><Icon name="sticker" /><p>No stickers here yet.</p><button onClick={onManage}>Add stickers</button></div>}
   </section></div>;
 }
 
@@ -3608,32 +3481,32 @@ function StickerManagerModal({ open, onClose }: { open: boolean; onClose: () => 
     if (!open) return;
     try { const [catalog, settings] = await Promise.all([fetch(apiUrl("/api/stickers?view=all"), { headers: appHeaders(), cache: "no-store" }), fetch(apiUrl("/api/stickers/settings"), { headers: appHeaders(), cache: "no-store" })]);
       const catalogData = await catalog.json() as { stickers?: StickerCatalogItem[]; categories?: StickerCategoryItem[]; error?: string }; const settingsData = await settings.json().catch(() => ({})) as { settings?: { enabled?: boolean; visionAvailable?: boolean } };
-      if (!catalog.ok) throw new Error(catalogData.error || "无法读取表情包"); setStickers(catalogData.stickers || []); setCategories(catalogData.categories || []); setAutoCollect(Boolean(settingsData.settings?.enabled)); setVisionAvailable(Boolean(settingsData.settings?.visionAvailable));
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "无法读取表情包"); }
+      if (!catalog.ok) throw new Error(catalogData.error || "Could not load stickers"); setStickers(catalogData.stickers || []); setCategories(catalogData.categories || []); setAutoCollect(Boolean(settingsData.settings?.enabled)); setVisionAvailable(Boolean(settingsData.settings?.visionAvailable));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load stickers"); }
   };
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [open]);
   const selectSticker = (sticker: StickerCatalogItem | null) => { setSelected(sticker); setName(sticker?.name || ""); setDescription(sticker?.description || ""); setCategoryId(sticker?.categoryId || ""); };
-  const upload = async (files: FileList | File[]) => { const list = Array.from(files); if (!list.length) return; setBusy(true); setError(""); try { for (const file of list) { const form = new FormData(); form.append("file", file); if (categoryId) form.append("categoryId", categoryId); const response = await fetch(apiUrl("/api/stickers"), { method: "POST", headers: appHeaders(), body: form }); const payload = await response.json().catch(() => ({})) as { error?: string }; if (!response.ok) throw new Error(payload.error || `${file.name} 上传失败`); } await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "上传失败"); } finally { setBusy(false); } };
-  const save = async () => { if (!selected) return; setBusy(true); try { const response = await fetch(apiUrl(`/api/stickers/${encodeURIComponent(selected.assetId)}`), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ name, description, categoryId: categoryId || null }) }); const payload = await response.json().catch(() => ({})) as { sticker?: StickerCatalogItem; error?: string }; if (!response.ok) throw new Error(payload.error || "保存失败"); selectSticker(payload.sticker || null); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "保存失败"); } finally { setBusy(false); } };
-  const remove = async () => { if (!selected || !window.confirm("删除这张表情包？聊天历史中的旧消息会显示为不可用占位。")) return; setBusy(true); try { const response = await fetch(apiUrl(`/api/stickers/${encodeURIComponent(selected.assetId)}`), { method: "DELETE", headers: appHeaders(true) }); const payload = await response.json().catch(() => ({})) as { error?: string }; if (!response.ok) throw new Error(payload.error || "删除失败"); selectSticker(null); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "删除失败"); } finally { setBusy(false); } };
-  const favorite = async () => { if (!selected) return; const response = await fetch(apiUrl(`/api/stickers/${encodeURIComponent(selected.assetId)}`), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ favorite: !selected.favorite }) }); const payload = await response.json().catch(() => ({})) as { sticker?: StickerCatalogItem; error?: string }; if (!response.ok) return setError(payload.error || "收藏失败"); selectSticker(payload.sticker || null); await load(); };
-  const createCategory = async () => { const name = window.prompt("新分类名称")?.trim(); if (!name) return; const response = await fetch(apiUrl("/api/stickers/categories"), { method: "POST", headers: appHeaders(true), body: JSON.stringify({ name }) }); const payload = await response.json().catch(() => ({})) as { category?: StickerCategoryItem; error?: string }; if (!response.ok) return setError(payload.error || "无法创建分类"); await load(); if (payload.category) setCategoryId(payload.category.id); };
-  const editCategory = async () => { const current = categories.find((item) => item.id === categoryId); if (!current) return setError("先选择一个分类"); const nextName = window.prompt("分类名称", current.name)?.trim(); if (!nextName) return; const description = window.prompt("分类说明（可留空）", current.description); if (description === null) return; const response = await fetch(apiUrl(`/api/stickers/categories/${encodeURIComponent(current.id)}`), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ name: nextName, description }) }); const payload = await response.json().catch(() => ({})) as { error?: string }; if (!response.ok) return setError(payload.error || "无法编辑分类"); await load(); };
-  const setCollection = async (enabled: boolean) => { const response = await fetch(apiUrl("/api/stickers/settings"), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ enabled }) }); const payload = await response.json().catch(() => ({})) as { settings?: { enabled?: boolean }; error?: string }; if (!response.ok) return setError(payload.error || "设置失败"); setAutoCollect(Boolean(payload.settings?.enabled)); };
+  const upload = async (files: FileList | File[]) => { const list = Array.from(files); if (!list.length) return; setBusy(true); setError(""); try { for (const file of list) { const form = new FormData(); form.append("file", file); if (categoryId) form.append("categoryId", categoryId); const response = await fetch(apiUrl("/api/stickers"), { method: "POST", headers: appHeaders(), body: form }); const payload = await response.json().catch(() => ({})) as { error?: string }; if (!response.ok) throw new Error(payload.error || `${file.name} upload failed`); } await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "Upload failed"); } finally { setBusy(false); } };
+  const save = async () => { if (!selected) return; setBusy(true); try { const response = await fetch(apiUrl(`/api/stickers/${encodeURIComponent(selected.assetId)}`), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ name, description, categoryId: categoryId || null }) }); const payload = await response.json().catch(() => ({})) as { sticker?: StickerCatalogItem; error?: string }; if (!response.ok) throw new Error(payload.error || "Save failed"); selectSticker(payload.sticker || null); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "Save failed"); } finally { setBusy(false); } };
+  const remove = async () => { if (!selected || !window.confirm("Delete this sticker? Existing messages will show an unavailable placeholder.")) return; setBusy(true); try { const response = await fetch(apiUrl(`/api/stickers/${encodeURIComponent(selected.assetId)}`), { method: "DELETE", headers: appHeaders(true) }); const payload = await response.json().catch(() => ({})) as { error?: string }; if (!response.ok) throw new Error(payload.error || "Delete failed"); selectSticker(null); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : "Delete failed"); } finally { setBusy(false); } };
+  const favorite = async () => { if (!selected) return; const response = await fetch(apiUrl(`/api/stickers/${encodeURIComponent(selected.assetId)}`), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ favorite: !selected.favorite }) }); const payload = await response.json().catch(() => ({})) as { sticker?: StickerCatalogItem; error?: string }; if (!response.ok) return setError(payload.error || "Could not save favorite"); selectSticker(payload.sticker || null); await load(); };
+  const createCategory = async () => { const name = window.prompt("New category name")?.trim(); if (!name) return; const response = await fetch(apiUrl("/api/stickers/categories"), { method: "POST", headers: appHeaders(true), body: JSON.stringify({ name }) }); const payload = await response.json().catch(() => ({})) as { category?: StickerCategoryItem; error?: string }; if (!response.ok) return setError(payload.error || "Could not create category"); await load(); if (payload.category) setCategoryId(payload.category.id); };
+  const editCategory = async () => { const current = categories.find((item) => item.id === categoryId); if (!current) return setError("Select a category first"); const nextName = window.prompt("Category name", current.name)?.trim(); if (!nextName) return; const description = window.prompt("Category description (optional)", current.description); if (description === null) return; const response = await fetch(apiUrl(`/api/stickers/categories/${encodeURIComponent(current.id)}`), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ name: nextName, description }) }); const payload = await response.json().catch(() => ({})) as { error?: string }; if (!response.ok) return setError(payload.error || "Could not edit category"); await load(); };
+  const setCollection = async (enabled: boolean) => { const response = await fetch(apiUrl("/api/stickers/settings"), { method: "PATCH", headers: appHeaders(true), body: JSON.stringify({ enabled }) }); const payload = await response.json().catch(() => ({})) as { settings?: { enabled?: boolean }; error?: string }; if (!response.ok) return setError(payload.error || "Could not save setting"); setAutoCollect(Boolean(payload.settings?.enabled)); };
   if (!open) return null;
-  return <div className="sticker-manager-layer" role="presentation"><button className="sticker-sheet-scrim" aria-label="关闭表情包管理" onClick={onClose} /><section className="sticker-manager" role="dialog" aria-modal="true" aria-label="管理表情包" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files); }}>
-    <header><div><p>VERA&apos;S STICKERS</p><h2>管理表情包</h2></div><button className="sticker-close" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></header>
-    <div className="sticker-manager-upload"><input ref={uploadRef} hidden type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} /><button onClick={() => uploadRef.current?.click()} disabled={busy}><Icon name="upload" />{busy ? "正在保存…" : "添加图片"}</button><span>可拖进 PNG、JPG、GIF 或 WebP，单张不超过 12MB。</span></div>
-    <div className="sticker-manager-category"><span>分类</span><div>{categories.map((item) => <button key={item.id} className={categoryId === item.id ? "active" : ""} onClick={() => setCategoryId(item.id)}>{item.name}</button>)}<button onClick={createCategory}>＋ 新建</button><button onClick={editCategory}>编辑当前</button></div></div>
-    <label className="sticker-collect-toggle"><span><b>自动收集聊天图片</b><small>{visionAvailable ? "仅在识别为表情包后保存，可随时关闭。" : "需要在服务端配置视觉识别后才能开启；不会默认保存普通照片。"}</small></span><input type="checkbox" checked={autoCollect} disabled={!visionAvailable} onChange={(event) => void setCollection(event.target.checked)} /></label>
+  return <div className="sticker-manager-layer" role="presentation"><button className="sticker-sheet-scrim" aria-label="Close sticker manager" onClick={onClose} /><section className="sticker-manager" role="dialog" aria-modal="true" aria-label="Manage stickers" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files); }}>
+    <header><div><p>VERA&apos;S STICKERS</p><h2>Manage stickers</h2></div><button className="sticker-close" aria-label="Close" onClick={onClose}><Icon name="close" /></button></header>
+    <div className="sticker-manager-upload"><input ref={uploadRef} hidden type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { if (event.target.files) void upload(event.target.files); event.target.value = ""; }} /><button onClick={() => uploadRef.current?.click()} disabled={busy}><Icon name="upload" />{busy ? "Saving…" : "Add images"}</button><span>Drop a PNG, JPG, GIF or WebP here, up to 12 MB each.</span></div>
+    <div className="sticker-manager-category"><span>Category</span><div>{categories.map((item) => <button key={item.id} className={categoryId === item.id ? "active" : ""} onClick={() => setCategoryId(item.id)}>{item.name}</button>)}<button onClick={createCategory}>＋ New</button><button onClick={editCategory}>Edit selected</button></div></div>
+    <label className="sticker-collect-toggle"><span><b>Collect chat stickers automatically</b><small>{visionAvailable ? "Only images identified as stickers are saved. You can turn this off anytime." : "Enable visual recognition on the server first. Regular photos are not saved automatically."}</small></span><input type="checkbox" checked={autoCollect} disabled={!visionAvailable} onChange={(event) => void setCollection(event.target.checked)} /></label>
     {error && <p className="sticker-sheet-error">{error}</p>}
-    <div className="sticker-manager-content"><div className="sticker-manager-grid">{stickers.map((sticker) => <button key={sticker.assetId} className={selected?.assetId === sticker.assetId ? "selected" : ""} onClick={() => selectSticker(sticker)}><StickerImage sticker={sticker} /><i>{sticker.favorite ? "★" : ""}</i></button>)}</div>{selected && <aside className="sticker-detail"><StickerImage sticker={selected} /><label>名称<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><label>使用场景<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={280} placeholder="例如：害羞地答应、晚安、撒娇" /></label><label>分类<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">未分类</option>{categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div><button onClick={() => void favorite()}>{selected.favorite ? "取消收藏" : "收藏"}</button><button onClick={() => void save()} disabled={busy}>保存</button><button className="danger" onClick={() => void remove()} disabled={busy}>删除</button></div></aside>}</div>
+    <div className="sticker-manager-content"><div className="sticker-manager-grid">{stickers.map((sticker) => <button key={sticker.assetId} className={selected?.assetId === sticker.assetId ? "selected" : ""} onClick={() => selectSticker(sticker)}><StickerImage sticker={sticker} /><i>{sticker.favorite ? "★" : ""}</i></button>)}</div>{selected && <aside className="sticker-detail"><StickerImage sticker={selected} /><label>Name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><label>When to use<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={280} placeholder="For example: shy agreement, goodnight, affection" /></label><label>Category<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Uncategorized</option>{categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div><button onClick={() => void favorite()}>{selected.favorite ? "Remove favorite" : "Favorites"}</button><button onClick={() => void save()} disabled={busy}>Save</button><button className="danger" onClick={() => void remove()} disabled={busy}>Delete</button></div></aside>}</div>
   </section></div>;
 }
 
 function formatTurnTimestamp(value: string) {
   const timestamp = visibleMessageTimestamp(value);
-  if (!Number.isFinite(timestamp)) return "时间未知";
+  if (!Number.isFinite(timestamp)) return "Unknown time";
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Shanghai", month: "numeric", day: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
@@ -3685,8 +3558,8 @@ function CodexChatMessage({
   const assistant = item.role === "agent";
   const timestamp = visibleMessageTimestamp(item.createdAt);
   const stamp = Number.isFinite(timestamp)
-    ? new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp))
-    : "时间未知";
+    ? new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp))
+    : "Unknown time";
   const status = item.metadata?.turnStatus;
   const statusText = status === "thinking" ? "Thinking…" : status === "tool" ? "Using a tool…" : status === "error" ? "Failed" : "";
   const statusLabel = formatTurnTimestamp(item.createdAt);
@@ -3711,10 +3584,10 @@ function CodexChatMessage({
       </div>}
       {!attachmentOnly && item.status !== "streaming" && !(assistant && turnInProgress) && <div className="message-actions">
         {!assistant && <time dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined}>{stamp}</time>}
-        <button className="message-action" aria-label="复制" title="复制" onClick={() => onCopy(item)}><Icon name="copy" /></button>
-        <button className={`message-action${favorite ? " active" : ""}`} aria-label={favorite ? "取消收藏" : "收藏"} title={favorite ? "取消收藏" : "收藏"} onClick={() => onFavorite(item)}><Icon name="bookmark" /></button>
+        <button className="message-action" aria-label="Copy" title="Copy" onClick={() => onCopy(item)}><Icon name="copy" /></button>
+        <button className={`message-action${favorite ? " active" : ""}`} aria-label={favorite ? "Remove favorite" : "Favorites"} title={favorite ? "Remove favorite" : "Favorites"} onClick={() => onFavorite(item)}><Icon name="bookmark" /></button>
 
-        <button className="message-action danger" aria-label="删除" title="删除" onClick={() => void onDelete(item).catch(() => {})}><Icon name="trash" /></button>
+        <button className="message-action danger" aria-label="Delete" title="Delete" onClick={() => void onDelete(item).catch(() => {})}><Icon name="trash" /></button>
       </div>}
       <MessageAttachments items={item.metadata?.attachments || []} onSaveAsSticker={onSaveAttachmentAsSticker ? (attachment) => onSaveAttachmentAsSticker(attachment, item) : undefined} />
     </div>
@@ -3730,22 +3603,22 @@ function CodexApprovalDialog({
   queuedCount: number;
   onDecision: (action: "allow" | "deny") => void;
 }) {
-  const type = approval.kind === "command" ? "命令" : approval.kind === "file" ? "文件变更" : "额外权限";
+  const type = approval.kind === "command" ? "Command" : approval.kind === "file" ? "File changes" : "Additional permissions";
   return (
     <div className="codex-approval-layer" role="presentation">
       <section className="codex-approval-dialog" role="alertdialog" aria-modal="true" aria-labelledby="codex-approval-title" aria-describedby="codex-approval-description">
-        <p className="codex-approval-kicker">CODEX 审批 · {type}</p>
+        <p className="codex-approval-kicker">CODEX APPROVAL · {type}</p>
         <h2 id="codex-approval-title">{approval.title}</h2>
         <p id="codex-approval-description" className="codex-approval-summary">{approval.summary}</p>
         <dl className="codex-approval-details">
           <div><dt>{approval.targetLabel}</dt><dd>{approval.target}</dd></div>
           <div><dt>{approval.detailLabel}</dt><dd><pre>{approval.detail}</pre></dd></div>
         </dl>
-        {queuedCount > 1 && <p className="codex-approval-queue">还有 {queuedCount - 1} 个请求等待你的决定。</p>}
-        <p className="codex-approval-note">允许只适用于这一次，不会保存为自动批准。</p>
+        {queuedCount > 1 && <p className="codex-approval-queue">Remaining {queuedCount - 1}  requests awaiting your decision.</p>}
+        <p className="codex-approval-note">Permission applies only to this request and will not enable automatic approval.</p>
         <div className="codex-approval-actions">
-          <button className="codex-approval-deny" onClick={() => onDecision("deny")}>拒绝</button>
-          <button className="codex-approval-allow" autoFocus onClick={() => onDecision("allow")}>仅本次允许</button>
+          <button className="codex-approval-deny" onClick={() => onDecision("deny")}>Deny</button>
+          <button className="codex-approval-allow" autoFocus onClick={() => onDecision("allow")}>Allow once</button>
         </div>
       </section>
     </div>
@@ -3770,13 +3643,13 @@ function MusicMessageCard({
       {card.cover ? <img src={card.cover} alt="" /> : <div className="music-card-placeholder">V</div>}
       <div className="music-card-copy">
         <b>{card.title}</b>
-        <span>{card.artist || "未知歌手"}{card.album ? ` · ${card.album}` : ""}</span>
+        <span>{card.artist || "Unknown artist"}{card.album ? ` · ${card.album}` : ""}</span>
         {card.message && <p>{card.message}</p>}
         <div className="music-card-actions">
-          <button disabled={!card.playable} onClick={() => onPlay(card.trackId)}><Icon name="play" /> 播放</button>
-          <button onClick={() => onQueue(card.trackId)}><Icon name="plus" /> 队列</button>
-          {card.source === "netease" && <button onClick={() => onAddToPlaylist(card)}><Icon name="library" /> 歌单</button>}
-          <button onClick={onOpen}><Icon name="music" /> 播放器</button>
+          <button disabled={!card.playable} onClick={() => onPlay(card.trackId)}><Icon name="play" /> Play</button>
+          <button onClick={() => onQueue(card.trackId)}><Icon name="plus" /> Queue</button>
+          {card.source === "netease" && <button onClick={() => onAddToPlaylist(card)}><Icon name="library" /> Playlists</button>}
+          <button onClick={onOpen}><Icon name="music" /> Player</button>
         </div>
       </div>
     </article>
@@ -3784,6 +3657,10 @@ function MusicMessageCard({
 }
 
 function ConnectedChat({
+  watchMode = false,
+  watchActive = false,
+  wakeRequest,
+  onWakeHandled,
   conversationId,
   onSelectConversation,
   agentName,
@@ -3798,6 +3675,10 @@ function ConnectedChat({
   onOpenMusic,
   onAddMusicToPlaylist,
 }: {
+  watchMode?: boolean;
+  watchActive?: boolean;
+  wakeRequest?: string | null;
+  onWakeHandled?: () => void;
   conversationId: string;
   onSelectConversation: (id: string) => void;
   agentName: string;
@@ -3813,6 +3694,9 @@ function ConnectedChat({
   onAddMusicToPlaylist: (card: MusicPlaylistIntent) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const watchCapture = useRef<(() => Promise<WatchFrame | null>) | null>(null);
+  const wakeConsumed = useRef(new Set<string>());
+  const sending = useRef(false);
   const [expandedActivities, setExpandedActivities] = useState<Record<string, boolean>>({});
   const [messages, setMessages] = useState<BridgeChatMessage[]>(() => mergeCodexMessages(normalizeCodexMessages(readLocalValue(`vesper-codex-chat-${conversationId}`, []), conversationId)).filter((item) => !messageWasDeleted(item, readLocalValue(`vesper-codex-tombstones-${conversationId}`, []))));
   const [pending, setPending] = useState<CodexPendingFile[]>([]);
@@ -3900,7 +3784,7 @@ function ConnectedChat({
     const updated = messagesRef.current.map((item) => item.id === id ? update(item) : item);
     save(updated);
     const item = updated.find((candidate) => candidate.id === id);
-    if (item) void persistCodexMessage(item).catch(() => setHistoryWarning("历史暂未同步"));
+    if (item) void persistCodexMessage(item).catch(() => setHistoryWarning("History not synced yet"));
   };
   const flushExecutions = () => {
     if (executionFlush.current) clearTimeout(executionFlush.current);
@@ -3913,11 +3797,11 @@ function ConnectedChat({
       // Serialize each item's checkpoints so a slow running write cannot overwrite completion.
       const writes = executionWrites.current;
       const write = (writes.get(item.id) || Promise.resolve())
-        .then(() => persistCodexMessage(item)).catch(() => setHistoryWarning("执行记录暂未同步"));
+        .then(() => persistCodexMessage(item)).catch(() => setHistoryWarning("Execution details not synced yet"));
       writes.set(item.id, write);
       void write.finally(() => { if (writes.get(item.id) === write) writes.delete(item.id); });
       void fetch(apiUrl('/api/codex/events'), { method: 'POST', headers: appHeaders(true), body: JSON.stringify({ conversationId, event: { ...item.metadata?.execution, id: item.id } }) })
-        .then(response => { if (!response.ok) throw new Error('event sync failed'); }).catch(() => setHistoryWarning("执行记录暂未同步"));
+        .then(response => { if (!response.ok) throw new Error('event sync failed'); }).catch(() => setHistoryWarning("Execution details not synced yet"));
     }
   };
   const observeExecution = (method: string, params: Record<string, unknown>) => {
@@ -4022,7 +3906,7 @@ function ConnectedChat({
         const sticker = (result as { stickerMessage?: unknown }).stickerMessage;
         if (sticker && typeof sticker === "object" && typeof (sticker as StickerMessageData).assetId === "string") pendingAgentStickers.current.push(sticker as StickerMessageData);
       }
-      observeExecution("item/completed", { threadId: activityThread, turnId: activityTurn, item: { id: activityId, type: "dynamicToolCall", name, status: "completed", result: "工具已返回结果。" } });
+      observeExecution("item/completed", { threadId: activityThread, turnId: activityTurn, item: { id: activityId, type: "dynamicToolCall", name, status: "completed", result: "The tool returned a result." } });
       socket.current?.send(JSON.stringify({ id: message.id, result: { contentItems: [{ type: "inputText", text: JSON.stringify(result) }], success: true } }));
     } catch (reason) {
       const text = reason instanceof Error ? reason.message : "Tool failed";
@@ -4037,7 +3921,7 @@ function ConnectedChat({
     const id = rpcId.current++;
     const timer = timeoutMs ? window.setTimeout(() => {
       rpc.current.delete(id);
-      reject(new Error("Codex 请求超时，请重试"));
+      reject(new Error("Codex request timed out. Please try again."));
     }, timeoutMs) : undefined;
     rpc.current.set(id, {
       resolve: (value) => { window.clearTimeout(timer); resolve(value); },
@@ -4055,7 +3939,7 @@ function ConnectedChat({
       modelCatalog.current = catalog;
       setModels(catalog);
     } catch {
-      if (loadId === modelLoadId.current) setModelError("暂时无法同步模型，请重试。");
+      if (loadId === modelLoadId.current) setModelError("Could not sync models. Please try again.");
     } finally {
       if (loadId === modelLoadId.current) setModelsLoading(false);
     }
@@ -4067,7 +3951,7 @@ function ConnectedChat({
     const current = socket.current;
     if (!current || current.readyState !== WebSocket.OPEN) {
       clearApprovalQueue();
-      setError("Codex 连接已断开，未发送审批决定。请重连后重试操作。");
+      setError("Codex disconnected. Your approval was not sent. Reconnect and try again.");
       return;
     }
     // Guard against a double tap while React is scheduling the dialog removal.
@@ -4140,7 +4024,7 @@ function ConnectedChat({
       // Returning a JSON-RPC error keeps an unknown server request from leaving
       // an uncloseable modal behind without guessing an approval payload.
       logCodexDiagnostic(message);
-      setError("收到当前版本无法安全展示的 Codex 审批请求；未替你作出允许或拒绝决定。");
+      setError("This Codex approval request cannot be safely displayed. No decision was sent.");
       if (typeof message.id === "number" || typeof message.id === "string") {
         socket.current?.send(JSON.stringify({ id: message.id, error: { code: -32601, message: "Unsupported approval request type" } }));
       }
@@ -4156,8 +4040,8 @@ function ConnectedChat({
         const diff = message.method === 'turn/diff/updated';
         const finished = message.method === 'turn/completed';
         observeExecution(finished || plan || diff ? 'item/completed' : 'item/started', { ...params, turnId, item: {
-          id: `${plan ? 'plan' : diff ? 'diff' : 'turn'}:${turnId}`, type: 'toolCall', name: plan ? '任务计划' : diff ? '本轮修改' : '回复任务',
-          status: plan || diff ? 'completed' : turn.status || (finished ? 'completed' : 'inProgress'), result: plan ? params.plan : diff ? params.diff : turn.error || (finished ? '本轮结束' : '已开始'),
+          id: `${plan ? 'plan' : diff ? 'diff' : 'turn'}:${turnId}`, type: 'toolCall', name: plan ? "Task plan" : diff ? "Changes this turn" : "Reply task",
+          status: plan || diff ? 'completed' : turn.status || (finished ? 'completed' : 'inProgress'), result: plan ? params.plan : diff ? params.diff : turn.error || (finished ? "Turn finished" : "Started"),
         } });
       }
       if (message.method === 'turn/plan/updated' || message.method === 'turn/diff/updated') return;
@@ -4223,7 +4107,7 @@ function ConnectedChat({
         });
         save(mergeCodexMessages(current, agentMessages));
         void Promise.all(agentMessages.map((agentMessage) => persistCodexMessage(agentMessage)))
-          .catch(() => setHistoryWarning("历史暂未同步"));
+          .catch(() => setHistoryWarning("History not synced yet"));
         agentMessages.forEach((agentMessage) => void persistMemoryMessage(agentMessage).catch(() => {}));
       }
       if (CODEX_ASSISTANT_ITEM_TYPES.has(itemType)) {
@@ -4245,6 +4129,7 @@ function ConnectedChat({
       if (completedTurnId) clearApprovalQueue({ threadId: threadId.current, turnId: completedTurnId });
       reasoningSummaries.current = [...new Set([...reasoningSummaries.current, ...Array.from(reasoningBuffers.current.values()).flatMap(cleanReasoningSummary)])];
       setBusy(false);
+      sending.current = false;
       const turnFailed = ["failed", "interrupted"].includes(String((params.turn as Record<string, unknown> | undefined)?.status));
       if (activeTurnUserId.current) {
         updateMessage(activeTurnUserId.current, (item) => ({
@@ -4254,6 +4139,7 @@ function ConnectedChat({
             ...item.metadata,
             turnId: activeTurnId.current || item.metadata?.turnId,
             turnStatus: turnFailed ? "error" : "completed",
+            wake: item.metadata?.wake ? { ...item.metadata.wake, endedAt: new Date().toISOString() } : undefined,
             thoughtSummary: reasoningSummaries.current.length ? reasoningSummaries.current.join("\n") : undefined,
           },
         }));
@@ -4274,7 +4160,7 @@ function ConnectedChat({
           createdAt: new Date().toISOString(),
         } satisfies BridgeChatMessage));
         save(mergeCodexMessages(messagesRef.current, stickerMessages));
-        void Promise.all(stickerMessages.map((item) => persistCodexMessage(item))).catch(() => setHistoryWarning("历史暂未同步"));
+        void Promise.all(stickerMessages.map((item) => persistCodexMessage(item))).catch(() => setHistoryWarning("History not synced yet"));
       }
       setStreamingItems({});
       streamBuffers.current.clear();
@@ -4339,13 +4225,14 @@ function ConnectedChat({
   };
   const loadDynamicTools = async () => {
     const catalog = await fetch(apiUrl("/api/codex/tools"), { headers: appHeaders(), cache: "no-store" });
-    if (!catalog.ok) throw new Error(catalog.status === 401 ? "无法读取 Vesper 工具，请先在设置中重新配对设备。" : "Vesper 工具目录暂时无法读取，请稍后重连。");
+    if (!catalog.ok) throw new Error(catalog.status === 401 ? "Could not load Vesper tools. Pair this device again in Settings." : "Vesper’s tool catalog is unavailable. Reconnect later.");
     const payload = await catalog.json() as { tools?: unknown };
     return validateCodexToolCatalog(payload.tools);
   };
   const startThreadWithTools = async (dynamicTools: typeof CODEX_DYNAMIC_TOOLS, developerInstructions: string) => {
     const result = await sendRpc("thread/start", {
       dynamicTools,
+      config: VESPER_DESIRE_SESSION_CONFIG,
       ...workspaceOptions(readLocalValue("vesper-codex-workspace", "")),
       approvalPolicy: "on-request",
       summary: "concise",
@@ -4359,7 +4246,7 @@ function ConnectedChat({
     syncThreadModel(result);
     appliedDeveloperInstructions.current = developerInstructions;
     void persistCodexConversation(conversationId, { codexThreadId: thread.id })
-      .catch(() => setHistoryWarning("历史暂未同步"));
+      .catch(() => setHistoryWarning("History not synced yet"));
     return thread.id;
   };
   const resumeThread = async (developerInstructions: string) => {
@@ -4376,8 +4263,8 @@ function ConnectedChat({
       setResumeError("");
     } catch (reason) {
       logCodexDiagnostic({ method: "thread/resume/failed", params: { kind: reason instanceof Error ? reason.name : "unknown" } });
-      setResumeError(`会话连接失败：${reason instanceof Error ? reason.message : "未知错误"}。已保存的记录仍可查看。`);
-      throw new Error("原会话暂时无法继续，可新建替代会话。 ");
+      setResumeError(`Conversation connection failed: ${reason instanceof Error ? reason.message : "Unknown error"}. Saved history is still available.`);
+      throw new Error("This conversation cannot continue right now. You can start a replacement.");
     }
   };
   const connectInternal = async (memoryBackground = "", createIfMissing = false) => {
@@ -4404,15 +4291,15 @@ function ConnectedChat({
       answeredToolQuestions.current.clear();
       completedQuestionTurns.current.clear();
       socket.current = null;
-      for (const request of rpc.current.values()) request.reject(new Error("Codex 连接已断开"));
+      for (const request of rpc.current.values()) request.reject(new Error("Codex disconnected"));
       rpc.current.clear();
       clearApprovalQueue();
       approvalResponses.current.clear();
-      if (hadPendingApproval) setError("Codex 连接已断开，待处理的审批没有被发送。");
+      if (hadPendingApproval) setError("Codex disconnected. Pending approvals were not sent.");
     };
     ws.onerror = () => setError("Codex app-server is offline");
     await new Promise<void>((resolve, reject) => {
-      const closedBeforeOpen = () => reject(new Error("Codex 连接在握手完成前断开"));
+      const closedBeforeOpen = () => reject(new Error("Codex disconnected before the handshake finished."));
       ws.addEventListener("close", closedBeforeOpen, { once: true });
       ws.onopen = () => { ws.removeEventListener("close", closedBeforeOpen); resolve(); };
       ws.onerror = () => { ws.removeEventListener("close", closedBeforeOpen); reject(new Error("Codex app-server is offline")); };
@@ -4444,8 +4331,8 @@ function ConnectedChat({
     try {
       // Create the Vesper conversation only. Its mounted chat starts its own
       // app-server thread; an empty thread on this old socket may not have a rollout yet.
-      await persistCodexConversation(replacementId, { title: "新会话", codexThreadId: null });
-      rememberConversation(replacementId, "新会话", 0);
+      await persistCodexConversation(replacementId, { title: "New conversation", codexThreadId: null });
+      rememberConversation(replacementId, "New conversation", 0);
       onSelectConversation(replacementId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not create replacement conversation");
@@ -4458,7 +4345,7 @@ function ConnectedChat({
     clearApprovalQueue({ threadId: threadId.current, turnId: activeTurnId.current });
     try {
       await sendRpc("turn/interrupt", { threadId: threadId.current, turnId: activeTurnId.current });
-      setError("已请求取消当前回复。");
+      setError("Cancellation requested.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not cancel the active turn");
     }
@@ -4468,11 +4355,11 @@ function ConnectedChat({
     if (!content || content === item.content) return;
     const updated = { ...item, content };
     save(messagesRef.current.map((message) => message.id === item.id ? updated : message));
-    void persistCodexMessage(updated).catch(() => setHistoryWarning("历史暂未同步"));
+    void persistCodexMessage(updated).catch(() => setHistoryWarning("History not synced yet"));
   };
   const copyMessage = async (item: BridgeChatMessage) => {
     try {
-      await navigator.clipboard.writeText(item.content || item.metadata?.sticker?.description || item.metadata?.sticker?.alt || "表情包");
+      await navigator.clipboard.writeText(item.content || item.metadata?.sticker?.description || item.metadata?.sticker?.alt || "Stickers");
       setError("Copied");
       window.setTimeout(() => setError((current) => current === "Copied" ? "" : current), 1200);
     } catch {
@@ -4484,7 +4371,7 @@ function ConnectedChat({
       setFavorites((current) => current.filter((favorite) => favorite.messageId !== item.id));
       return;
     }
-    const title = readLocalValue<ConversationSummary[]>("vesper-local-conversation-index", []).find((entry) => entry.id === conversationId)?.title || "对话";
+    const title = readLocalValue<ConversationSummary[]>("vesper-local-conversation-index", []).find((entry) => entry.id === conversationId)?.title || "Conversations";
     setFavorites((current) => [...current, {
       id: crypto.randomUUID(), folderId: "default", messageId: item.id,
       itemId: item.metadata?.itemId || item.metadata?.blockType, threadId: item.metadata?.threadId || item.metadata?.turnId,
@@ -4492,7 +4379,7 @@ function ConnectedChat({
     }]);
   };
   const deleteMessage = async (item: BridgeChatMessage) => {
-    if (!window.confirm("删除此消息？此操作无法撤销。")) return;
+    if (!window.confirm("Delete this message? This cannot be undone.")) return;
     const response = await fetch(codexHistoryUrl(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(item.id)}`), {
       method: "DELETE",
       headers: codexHistoryHeaders(true),
@@ -4501,7 +4388,7 @@ function ConnectedChat({
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({})) as { error?: string };
-      const detail = payload.error || `删除失败（HTTP ${response.status}）`;
+      const detail = payload.error || `Delete failed (HTTP ${response.status})`;
       setError(detail);
       throw new Error(detail);
     }
@@ -4529,35 +4416,42 @@ function ConnectedChat({
       return { type: "image", url: await localImage(new File([blob], sticker.name || "sticker", { type: sticker.mimeType || blob.type })) };
     } catch { return null; }
   };
-  const send = async (selectedSticker?: StickerCatalogItem) => {
-    const content = draft.trim();
-    if ((!content && !pending.length && !selectedSticker) || busy) return;
-    setBusy(true); setError(""); setDraft("");
+  const send = async (selectedSticker?: StickerCatalogItem, wakeId?: string, sharedFrame?: WatchFrame) => {
+    const content = wakeId ? `这是一次 Vesper 主动唤醒，request_id=${wakeId}。这段文字是应用生成的唤醒上下文，不是 Vera 的新聊天消息。结合已有上下文，自行选择一件适合现在做的小事，可以调用已授权工具，然后自然地给 Vera 留话。只报告实际完成的事，不虚构工具调用。若记录这次自主行动，来源使用 automation，同一事件复用 request_id，不重复提交。涉及对外发送或其他需确认的操作仍遵守原有权限。` : sharedFrame ? (sharedFrame.automatic ? "陪看画面自动更新（不是新的用户发言，若记录互动须使用 automation 来源）：根据这一幕简短陪聊，不必每次重复描述画面。" : "陪我看看这一幕。") : draft.trim();
+    if ((!content && !pending.length && !selectedSticker) || busy || sending.current) return;
+    sending.current = true;
+    const outgoingFiles = wakeId || sharedFrame ? [] : pending;
+    setBusy(true); setError(""); if (!wakeId && !sharedFrame) setDraft("");
     pendingAgentStickers.current = [];
     nearBottomRef.current = true;
-    const userMessage: BridgeChatMessage = { id: crypto.randomUUID(), conversationId, role: "user", type: selectedSticker ? "sticker" : "text", content: content || (selectedSticker ? "[Sticker]" : "Attachment"), status: "thinking", metadata: { attachments: [], sticker: selectedSticker ? { assetId: selectedSticker.assetId, url: selectedSticker.url, width: selectedSticker.width, height: selectedSticker.height, mimeType: selectedSticker.mimeType, alt: selectedSticker.alt || selectedSticker.description || selectedSticker.name || "表情包", description: selectedSticker.description, category: selectedSticker.category } : undefined, turnId: `pending-${crypto.randomUUID()}`, turnStatus: "thinking" }, createdAt: new Date().toISOString() };
+    const userMessage: BridgeChatMessage = { id: crypto.randomUUID(), conversationId, role: "user", type: selectedSticker ? "sticker" : "text", content: wakeId ? "Wake AI" : content || (selectedSticker ? "[Sticker]" : "Attachment"), status: "thinking", metadata: { wake: wakeId ? { requestId: wakeId, requestedAt: new Date().toISOString(), source: wakeId.startsWith("auto-") ? "automation" : "manual" } : undefined, attachments: [], sticker: selectedSticker ? { assetId: selectedSticker.assetId, url: selectedSticker.url, width: selectedSticker.width, height: selectedSticker.height, mimeType: selectedSticker.mimeType, alt: selectedSticker.alt || selectedSticker.description || selectedSticker.name || "Stickers", description: selectedSticker.description, category: selectedSticker.category } : undefined, turnId: `pending-${crypto.randomUUID()}`, turnStatus: "thinking" }, createdAt: new Date().toISOString() };
     activeTurnUserId.current = userMessage.id;
     save([...messagesRef.current, userMessage]);
     if (selectedSticker) void fetch(apiUrl(`/api/stickers/${encodeURIComponent(selectedSticker.assetId)}`), { method: "POST", headers: appHeaders(true), body: JSON.stringify({ action: "use" }) }).catch(() => {});
-    rememberConversation(conversationId, content.slice(0, 28) || (selectedSticker ? "表情包" : "Attachment"));
+    rememberConversation(conversationId, wakeId ? "Wake AI" : content.slice(0, 28) || (selectedSticker ? "Stickers" : "Attachment"));
     try {
-      void persistCodexMessage(userMessage, content.slice(0, 42) || (selectedSticker ? "表情包" : "Attachment"))
-        .catch(() => setHistoryWarning("历史暂未同步"));
-      if (userMessage.content && userMessage.type !== "sticker") void persistMemoryMessage(userMessage).catch(() => {});
-      const prepared = await Promise.all(pending.map(prepareFile));
+      void persistCodexMessage(userMessage, wakeId ? "Wake AI" : content.slice(0, 42) || (selectedSticker ? "Stickers" : "Attachment"))
+        .catch(() => setHistoryWarning("History not synced yet"));
+      if (!wakeId && !sharedFrame?.automatic && userMessage.content && userMessage.type !== "sticker") void persistMemoryMessage(userMessage).catch(() => {});
+      const prepared = await Promise.all(outgoingFiles.map(prepareFile));
+      const frame = sharedFrame || (watchMode && !wakeId && !selectedSticker ? await watchCapture.current?.() : null);
+      if (frame) {
+        const image = await prepareFile({ file: frame.file, preview: "" });
+        prepared.push({ ...image, text: frame.context });
+      }
       userMessage.metadata = { ...userMessage.metadata, attachments: prepared.map((item) => item.attachment) };
       updateMessage(userMessage.id, () => userMessage);
       // Opt-in automatic collection is server-owned and classification-gated.
       // This notification deliberately remains non-blocking so an ordinary
       // photo never delays a chat turn or silently turns into a sticker.
       for (const [index, item] of prepared.entries()) {
-        const source = pending[index]?.file;
+        const source = outgoingFiles[index]?.file;
         if (!source?.type.startsWith("image/")) continue;
         void fileSha256(source).then((sha256) => fetch(apiUrl("/api/stickers/collect"), {
           method: "POST", headers: appHeaders(true), body: JSON.stringify({ key: item.attachment.key, messageId: userMessage.id, conversationId, sha256 }),
         })).catch(() => {});
       }
-      const stickerText = selectedSticker ? `[Vesper sticker sent by Vera. This is a private catalog asset, not a user text message. category: ${selectedSticker.category || "未分类"}; description: ${selectedSticker.description || selectedSticker.alt || "无"}; assetId: ${selectedSticker.assetId}]` : "";
+      const stickerText = selectedSticker ? `[Vesper sticker sent by Vera. This is a private catalog asset, not a user text message. category: ${selectedSticker.category || "未分类"}; description: ${selectedSticker.description || selectedSticker.alt || "None"}; assetId: ${selectedSticker.assetId}]` : "";
       const memoryBackground = await recallMemoryBackground((selectedSticker ? "" : content) || stickerText);
       const input: CodexInput[] = [
         { type: "text", text: [selectedSticker ? "" : content, stickerText, ...prepared.map((item) => item.text).filter(Boolean)].filter(Boolean).join("\n\n") || "Please inspect the attached files." },
@@ -4573,7 +4467,7 @@ function ConnectedChat({
       const started = await startCodexTurnWithModel(sendRpc, { threadId: threadId.current, ...workspaceOptions(readLocalValue("vesper-codex-workspace", "")), clientUserMessageId: userMessage.id, input, summary: "concise" }, requestedModel, modelCatalog.current);
       // The server has accepted these attachments. Do not wait for the
       // assistant reply (which may time out), or remove newly selected files.
-      const sentFiles = new Set(pending);
+      const sentFiles = new Set(outgoingFiles);
       setPending((current) => current.filter((item) => !sentFiles.has(item)));
       for (const item of sentFiles) URL.revokeObjectURL(item.preview);
       // A rejected RPC must retain the pending selection, not pretend it applied.
@@ -4582,28 +4476,67 @@ function ConnectedChat({
         nextModelRef.current = null;
         setNextModel(null);
       }
-      const turn = (started.result?.turn || {}) as { id?: string };
+      const turn = (started.result?.turn || {}) as { id?: string; createdAt?: unknown };
       activeTurnId.current = turn.id || `turn-${userMessage.id}`;
-      updateMessage(userMessage.id, (item) => ({ ...item, metadata: { ...item.metadata, turnId: activeTurnId.current, turnStatus: "thinking" } }));
+      sending.current = false;
+      updateMessage(userMessage.id, (item) => ({ ...item, metadata: { ...item.metadata, turnId: activeTurnId.current, turnStatus: "thinking", wake: item.metadata?.wake ? { ...item.metadata.wake, startedAt: codexTimestamp(turn.createdAt, new Date().toISOString()) } : undefined } }));
       const completion = await Promise.race([done.then(() => "completed" as const), new Promise<"listening">((resolve) => window.setTimeout(() => resolve("listening"), 120000))]);
       if (completion === "listening") {
-        setError("回复仍在服务器上运行，Vesper 会继续监听；也可手动取消。");
+        setError("The reply is still running on the server. Vesper will keep listening; you can also cancel it.");
         return;
       }
     } catch (reason) {
       updateMessage(userMessage.id, (item) => ({ ...item, status: "error", metadata: { ...item.metadata, turnStatus: "error" } }));
-      setDraft(content); setError(reason instanceof Error ? reason.message : "Message failed"); setBusy(false);
+      if (!wakeId && !sharedFrame) setDraft(content); setError(reason instanceof Error ? reason.message : "Message failed"); setBusy(false); sending.current = false;
+      if (sharedFrame) throw reason;
     }
   };
+  useEffect(() => {
+    if (!wakeRequest || wakeConsumed.current.has(wakeRequest)) return;
+    wakeConsumed.current.add(wakeRequest); onWakeHandled?.();
+    void fetch(codexHistoryUrl('/wake'), { method: 'POST', headers: codexHistoryHeaders(true),
+      body: JSON.stringify({action: 'request', requestId: wakeRequest}) }).then(async response => {
+      if (!response.ok) throw new Error("Background wake-up is unavailable. Please try again later.");
+      const result = await response.json() as {conversationId: string};
+      if (result.conversationId) onSelectConversation(result.conversationId);
+    }).catch(reason => setError(reason.message));
+  }, [wakeRequest, onWakeHandled, onSelectConversation]);
+  useEffect(() => {
+    const deviceId = `web-${conversationId}-${crypto.randomUUID()}`;
+    const publish = () => { void fetch(codexHistoryUrl('/wake'), {method:'POST',headers:codexHistoryHeaders(true),
+      body:JSON.stringify({action:'presence',deviceId,busy})}).catch(() => {}); };
+    publish(); const timer=window.setInterval(publish,30000);
+    return () => {window.clearInterval(timer); void fetch(codexHistoryUrl('/wake'), {method:'POST',headers:codexHistoryHeaders(true),
+      body:JSON.stringify({action:'presence',deviceId,busy:false}),keepalive:true}).catch(() => {});};
+  }, [busy, conversationId]);
+  useEffect(() => {
+    if (!conversationId || !historyReady || busy) return;
+    let stopped=false;
+    const refresh=async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const response=await fetch(codexHistoryUrl(`/conversations/${conversationId}`), {headers:codexHistoryHeaders(),cache:'no-store'});
+        if (!response.ok) return;
+        const payload=await response.json() as {messages?: BridgeChatMessage[]; tombstones?: CodexMessageTombstone[]};
+        if (!stopped) {
+          tombstonesRef.current=[...tombstonesRef.current,...(payload.tombstones || [])];
+          save(mergeCodexMessages(messagesRef.current, normalizeCodexMessages(payload.messages || [],conversationId)).filter(item=>!messageWasDeleted(item,tombstonesRef.current)));
+        }
+      } catch {}
+    };
+    const timer=window.setInterval(() => void refresh(),5000);
+    document.addEventListener('visibilitychange',refresh);
+    return () => {stopped=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',refresh);};
+  }, [conversationId, historyReady, busy]);
   const saveAttachmentAsSticker = async (attachment: ChatAttachment, item: BridgeChatMessage) => {
-    const description = window.prompt("这张表情适合什么时候用？（可留空）", "") ?? null;
+    const description = window.prompt("When would you use this sticker? (Optional)", "") ?? null;
     if (description === null) return;
     try {
       const response = await fetch(apiUrl("/api/stickers/from-message"), { method: "POST", headers: appHeaders(true), body: JSON.stringify({ key: attachment.key, name: attachment.name, type: attachment.type, conversationId: item.conversationId, messageId: item.id, description }) });
       const payload = await response.json().catch(() => ({})) as { duplicate?: boolean; error?: string };
-      if (!response.ok) throw new Error(payload.error || "保存失败");
-      setError(payload.duplicate ? "这张图片已经在表情包里了" : "已保存到表情包");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "保存为表情包失败"); }
+      if (!response.ok) throw new Error(payload.error || "Save failed");
+      setError(payload.duplicate ? "This image is already a sticker." : "Saved as sticker");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save as sticker"); }
   };
   const selectFiles = (files: FileList | null) => {
     if (!files) return;
@@ -4624,14 +4557,14 @@ function ConnectedChat({
       try {
         await migrateLegacyHistory();
       } catch {
-        if (!cancelled) setHistoryWarning("历史暂未同步");
+        if (!cancelled) setHistoryWarning("History not synced yet");
       }
       try {
         const response = await fetch(codexHistoryUrl(`/conversations/${encodeURIComponent(conversationId)}`), {
           headers: codexHistoryHeaders(),
           cache: "no-store",
         });
-        if (!response.ok) throw new Error("无法读取 VPS 历史记录");
+        if (!response.ok) throw new Error("Could not load VPS history");
         const payload = await response.json() as {
           conversation?: { codexThreadId?: string | null } | null;
           messages?: BridgeChatMessage[];
@@ -4647,14 +4580,14 @@ function ConnectedChat({
         // those tagged internal records, then immediately exclude them from
         // this render even if the cleanup request is temporarily offline.
         void removeLeakedInternalHistoryMessages(conversationId, rawRemote)
-          .catch(() => setHistoryWarning("历史暂未同步"));
+          .catch(() => setHistoryWarning("History not synced yet"));
         const remote = normalizeCodexMessages(rawRemote, conversationId);
         const cached = normalizeCodexMessages(readLocalValue(`vesper-codex-chat-${conversationId}`, []), conversationId);
         const backup = normalizeCodexMessages(readLocalValue(`vesper-codex-chat-backup-${conversationId}`, []), conversationId);
         save(mergeCodexMessages(remote, cached, backup).filter((item) => !messageWasDeleted(item, tombstonesRef.current)));
         threadId.current = payload.conversation?.codexThreadId || threadId.current;
       } catch {
-        if (!cancelled) setHistoryWarning("历史暂未同步");
+        if (!cancelled) setHistoryWarning("History not synced yet");
       } finally {
         if (!cancelled) setHistoryReady(true);
       }
@@ -4703,7 +4636,7 @@ function ConnectedChat({
         createdAt: new Date().toISOString(),
       };
       save([...current, cardMessage]);
-      void persistCodexMessage(cardMessage).catch(() => setHistoryWarning("历史暂未同步"));
+      void persistCodexMessage(cardMessage).catch(() => setHistoryWarning("History not synced yet"));
     };
     window.addEventListener("vesper-music-card", receiveCard);
     return () => window.removeEventListener("vesper-music-card", receiveCard);
@@ -4745,6 +4678,22 @@ function ConnectedChat({
     };
   }, [conversationId]);
   useLayoutEffect(() => {
+    const composer = textareaRef.current?.closest(".chat-compose") as HTMLElement | null;
+    const chat = composer?.closest(".codex-chat") as HTMLElement | null;
+    if (!composer || !chat || chat.classList.contains("watch-chat")) return;
+    const measure = () => {
+      chat.style.setProperty("--floating-compose-height", `${composer.getBoundingClientRect().height}px`);
+      if (nearBottomRef.current) {
+        const stream = streamEnd.current?.closest(".chat-stream") as HTMLElement | null;
+        if (stream) stream.scrollTop = stream.scrollHeight;
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, [conversationId]);
+  useLayoutEffect(() => {
     const node = textareaRef.current;
     if (!node) return;
     node.style.height = "24px";
@@ -4752,7 +4701,11 @@ function ConnectedChat({
     const lineHeight = parseFloat(styles.lineHeight) || 20;
     const maxHeight = Math.ceil(lineHeight * 4 + (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0));
     const nextHeight = Math.min(node.scrollHeight, maxHeight);
-    node.style.height = `${Math.max(24, nextHeight)}px`;
+    const fieldHeight = Math.max(24, nextHeight);
+    node.style.height = `${fieldHeight}px`;
+    if (node.parentElement?.classList.contains("compose-text-field")) {
+      node.parentElement.style.height = `${fieldHeight * 0.875}px`;
+    }
     node.style.overflowY = node.scrollHeight > maxHeight ? "auto" : "hidden";
   }, [draft]);
   useLayoutEffect(() => {
@@ -4804,7 +4757,7 @@ function ConnectedChat({
     const activity = turnActivities.get(turnId)!;
     if (item.metadata?.execution && !item.metadata.execution.id.startsWith('turn:')) activity.executions.push(item.metadata.execution);
     if (item.metadata?.thoughtSummary && !activity.summary.includes(item.metadata.thoughtSummary)) activity.summary += `${activity.summary ? '\n' : ''}${item.metadata.thoughtSummary}`;
-    if (item.role === 'agent' && !item.metadata?.execution && !activityAnchors.has(turnId)) activityAnchors.set(turnId, item.id);
+    if ((item.role === 'agent' || item.metadata?.wake?.messageOmitted) && !item.metadata?.execution && !activityAnchors.has(turnId)) activityAnchors.set(turnId, item.id);
   }
   if (busy && activeTurnId.current) {
     const activity = turnActivities.get(activeTurnId.current) || { busy: true, online, executions: [], summary: '' };
@@ -4831,48 +4784,50 @@ function ConnectedChat({
   for (const row of activityOnlyRows) if (!lastTurnIndex.has(row.metadata!.turnId!)) visibleRows.push(row);
   const liveTurnStatus = messages.find((item) => item.id === activeTurnUserId.current)?.metadata?.turnStatus;
   const displayedModel = nextModel || currentModel;
-  const displayedModelName = models.find((item) => item.model === displayedModel?.model)?.displayName || displayedModel?.model || "选择模型";
+  const displayedModelName = models.find((item) => item.model === displayedModel?.model)?.displayName || displayedModel?.model || "Select model";
   return (
-    <div className="page-body chat-page codex-chat">
+    <div className={`page-body chat-page codex-chat${watchMode ? " watch-chat" : ""}`}>
+      {watchMode && <WatchPlayer active={watchActive} busy={busy || !historyReady} captureRef={watchCapture} onShare={frame => send(undefined, undefined, frame)} />}
       {toolQuestions[0] && <CodexUserInput key={toolQuestions[0].id} request={toolQuestions[0]} onRespond={result => {
         const request = toolQuestions[0];
-        if (socket.current?.readyState !== WebSocket.OPEN) { setError("连接已断开，确认没有发送。"); return; }
+        if (socket.current?.readyState !== WebSocket.OPEN) { setError("Disconnected. Your confirmation was not sent."); return; }
         if (answeredToolQuestions.current.has(request.id)) return;
         answeredToolQuestions.current.add(request.id);
         socket.current.send(JSON.stringify({ id: request.id, result }));
         setToolQuestions(current => current.filter(entry => entry.id !== request.id));
       }} />}
       <div className="chat-status-stack">
-        {error && <div className="chat-restore-error" role="alert"><span>{error}</span>{!online && <button type="button" disabled={busy} onClick={() => void connect().catch(reason => setError(reason instanceof Error ? reason.message : "连接失败，请重试"))}>重试连接</button>}</div>}
+        {error && <div className="chat-restore-error" role="alert"><span>{error}</span>{!online && <button type="button" disabled={busy} onClick={() => void connect().catch(reason => setError(reason instanceof Error ? reason.message : "Connection failed. Please try again."))}>Reconnect</button>}</div>}
         {historyWarning && <div className="chat-history-warning" role="status">{historyWarning}</div>}
-        {toolUpgradeNeeded && !resumeError && <div className="chat-history-warning" role="status"><span>这段会话尚未确认注册文件发送工具。重连不能更新旧会话的工具；新建对话可加载完整工具，原记录会保留。</span><button type="button" disabled={busy || !online} onClick={() => void createReplacementConversation()}>新建支持文件的对话</button></div>}
-        {resumeError && <div className="chat-restore-error" role="alert"><span>{resumeError}</span><button onClick={() => void createReplacementConversation()}>继续为新会话</button></div>}
+        {toolUpgradeNeeded && !resumeError && <div className="chat-history-warning" role="status"><span>This conversation uses an older tool catalog. Start a new conversation to load all current tools, including Vesper’s independent Desire. Existing history is preserved.</span><button type="button" disabled={busy || !online} onClick={() => void createReplacementConversation()}>New conversation with updated tools</button></div>}
+        {resumeError && <div className="chat-restore-error" role="alert"><span>{resumeError}</span><button onClick={() => void createReplacementConversation()}>Continue in a new conversation</button></div>}
       </div>
       <div className="chat-stream">
-        {!messages.length && !Object.keys(streamingItems).length && <div className="chat-empty"><Icon name="chat" /><b>{!historyReady ? "正在准备对话…" : "A quiet place to think"}</b><span>One private Codex connection · files, images, audio and tools ready</span></div>}
+        {!messages.length && !Object.keys(streamingItems).length && <div className="chat-empty"><Icon name="chat" /><b>{!historyReady ? "Preparing conversation…" : "A quiet place to think"}</b><span>One private Codex connection · files, images, audio and tools ready</span></div>}
         {visibleRows.map((item, index) => {
           const timestamp = visibleMessageTimestamp(item.createdAt);
           const previousTimestamp = index ? visibleMessageTimestamp(visibleRows[index - 1].createdAt) : Number.NaN;
           const day = Number.isFinite(timestamp) ? new Date(timestamp).toDateString() : "";
           const previousDay = Number.isFinite(previousTimestamp) ? new Date(previousTimestamp).toDateString() : "";
-          const divider = day && day !== previousDay ? new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(timestamp)) : "";
+          const divider = day && day !== previousDay ? new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric" }).format(new Date(timestamp)) : "";
           const activity = item.metadata?.turnId && activityAnchors.get(item.metadata.turnId) === item.id ? turnActivities.get(item.metadata.turnId) : undefined;
           const activityExpanded = expandedActivities[item.metadata?.turnId || ''] || false;
           const onActivityExpandedChange = (open: boolean) => { const turnId = item.metadata?.turnId; if (turnId) setExpandedActivities(current => current[turnId] === open ? current : { ...current, [turnId]: open }); };
+          if (item.metadata?.wake?.messageOmitted) return <div className="message-with-date" key={item.id}>{divider && <div className="chat-date-divider"><span>{divider}</span></div>}<ChatActivity busy={false} online={online} executions={turnActivities.get(item.metadata.turnId || '')?.executions || []} summary="" expanded={activityExpanded} onExpandedChange={onActivityExpandedChange} timestamp={formatTurnTimestamp(item.createdAt)} dateTime={item.createdAt} /></div>;
+          if (item.metadata?.wake) return <div className="message-with-date" key={item.id}><WakeCard wake={item.metadata.wake} executions={turnActivities.get(item.metadata.turnId || '')?.executions || []} status={item.metadata.turnStatus || item.status} online={online} /></div>;
           if (activity && item.id.startsWith('activity:')) return <div className="message-with-date" key={item.id}>{divider && <div className="chat-date-divider"><span>{divider}</span></div>}<ChatActivity {...activity} expanded={activityExpanded} onExpandedChange={onActivityExpandedChange} timestamp={formatTurnTimestamp(item.createdAt)} dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined} status={liveTurnStatus === 'tool' ? 'Using a tool…' : 'Thinking…'} /></div>;
           return <div className="message-with-date" key={item.id}>{divider && <div className="chat-date-divider"><span>{divider}</span></div>}<CodexChatMessage item={item} activity={activity} activityExpanded={activityExpanded} onActivityExpandedChange={onActivityExpandedChange} turnInProgress={online && busy && Boolean(activeTurnId.current) && item.metadata?.turnId === activeTurnId.current} agentName={agentName} userName={userName} onThought={setThought} onCopy={copyMessage} favorite={favorites.some((favorite) => favorite.messageId === item.id)} onFavorite={toggleFavorite} onDelete={deleteMessage} onPlayMusic={(trackId) => window.dispatchEvent(new CustomEvent("vesper-music-play", { detail: { trackId } }))} onQueueMusic={(trackId) => window.dispatchEvent(new CustomEvent("vesper-music-queue-add", { detail: { trackId } }))} onOpenMusic={onOpenMusic} onAddMusicToPlaylist={onAddMusicToPlaylist} onSaveAttachmentAsSticker={item.role === "user" ? saveAttachmentAsSticker : undefined} /></div>;
         })}
         <div ref={streamEnd} />
       </div>
-      {showScrollToBottom && <button className="chat-scroll-to-bottom" type="button" aria-label="回到最新消息" title="回到最新消息" onClick={scrollToLatest}>
+      {showScrollToBottom && <button className="chat-scroll-to-bottom" type="button" aria-label="Jump to latest message" title="Jump to latest message" onClick={scrollToLatest}>
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v15m-6-6 6 6 6-6" /></svg>
       </button>}
-      {currentTrack && <div className="codex-mini-player"><button className="mini-track" onClick={onOpenMusic}>{currentTrack.cover ? <img src={currentTrack.cover} alt="" /> : <span>V</span>}<strong>{currentTrack.title}</strong><small>{currentTrack.artist || "未知歌手"}</small></button><button aria-label={playing ? "暂停" : "播放"} onClick={onToggleMusic}><Icon name={playing ? "pause" : "play"} /></button><button aria-label="下一首" onClick={onNextMusic}><Icon name="forward" /></button></div>}
       <div className="chat-compose">
         {pending.length > 0 && <div className="compose-previews">{pending.map((item, index) => <div className="compose-preview" key={`${item.file.name}-${index}`}>{item.file.type.startsWith("image/") ? <img src={item.preview} alt={item.file.name} /> : item.file.type.startsWith("video/") ? <video src={item.preview} muted /> : item.file.type.startsWith("audio/") ? <audio src={item.preview} controls /> : <span><Icon name="archive" />{item.file.name}</span>}<button aria-label="Remove attachment" onClick={() => setPending((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Icon name="close" /></button></div>)}</div>}
-        <textarea ref={textareaRef} placeholder="Write to Codex…" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} />
-        <div className="compose-actions"><details className="compose-add-menu"><summary aria-label="添加附件或表情包"><Icon name="plus" /></summary><div className="compose-add-options"><button type="button" onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); fileInput.current?.click(); }}><Icon name="file-code" />Files</button><button type="button" onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setStickerPickerOpen(true); }}><Icon name="sticker" />Stickers</button></div></details><input ref={fileInput} hidden multiple type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.md,.json,.html,.csv,.zip" onChange={(event) => { selectFiles(event.target.files); event.target.value = ""; }} />
-          <span className="composer-status"><i className={online ? "online" : ""} role="img" aria-label={online ? "已连接" : "未连接"} title={online ? "已连接" : "未连接"} /><button className="codex-model-trigger" type="button" aria-label="选择模型与使用强度" aria-haspopup="dialog" disabled={busy || !online} onClick={() => { setModelPickerOpen(true); void refreshModels(); }}><span>{busy ? "回复中…" : listening ? "Listening…" : displayedModelName}</span><small>{nextModel ? "下次 · " : ""}{effortLabel(displayedModel?.effort ?? null)}⌄</small></button></span>
+        <div className="compose-text-field"><textarea ref={textareaRef} placeholder="Write to Codex…" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} /></div>
+        <div className="compose-actions"><details className="compose-add-menu"><summary aria-label="Add attachments or stickers"><Icon name="plus" /></summary><div className="compose-add-options"><button type="button" onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); fileInput.current?.click(); }}><Icon name="file-code" />Files</button><button type="button" onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setStickerPickerOpen(true); }}><Icon name="sticker" />Stickers</button></div></details><input ref={fileInput} hidden multiple type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.md,.json,.html,.csv,.zip" onChange={(event) => { selectFiles(event.target.files); event.target.value = ""; }} />
+          <span className="composer-status"><i className={online ? "online" : ""} role="img" aria-label={online ? "Connected" : "Disconnected"} title={online ? "Connected" : "Disconnected"} /><button className="codex-model-trigger" type="button" aria-label="Select model and reasoning effort" aria-haspopup="dialog" disabled={busy || !online} onClick={() => { setModelPickerOpen(true); void refreshModels(); }}><span>{busy ? "Replying…" : listening ? "Listening…" : displayedModelName}</span><small>{nextModel ? "Next ·" : ""}{effortLabel(displayedModel?.effort ?? null)}⌄</small></button></span>
           {busy && <button aria-label="Cancel active response" onClick={() => void cancelActiveTurn()}><Icon name="close" /></button>}<button className={listening ? "active" : ""} aria-label="Voice input" onClick={startStt}><Icon name="mic" /></button><button className="send-message-button" aria-label="Send message" disabled={busy || (!draft.trim() && !pending.length)} onClick={() => void send()}><Icon name="arrow-up" /></button></div>
       </div>
       {thought && <div className="thought-sheet-layer"><button className="thought-scrim" aria-label="Close reasoning" onClick={() => setThought(null)} /><section className="thought-sheet"><div className="thought-sheet-head"><button aria-label="Close" onClick={() => setThought(null)}><Icon name="close" /></button><h2>Thought process</h2></div><div className="thought-raw">{thought.metadata?.thoughtSummary?.split("\n").map((line, index) => <p key={`${line}-${index}`}>{line}</p>)}</div></section></div>}
@@ -4902,166 +4857,120 @@ function MessageAttachments({ items, onSaveAsSticker }: { items: ChatAttachment[
   );
 }
 
+type DiaryActivity = { user: number; agent: number; autonomous: number; total: number };
+const emptyDiaryActivity: DiaryActivity = { user: 0, agent: 0, autonomous: 0, total: 0 };
+function diaryToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
 function Diary() {
-  const [entries, setEntries] = usePersistentDocument<DiaryDocument>(
-    "diary",
-    {},
-  );
-  const [month, setMonth] = useState(
-    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-  );
+  const [entries, setEntries] = usePersistentDocument<DiaryDocument>("diary", {});
+  const [month, setMonth] = useState(() => new Date(`${diaryToday().slice(0, 7)}-01T12:00:00`));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [activity, setActivity] = useState<{ month: string; days: Record<string, DiaryActivity> } | null>(null);
+  const [error, setError] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const year = month.getFullYear();
   const monthIndex = month.getMonth();
-  const firstWeekday = new Date(year, monthIndex, 1).getDay();
-  const dayCount = new Date(year, monthIndex + 1, 0).getDate();
-  const cells = Array.from({ length: 42 }, (_, index) => {
-    const day = index - firstWeekday + 1;
-    return day >= 1 && day <= dayCount ? day : null;
-  });
-  const keyFor = (day: number) =>
-    `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  const selected = selectedKey
-    ? entries[selectedKey] || { user: "", agent: "", updatedAt: "" }
-    : null;
+  const monthKey = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+  useEffect(() => {
+    let alive = true;
+    let pending = false;
+    const controller = new AbortController();
+    const read = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const response = await fetch(codexHistoryUrl(`/activity?month=${monthKey}`), { headers: codexHistoryHeaders(), signal: controller.signal, cache: "no-store" });
+        if (!response.ok) throw new Error("Activity unavailable");
+        const data = await response.json() as { month: string; days: Record<string, DiaryActivity> };
+        if (data.month !== monthKey || !data.days) throw new Error("Invalid activity");
+        if (alive) { setActivity(data); setError(false); }
+      } catch { if (alive) setError(true); }
+      finally { pending = false; }
+    };
+    void read();
+    const update = () => { if (!document.hidden) void read(); };
+    const timer = window.setInterval(update, 30000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => { alive = false; controller.abort(); clearInterval(timer); window.removeEventListener("focus", update); document.removeEventListener("visibilitychange", update); };
+  }, [monthKey, refresh]);
+  const ready = activity?.month === monthKey;
+  const selected = selectedKey ? entries[selectedKey] || { user: "", agent: "", updatedAt: "" } : null;
+  const stats = selectedKey && ready ? activity.days[selectedKey] || emptyDiaryActivity : null;
   const saveUser = (value: string) => {
     if (!selectedKey) return;
-    setEntries((current) => ({
-      ...current,
-      [selectedKey]: {
-        ...(current[selectedKey] || { agent: "" }),
-        user: value,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
+    setEntries(current => ({ ...current, [selectedKey]: { ...(current[selectedKey] || { agent: "" }), user: value, updatedAt: new Date().toISOString() } }));
   };
-  return (
-    <div className="page-body">
-      <PageIntro
-        eyebrow={`${year} · ${String(monthIndex + 1).padStart(2, "0")}`}
-        title="日记"
-        text="点击日期查看或编辑当天日记。"
-      />
-      <div className="calendar-head">
-        <button
-          aria-label="上个月"
-          onClick={() => setMonth(new Date(year, monthIndex - 1, 1))}
-        >
-          ‹
-        </button>
-        <h2>
-          {year}年 {monthIndex + 1}月
-        </h2>
-        <button
-          aria-label="下个月"
-          onClick={() => setMonth(new Date(year, monthIndex + 1, 1))}
-        >
-          ›
-        </button>
-      </div>
-      <div className="calendar surface">
-        <div className="week">
-          {["日", "一", "二", "三", "四", "五", "六"].map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-        <div className="calendar-grid">
-          {cells.map((day, index) => {
-            if (!day) return <span className="calendar-blank" key={index} />;
-            const key = keyFor(day);
-            const entry = entries[key];
-            const today = key === new Date().toLocaleDateString("en-CA");
-            return (
-              <button
-                key={key}
-                className={`${today ? "today " : ""}${entry?.user || entry?.agent ? "has-entry" : ""}`}
-                onClick={() => setSelectedKey(key)}
-              >
-                <b>{day}</b>
-                {(entry?.user || entry?.agent) && <i />}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="diary-legend">
-        <span>
-          <i className="user-dot" />
-          我的日记
-        </span>
-        <span>
-          <i className="agent-dot" />
-          Agent 日记
-        </span>
-      </div>
-      <div className="month-memory surface">
-        <span>本月记录</span>
-        <b>
-          {
-            Object.keys(entries).filter((key) =>
-              key.startsWith(
-                `${year}-${String(monthIndex + 1).padStart(2, "0")}`,
-              ),
-            ).length
-          }{" "}
-          天
-        </b>
-      </div>
-      {selectedKey && selected && (
-        <div className="modal-layer">
-          <button
-            className="modal-scrim"
-            onClick={() => setSelectedKey(null)}
-          />
-          <section className="diary-modal">
-            <div className="modal-head">
-              <div>
-                <small>
-                  {new Date(`${selectedKey}T12:00:00`).toLocaleDateString(
-                    "zh-CN",
-                    {
-                      weekday: "long",
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    },
-                  )}
-                </small>
-                <h2>这一天的日记</h2>
-              </div>
-              <button onClick={() => setSelectedKey(null)}>
-                <Icon name="close" />
-              </button>
-            </div>
+  const status = error ? <button className="diary-count-status" onClick={() => setRefresh(v => v + 1)}>Chat statistics unavailable. Tap to retry.</button> : !ready ? <p className="diary-count-status">Loading chat history…</p> : null;
+  if (selectedKey && selected) return (
+    <div className="page-body diary-day-page">
+      <button className="diary-back" onClick={() => setSelectedKey(null)}>‹ Back to calendar</button>
+      <PageIntro eyebrow={selectedKey} title="This day" text={new Date(`${selectedKey}T12:00:00+08:00`).toLocaleDateString("en-US", { weekday: "long", timeZone: "Asia/Shanghai" })} />
+      {status}
+      <section className="surface diary-day-counts" aria-label="Daily message counts">
+        <div><strong>{stats?.total ?? "—"}</strong><span> chat messages</span></div>
+        <p>You sent  {stats?.user ?? "—"}  · Rowan replied  {stats?.agent ?? "—"}  messages</p>
+        <small>Autonomous notes {stats?.autonomous ?? "—"} , counted separately</small>
+      </section>
             <label className="diary-sheet user-sheet">
               <span>
-                <b>USER</b>
-                <em>可编辑</em>
+                <b>VERA</b>
+                <em>Editable</em>
               </span>
               <textarea
-                placeholder="写下今天……"
+                placeholder="Write about today…"
                 value={selected.user}
                 onChange={(event) => saveUser(event.target.value)}
               />
               <small>
                 {selected.updatedAt
-                  ? `保存于 ${new Date(selected.updatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
-                  : "输入后自动保存"}
+                  ? `Saved at ${new Date(selected.updatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`
+                  : "Saved automatically as you type"}
               </small>
             </label>
             <article className="diary-sheet agent-sheet">
               <span>
-                <b>AGENT</b>
+                <b>ROWAN</b>
                 <em>
                   <Icon name="link" />
                   Agent can write
                 </em>
               </span>
-              <p>{selected.agent || "Agent 尚未记录这一天。"}</p>
+              <p>{selected.agent || "Rowan has not written about this day yet."}</p>
             </article>
-          </section>
-        </div>
-      )}
+
+    </div>
+  );
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
+  const dayCount = new Date(year, monthIndex + 1, 0).getDate();
+  const cells = Array.from({ length: Math.ceil((firstWeekday + dayCount) / 7) * 7 }, (_, i) => { const d = i - firstWeekday + 1; return d > 0 && d <= dayCount ? d : null; });
+  return (
+    <div className="page-body diary-activity-page">
+      <PageIntro eyebrow={`${year} · ${String(monthIndex + 1).padStart(2, "0")}`} title="Journal" text="Conversations and moments, day by day. Select a date to explore." />
+      <div className="calendar-head">
+        <button aria-label="Previous month" onClick={() => setMonth(new Date(year, monthIndex - 1, 1))}>‹</button>
+        <h2>{month.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</h2>
+        <button aria-label="Next month" onClick={() => setMonth(new Date(year, monthIndex + 1, 1))}>›</button>
+      </div>
+      <div className="calendar surface">
+        <div className="week">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(label => <span key={label}>{label}</span>)}</div>
+        <div className="calendar-grid diary-heat-grid">{cells.map((day, index) => {
+          if (!day) return <span key={`blank-${index}`} />;
+          const key = `${monthKey}-${String(day).padStart(2, "0")}`;
+          const count = ready ? activity.days[key]?.total || 0 : null;
+          const level = count === null || count === 0 ? 0 : count < 10 ? 1 : count < 30 ? 2 : count < 60 ? 3 : 4;
+          const entry = entries[key];
+          return <button key={key} className={`diary-heat-${level}${key === diaryToday() ? " today" : ""}`} aria-label={`${key}${count === null ? "" : `, ${count} chat messages`}${entry?.user ? ", Vera’s journal available" : ""}${entry?.agent ? ", Rowan’s journal available" : ""}`} onClick={() => setSelectedKey(key)}>
+            <b>{day}</b><small>{key > diaryToday() ? "" : count === null ? "—" : `${count} msgs`}</small>
+            <span className="diary-entry-dots">{entry?.user && <i className="user-dot" />}{entry?.agent && <i className="agent-dot" />}</span>
+          </button>;
+        })}</div>
+      </div>
+      <div className="diary-heat-legend"><span>Less</span>{[0, 1, 2, 3, 4].map(n => <i key={n} className={`diary-heat-${n}`} />)}<span>More</span></div>
+      <div className="diary-legend"><span><i className="user-dot" />Vera’s journal</span><span><i className="agent-dot" />Rowan’s journal</span></div>
+      {status}
+      <p className="diary-count-status">Dates use Beijing time · Autonomous notes are listed separately in daily details</p>
     </div>
   );
 }
@@ -5069,9 +4978,9 @@ function Diary() {
 function Todos() {
   const [items, setItems] = usePersistentDocument<TodoItem[]>("todos", []);
   const add = () => {
-    const title = window.prompt("提醒内容");
+    const title = window.prompt("Reminder");
     if (!title?.trim()) return;
-    const due = window.prompt("时间或日期（可留空）") || "";
+    const due = window.prompt("Time or date (optional)") || "";
     setItems((current) => [
       ...current,
       {
@@ -5089,15 +4998,15 @@ function Todos() {
     <div className="page-body">
       <PageIntro
         eyebrow="TO DO"
-        title="提醒"
-        text="创建、完成和删除你的提醒。"
+        title="Reminders"
+        text="Create, complete and delete your reminders."
       />
       <div className="todo-summary">
         <div>
           <b>
             {completed}/{items.length}
           </b>
-          <span>已完成</span>
+          <span>Completed</span>
         </div>
         <div className="summary-line">
           <i
@@ -5110,13 +5019,13 @@ function Todos() {
         </div>
       </div>
       {!items.length ? (
-        <EmptyState text="还没有提醒。" />
+        <EmptyState text="No reminders yet." />
       ) : (
         <div className="surface todo-list">
           {items.map((item) => (
             <div className="todo-item" key={item.id}>
               <button
-                aria-label="切换完成状态"
+                aria-label="Toggle completion"
                 onClick={() =>
                   setItems((current) =>
                     current.map((entry) =>
@@ -5137,11 +5046,11 @@ function Todos() {
                 <b>{item.title}</b>
                 <small>
                   {[item.tag, item.due].filter(Boolean).join(" · ") ||
-                    "未设置时间"}
+                    "No time set"}
                 </small>
               </span>
               <button
-                aria-label="删除提醒"
+                aria-label="Delete reminder"
                 onClick={() =>
                   setItems((current) =>
                     current.filter((entry) => entry.id !== item.id),
@@ -5156,27 +5065,28 @@ function Todos() {
       )}
       <button className="primary-action" onClick={add}>
         <Icon name="plus" />
-        添加新提醒
+        Add reminder
       </button>
     </div>
   );
 }
 
 function SettingsPage({
+  onOpenSection,
   accent,
-  background,
   onAccent,
   onBackground,
   environment,
   onEnvironment,
 }: {
+  onOpenSection: (section: string) => void;
   accent: string;
-  background: string;
   onAccent: (value: string) => void;
   onBackground: (value: string) => void;
   environment: EnvironmentSnapshot;
   onEnvironment: (value: EnvironmentSnapshot) => void;
 }) {
+  const [category, setCategory] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detailClosing, setDetailClosing] = useState(false);
   const [preferences, setPreferences] =
@@ -5189,24 +5099,24 @@ function SettingsPage({
     );
   const careLabel =
     preferences.careFrequency === "off"
-      ? "关闭"
+      ? "Close"
       : preferences.careFrequency === "twice-weekly"
-        ? "每周两次"
-        : "每天一次";
+        ? "Twice a week"
+        : "Daily";
   const locationLabel =
     environment.permission === "granted"
       ? environment.temperature === undefined
-        ? "已授权"
-        : `已定位 · ${Math.round(environment.temperature)}°`
+        ? "Allowed"
+        : `Located · ${Math.round(environment.temperature)}°`
       : environment.permission === "denied"
-        ? "定位被拒绝"
-        : "尚未授权";
+        ? "Location denied"
+        : "Not requested";
   const notificationLabel =
     notificationPermission === "granted"
-      ? "系统通知已授权"
+      ? "Notifications allowed"
       : notificationPermission === "denied"
-        ? "通知被拒绝"
-        : "尚未授权";
+        ? "Notifications denied"
+        : "Not requested";
   const closeDetail = () => {
     if (detailClosing) return;
     setDetailClosing(true);
@@ -5217,115 +5127,48 @@ function SettingsPage({
   };
   return (
     <div className={`${selected ? "page-body settings-page detail-active" : "page-body settings-page"}${detailClosing ? " detail-closing" : ""}`}>
-      <PageIntro
-        eyebrow="PREFERENCES"
-        title="设置"
-        text="让 Vesper 以你感到舒服的方式陪伴。"
-      />
-      <SettingsGroup title="CODEx RUNTIME">
-        <SettingRow
-          icon="sparkles"
-          title="Codex Server"
-          sub="One private app-server on your VPS"
-          onClick={() => setSelected("Codex Server")}
-        />
-        <SettingRow
-          icon="link"
-          title="MCP Servers"
-          sub="Add servers with OAuth or no authorization"
-          onClick={() => setSelected("MCP 工具")}
-        />
-        <SettingRow
-          icon="link"
-          title="Vesper MCP"
-          sub="让外部 AI 连接 Vesper 的日记、便笺与记忆"
-          onClick={() => setSelected("Vesper MCP")}
-        />
-        <SettingRow
-          icon="volume"
-          title="Agent 声音（TTS）"
-          sub="尚未连接声音服务"
-          onClick={() => setSelected("Agent 声音")}
-        />
-        <SettingRow
-          icon="wifi"
-          title="Web Push"
-          sub={notificationLabel}
-          status={notificationPermission === "granted"}
-          onClick={() => setSelected("Web Push")}
-        />
-        <SettingRow
-          icon="location"
-          title="定位与环境"
-          sub={locationLabel}
-          status={environment.permission === "granted"}
-          onClick={() => setSelected("定位与环境")}
-        />
-      </SettingsGroup>
-      <SettingsGroup title="体验">
-        <SettingRow
-          icon="settings"
-          title="外观 Appearance"
-          sub={background ? "自定义主题与背景" : "冰灰主题 · 大理石背景"}
-          onClick={() => setSelected("Appearance")}
-        />
-        <SettingRow
-          icon="bell"
-          title="通知偏好"
-          sub={
-            `${preferences.reminders ? "提醒 " : ""}${preferences.anniversaries ? "纪念日 " : ""}${preferences.agentNotes ? "Agent 留言" : ""}`.trim() ||
-            "全部关闭"
-          }
-          onClick={() => setSelected("通知偏好")}
-        />
-        <SettingRow
-          icon="heart"
-          title="关心频率"
-          sub={careLabel}
-          onClick={() => setSelected("关心频率")}
-        />
-        <SettingRow
-          icon="sparkles"
-          title="自主唤醒"
-          sub={preferences.careFrequency === "off" ? "当前已关闭" : "查看运行状态与下一次机会"}
-          status={preferences.careFrequency !== "off"}
-          onClick={() => setSelected("自主唤醒")}
-        />
-      </SettingsGroup>
-      <SettingsGroup title="隐私与数据">
-        <SettingRow
-          icon="lock"
-          title="记忆权限"
-          sub="日记、便笺与聊天可分别控制"
-          onClick={() => setSelected("记忆权限")}
-        />
-        <SettingRow
-          icon="archive"
-          title="导出与备份"
-          sub={
-            preferences.lastExportAt
-              ? `上次导出：${new Date(preferences.lastExportAt).toLocaleString("zh-CN")}`
-              : "本地优先保存 · 应用更新不清除数据"
-          }
-          onClick={() => setSelected("导出与备份")}
-        />
-      </SettingsGroup>
-      <p className="settings-foot">VESPER 0.5 · CODEX APP-SERVER</p>
-      {selected === "Appearance" ? (
-        <AppearanceModal
-          accent={accent}
-          onAccent={onAccent}
-          onBackground={onBackground}
-          onClose={closeDetail}
-        />
+      <PageIntro eyebrow="PREFERENCES" title="Settings" text="Make Vesper feel like you." />
+      <div className="settings-category-list settings-accordion">
+        <section className="surface settings-accordion-item"><SettingRow icon="sparkles" title="Autonomous Wake" sub="Schedule, controls and recent activity" onClick={() => setSelected("Autonomous Wake")} /></section>
+        {[
+          ["sparkles", "Agent", "Model connection and voice"],
+          ["link", "Tools", "MCP connections and notifications"],
+          ["archive", "Data", "Memory permissions, export and backup"],
+        ].map(([icon, title, description]) => (
+          <section className="surface settings-accordion-item" key={title}>
+            <SettingRow icon={icon} title={title} sub={description}
+              expanded={category === title} controls={`settings-options-${title}`}
+              onClick={() => setCategory(current => current === title ? null : title)} />
+            <div id={`settings-options-${title}`} className="settings-accordion-content" hidden={category !== title}>
+        {title === "Agent" && <>
+          <SettingRow icon="sparkles" title="Codex Server" sub="Model service and connection" onClick={() => setSelected("Codex Server")} />
+          <SettingRow icon="volume" title="Agent Voice (TTS)" sub="Voice service and voice selection" onClick={() => setSelected("Agent 声音")} />
+        </>}
+        {title === "Tools" && <>
+          <SettingRow icon="link" title="MCP Servers" sub="Connect external tools and services" onClick={() => setSelected("MCP 工具")} />
+          <SettingRow icon="link" title="Vesper MCP" sub="Connect external AI to journals, notes and memory" onClick={() => setSelected("Vesper MCP")} />
+          <SettingRow icon="bell" title="Notification" sub="Web Push and Apple notification permissions" onClick={() => setSelected("Notification")} />
+          <SettingRow icon="bell" title="Notification Preferences" sub={`${preferences.reminders ? "Reminders " : ""}${preferences.anniversaries ? "Dates " : ""}${preferences.agentNotes ? "Rowan’s notes" : ""}`.trim() || "All off"} onClick={() => setSelected("通知偏好")} />
+        </>}
+        {title === "Data" && <>
+          <SettingRow icon="lock" title="Memory Permissions" sub="Control access to journals, notes and chat separately" onClick={() => setSelected("记忆权限")} />
+          <SettingRow icon="archive" title="Export &amp; Backup" sub={preferences.lastExportAt ? `Last export: ${new Date(preferences.lastExportAt).toLocaleString("en-US")}` : "Saved locally · App updates preserve your data"} onClick={() => setSelected("导出与备份")} />
+        </>}
+            </div>
+          </section>
+        ))}
+      </div>
+      {selected === "Autonomous Wake" ? (
+        <WakeVisualizer onClose={closeDetail} />
+      ) : selected === "Notification" ? (
+        <NotificationSettings onClose={closeDetail} onWebPush={() => setSelected("Web Push")} />
       ) : selected === "Codex Server" ? (
         <CodexConnectionModal onClose={closeDetail} />
       ) : selected === "MCP 工具" ? (
         <ExternalMcpModal onClose={closeDetail} />
       ) : selected === "Vesper MCP" ? (
         <VesperMcpModal onClose={closeDetail} />
-      ) : selected === "自主唤醒" ? (
-        <WakeVisualizer preferences={preferences} onClose={closeDetail} />
+
       ) : selected === "Agent 声音" ? (
         <VoiceSettingsModal onClose={closeDetail} />
       ) : selected &&
@@ -5345,7 +5188,7 @@ function SettingsPage({
             environment={environment}
             onEnvironment={onEnvironment}
             onNotificationPermission={setNotificationPermission}
-            onClose={closeDetail}
+            onClose={selected === "Web Push" ? () => setSelected("Notification") : closeDetail}
           />
         )
       )}
@@ -5353,39 +5196,106 @@ function SettingsPage({
   );
 }
 
-function WakeVisualizer({ preferences, onClose }: { preferences: VesperPreferences; onClose: () => void }) {
-  const [tick, setTick] = useState(0);
-  const [previewPulse, setPreviewPulse] = useState(0);
-  const runtime = readLocalValue("vesper-wake-runtime-v1", {
-    checkedAt: 0, cumulative: 0, threshold: 1, lastWakeAt: 0, generation: 0,
-  });
+type WakeRuntime = {
+  configVersion?: number;
+  prompt?: string; defaultPrompt?: string; promptMaxLength?: number;
+  config?: { enabled: boolean; intervalMinutes: number | null };
+  heartbeat?: number; nextAt?: number; schedulerError?: string;
+  jobs?: { id: string; source: string; status: string; created: number; started?: number;
+    finished?: number; tools: number; decision?: string; tokens?: number;
+    calls?: { name: string; status: string }[] }[];
+};
+
+function WakeVisualizer({ onClose }: { onClose: () => void }) {
+  const [runtime, setRuntime] = useState<WakeRuntime | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [interval, setIntervalValue] = useState("auto");
+  const [prompt, setPrompt] = useState("");
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const initialized = useRef(false);
+  const savingRef = useRef(false);
   useEffect(() => {
-    const update = () => setTick(new Date().getTime());
-    const initial = window.setTimeout(update, 0);
-    const timer = window.setInterval(update, 1000);
-    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
+    let stopped = false;
+    const refresh = async () => {
+      if (savingRef.current) return;
+      try {
+        const response = await fetch(codexHistoryUrl('/wake'), { headers: codexHistoryHeaders(), cache: 'no-store' });
+        if (!response.ok) throw new Error("Cannot load wake settings. Check the server connection.");
+        const value = await response.json() as WakeRuntime;
+        if (stopped || savingRef.current) return;
+        setRuntime(value); setError("");
+        if (!initialized.current && value.config) {
+          setEnabled(value.config.enabled);
+          setIntervalValue(value.config.intervalMinutes === null ? "auto" : String(value.config.intervalMinutes));
+          setPrompt(value.prompt || "");
+          initialized.current = true;
+        }
+      } catch (reason) { if (!stopped) setError(reason instanceof Error ? reason.message : "Connection unavailable."); }
+    };
+    void refresh(); const timer = window.setInterval(refresh, 15000);
+    return () => { stopped = true; window.clearInterval(timer); };
   }, []);
-  const elapsed = tick && runtime.checkedAt ? Math.max(0, tick - runtime.checkedAt) / 3_600_000 : 0;
-  const rate = preferences.careFrequency === "daily" ? 1 / 14 : 1 / 72;
-  const progress = preferences.careFrequency === "off" ? 0 : Math.min(1, (runtime.cumulative + elapsed * rate) / Math.max(.01, runtime.threshold));
-  const estimatedHours = preferences.careFrequency === "off" ? null : Math.max(0, (runtime.threshold - runtime.cumulative) / rate - elapsed);
-  return (
-    <div className="modal-layer">
-      <button className="modal-scrim" onClick={onClose} />
-      <section className="connection-modal wake-visualizer" data-tick={tick}>
-        <div className="modal-head"><button className="settings-back" onClick={onClose}><Icon name="chevron" /></button><div><small>AUTONOMOUS WAKE</small><h2>自主唤醒</h2></div></div>
-        <div key={previewPulse} className={`${preferences.careFrequency === "off" ? "wake-orbit asleep" : "wake-orbit"}${previewPulse ? " previewing" : ""}`} style={{ "--wake-progress": progress } as CSSProperties}><i /><i /><span><Icon name="sparkles" /></span></div>
-        <div className="wake-status-grid">
-          <div><small>当前状态</small><b>{preferences.careFrequency === "off" ? "休眠" : "静候合适时机"}</b></div>
-          <div><small>机会累积</small><b>{Math.round(progress * 100)}%</b></div>
-          <div><small>上次行动</small><b>{runtime.lastWakeAt ? new Date(runtime.lastWakeAt).toLocaleString("zh-CN") : "尚未发生"}</b></div>
-          <div><small>预计窗口</small><b>{estimatedHours === null ? "—" : estimatedHours < 1 ? "一小时内" : `约 ${Math.ceil(estimatedHours)} 小时`}</b></div>
+  const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true; setSaving(true); setError(""); setSaved(false);
+    try {
+      const response = await fetch(codexHistoryUrl('/wake'), { method: 'POST', headers: codexHistoryHeaders(true),
+        body: JSON.stringify({ action: 'configure', enabled, intervalMinutes: interval === 'auto' ? null : Number(interval), ...(runtime?.configVersion && runtime.configVersion >= 2 ? { prompt } : {}) }) });
+      if (!response.ok) throw new Error("Settings were not saved. Please try again.");
+      const value = await response.json() as WakeRuntime;
+      if (!value.configVersion || !value.config) throw new Error("The background service needs an update before settings can be saved.");
+      if ((runtime?.configVersion || 0) >= 2 && ((value.configVersion || 0) < 2 || value.prompt !== prompt)) throw new Error("The prompt was not saved. Update the background service and try again.");
+      setRuntime(value); setSaved(true);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Settings were not saved."); }
+    finally { savingRef.current = false; setSaving(false); }
+  };
+  const format = (seconds?: number) => seconds ? new Date(seconds * 1000).toLocaleString('en-GB', { timeZone: 'Asia/Shanghai', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const alive = !!runtime?.heartbeat && Date.now() / 1000 - runtime.heartbeat < 1000;
+  const supported = (runtime?.configVersion || 0) >= 1;
+  const promptSupported = (runtime?.configVersion || 0) >= 2;
+  const promptInvalid = promptSupported && (!prompt.trim() || [...prompt].length > (runtime?.promptMaxLength || 8000));
+  return <div className="modal-layer"><button className="modal-scrim" aria-label="Close wake settings" onClick={onClose}/>
+    <section className="connection-modal wake-visualizer" role="dialog" aria-modal="true" aria-labelledby="wake-title">
+      <div className="modal-head"><button className="settings-back" aria-label="Back to settings" onClick={onClose}><Icon name="chevron"/></button><div><small>AUTONOMOUS WAKE</small><h2 id="wake-title">Autonomous Wake</h2></div></div>
+      <div className="wake-controls">
+        <label className="wake-toggle"><span>Automatic wake-up</span><input type="checkbox" role="switch" checked={enabled} disabled={!supported || saving} onChange={event => {setEnabled(event.target.checked);setSaved(false);}} /></label>
+        <label>Interval<select value={interval} disabled={!supported || saving} onChange={event => {setIntervalValue(event.target.value);setSaved(false);}}>
+          <option value="auto">Adaptive · 30–120 minutes</option>
+          {[30,60,120,240,360,720,1440].map(minutes => <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} minutes` : `${minutes / 60} hours`}</option>)}
+          {interval !== 'auto' && ![30,60,120,240,360,720,1440].includes(Number(interval)) && <option value={interval}>{interval} minutes</option>}
+        </select></label>
+        <p className="settings-hint">Active chats and quiet requests can postpone a wake-up. Turning this off prevents new automatic runs; a running task may finish.</p>
+        <div className="wake-prompt-editor">
+          <label htmlFor="wake-prompt">Wake prompt</label>
+          <textarea id="wake-prompt" value={prompt} disabled={!promptSupported || saving} rows={8} aria-describedby="wake-prompt-help" onChange={event => {setPrompt(event.target.value);setSaved(false);}} />
+          <p id="wake-prompt-help" className="settings-hint">Describe what you want each wake-up to do. Saved changes apply from the next run; tool permissions and delivery rules remain in effect.</p>
+          <div className="wake-prompt-footer"><small>{[...prompt].length} / {runtime?.promptMaxLength || 8000}</small><button type="button" disabled={!promptSupported || saving} onClick={() => {setPrompt(runtime?.defaultPrompt || "");setSaved(false);}}>Restore default</button></div>
+          {runtime && !promptSupported && <p className="settings-hint">Update the background service to edit the wake prompt.</p>}
+          {promptInvalid && <p role="alert">Enter a prompt of 1–8000 characters.</p>}
         </div>
-        <p className="settings-hint">Vesper 只在白天、达到频率阈值且 AI 已连接时行动；留言、消息或来电会同时触发 Web Push。</p>
-        <button className="reset-background" onClick={() => setPreviewPulse((value) => value + 1)}>预览一次脉冲</button>
-      </section>
-    </div>
-  );
+        <button className="reset-background" disabled={!supported || saving || promptInvalid} onClick={() => void save()}>{saving ? 'Saving…' : 'Save settings'}</button>
+        <p role="status">{saved ? 'Saved. Changes apply from the next run.' : ''}</p>
+      </div>
+      {error && <p role="alert" className="settings-hint">{error}</p>}
+      {runtime && !supported && <p className="settings-hint">Update the background service to enable controls and history.</p>}
+      <div className="wake-status-grid">
+        <div><small>Status</small><b>{!runtime ? 'Loading…' : !alive ? 'Connection unknown' : runtime.config?.enabled === false ? 'Paused' : 'Online'}</b></div>
+        <div><small>Next wake · Beijing time</small><b>{runtime?.config?.enabled === false ? 'Paused' : format(runtime?.nextAt)}</b></div>
+      </div>
+      {runtime?.schedulerError && <p className="settings-hint">The scheduler reported an error. The next wake is not confirmed.</p>}
+      <div className="wake-history"><h3>Recent activity</h3>
+        {supported && !runtime?.jobs?.length && <p>No wake records yet.</p>}
+        {runtime?.jobs?.map(job => <details key={job.id}>
+          <summary><span>{format(job.created)}</span><b>{job.status.replaceAll('_', ' ')}</b></summary>
+          <dl><dt>Source</dt><dd>{job.source}</dd><dt>Started</dt><dd>{format(job.started)}</dd><dt>Finished</dt><dd>{format(job.finished)}</dd><dt>Tools</dt><dd>{job.tools}</dd>{job.decision && <><dt>Outcome</dt><dd>{job.decision.replaceAll('_', ' ')}</dd></>}</dl>
+          {!!job.calls?.length && <ul>{job.calls.map((call, index) => <li key={index}>{call.name || 'Tool'} · {call.status}</li>)}</ul>}
+          <small>Run {job.id}</small>
+        </details>)}
+        <p className="settings-hint">Latest 50 runs. All times are in Beijing time. Replies appear in chat; a saved reply does not confirm a phone notification.</p>
+      </div>
+    </section></div>;
 }
 
 const VESPER_MCP_URL = "https://mcp.vesper.r-vera.com/mcp";
@@ -5406,7 +5316,7 @@ type ExternalMcpEntry = {
   resource?: string;
 };
 
-function ExternalMcpModal({ onClose }: { onClose: () => void }) {
+function ExternalMcpModal({ onClose, context }: { onClose: () => void; context?: "desire" }) {
   const [servers, setServers] = useLocalDocument<ExternalMcpEntry[]>("external-mcp-servers", []);
   const [message, setMessage] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -5415,7 +5325,11 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
     return value;
   });
   const [testingId, setTestingId] = useState("");
-  const [editor, setEditor] = useState<ExternalMcpEntry | null>(null);
+  const [authorizingId, setAuthorizingId] = useState("");
+  const [editor, setEditor] = useState<ExternalMcpEntry | null>(() => context === "desire" && !servers.some(server => /desire|欲望/i.test(server.name))
+    ? { id: crypto.randomUUID(), name: "Desire", url: "", token: "", enabled: true, authMode: "none" }
+    : null);
+  const [saving, setSaving] = useState(false);
   const [editorMessage, setEditorMessage] = useState("");
   const syncedConnections = useRef(new Set<string>());
   const configuredServers = servers.filter(
@@ -5432,7 +5346,7 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
   const add = () => {
     setEditor({
       id: crypto.randomUUID(),
-      name: "",
+      name: context === "desire" ? "Desire" : "",
       url: "",
       token: "",
       enabled: true,
@@ -5442,16 +5356,32 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
   };
   const updateEditor = (patch: Partial<ExternalMcpEntry>) =>
     setEditor((current) => (current ? { ...current, ...patch } : current));
-  const saveEditor = () => {
-    if (!editor) return;
+  const saveEditor = async () => {
+    if (!editor || saving) return;
     const next = {
       ...editor,
       name: editor.name.trim(),
       url: editor.url.trim(),
     };
     if (!next.name && !next.url) {
-      setEditorMessage("请填写名称或 MCP 服务地址");
+      setEditorMessage("Enter a name or MCP server URL.");
       return;
+    }
+    if (context === "desire" && (!next.url || !next.name)) {
+      setEditorMessage("Enter a name and MCP server URL.");
+      return;
+    }
+    if (context === "desire" && next.authMode !== "oauth") {
+      setSaving(true);
+      try {
+        await syncToCodex(next);
+        setMessage("Connection saved. Return to Desire to load the latest state.");
+      } catch (reason) {
+        setEditorMessage(reason instanceof Error ? reason.message : "Connection failed. Check the URL and credentials.");
+        return;
+      } finally {
+        setSaving(false);
+      }
     }
     setServers((current) =>
       current.some((server) => server.id === next.id)
@@ -5477,7 +5407,7 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
       }),
     });
     const result = await response.json().catch(() => ({})) as { serverName?: string; toolCount?: number; error?: string };
-    if (!response.ok) throw new Error(result.error || "无法同步 MCP 给 Codex");
+    if (!response.ok) throw new Error(result.error || "Could not sync MCP tools to Codex");
     return result;
   };
   useEffect(() => {
@@ -5491,15 +5421,20 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
     }
   }, [servers]);
   const authorize = async (server: ExternalMcpEntry) => {
+    if (authorizingId) return;
     if (!server.url) {
-      setMessage("请先填写 MCP 服务地址");
+      setMessage("Enter the MCP server URL first.");
       return;
     }
+    setAuthorizingId(server.id);
+    let stage = "Reading OAuth configuration";
     try {
-      setMessage("正在打开授权页面…");
-      const redirectUri = `${window.location.origin}/mcp/oauth/callback`;
-      const discoveryResponse = await fetch("/api/mcp/oauth/discover", {
+      const native = Capacitor.getPlatform() === "ios";
+      setMessage(`${stage}…`);
+      const redirectUri = native ? "https://vesper.r-vera.com/mcp/oauth/callback" : `${window.location.origin}/mcp/oauth/callback`;
+      const discoveryResponse = await fetch(apiUrl("/api/mcp/oauth/discover"), {
         method: "POST",
+        signal: AbortSignal.timeout(60000),
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: server.url, redirectUri, clientId: server.clientId }),
       });
@@ -5514,10 +5449,10 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
         error?: string;
       };
       if (!discoveryResponse.ok || !discovered.authorizationUrl || !discovered.tokenUrl) {
-        throw new Error(discovered.error || "无法自动发现 OAuth 授权页面");
+        throw new Error(discovered.error || "Could not discover the OAuth authorization page");
       }
       if (discovered.needsClientId || !discovered.clientId) {
-        throw new Error("该服务不支持自动注册，请填写它分配给 Vesper 的 Client ID 后重试");
+        throw new Error("This service requires a Client ID. Enter the one assigned to Vesper and try again.");
       }
       update(server.id, {
         authorizationUrl: discovered.authorizationUrl,
@@ -5527,26 +5462,21 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
         scopes: discovered.scopes,
         resource: discovered.resource,
       });
+      if (context === "desire") window.sessionStorage.setItem("vesper-mcp-return", "desire");
       const verifier = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll("-", "");
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
       const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
         .replaceAll("+", "-")
         .replaceAll("/", "_")
         .replaceAll("=", "");
-      const state = crypto.randomUUID();
-      window.sessionStorage.setItem(
-        "vesper-mcp-oauth-pending",
-        JSON.stringify({
-          serverId: server.id,
-          state,
-          verifier,
-          tokenUrl: discovered.tokenUrl,
-          clientId: discovered.clientId,
-          clientSecret: discovered.clientSecret || server.clientSecret,
-          redirectUri,
-          resource: discovered.resource,
-        }),
-      );
+      const state = `${native ? NATIVE_OAUTH_PREFIX : ""}${crypto.randomUUID()}`;
+      const pending = {
+        serverId: server.id, state, verifier,
+        tokenUrl: discovered.tokenUrl, clientId: discovered.clientId,
+        clientSecret: discovered.clientSecret || server.clientSecret,
+        redirectUri, resource: discovered.resource,
+      };
+      if (!native) window.sessionStorage.setItem("vesper-mcp-oauth-pending", JSON.stringify(pending));
       update(server.id, { oauthStatus: "pending" });
       const target = new URL(discovered.authorizationUrl);
       target.searchParams.set("response_type", "code");
@@ -5557,24 +5487,54 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
       target.searchParams.set("code_challenge_method", "S256");
       if (discovered.scopes) target.searchParams.set("scope", discovered.scopes);
       target.searchParams.set("resource", discovered.resource || server.url);
-      window.location.assign(target.toString());
+      if (!native) {
+        window.location.assign(target.toString());
+        return;
+      }
+      stage = "Waiting for iOS authorization";
+      setMessage(`${stage}…`);
+      const callback = await nativeMcpOAuth.authorize({ url: target.toString() });
+      const code = nativeOAuthCode(callback.url, state);
+      stage = "Completing OAuth authorization";
+      setMessage(`${stage}…`);
+      const exchange = await fetch(apiUrl("/api/mcp/oauth"), {
+        method: "POST", signal: AbortSignal.timeout(30000), headers: appHeaders(true),
+        body: JSON.stringify({ ...pending, code }),
+      });
+      const result = await exchange.json() as { accessToken?: string; error?: string };
+      if (!exchange.ok || !result.accessToken) throw new Error(result.error || "OAuth authorization failed");
+      const authorized = { ...server, token: result.accessToken, oauthStatus: "authorized" as const };
+      const signature = `${server.id}:${server.url}:${result.accessToken}:${server.enabled}`;
+      syncedConnections.current.add(signature);
+      update(server.id, { token: result.accessToken, oauthStatus: "authorized" });
+      window.sessionStorage.removeItem("vesper-mcp-return");
+      try {
+        await syncToCodex(authorized);
+        setMessage("Authorized and synced. Start a new conversation to use these tools.");
+      } catch {
+        syncedConnections.current.delete(signature);
+        setMessage("Authorized. Tool sync failed; use Test to retry.");
+      }
     } catch (reason) {
-      update(server.id, { oauthStatus: undefined });
-      setMessage(reason instanceof Error ? reason.message : "无法打开 OAuth 授权页面");
+      update(server.id, { oauthStatus: server.token ? "authorized" : undefined });
+      window.sessionStorage.removeItem("vesper-mcp-return");
+      setMessage(`${stage}: ${reason instanceof Error ? reason.message : "Authorization failed"}`);
+    } finally {
+      setAuthorizingId("");
     }
   };
   const test = async (server: ExternalMcpEntry) => {
     if (!server.url) {
-      setMessage("请先填写 MCP 服务地址");
+      setMessage("Enter the MCP server URL first.");
       return;
     }
     setTestingId(server.id);
     setMessage("");
     try {
       const result = await syncToCodex(server);
-      setMessage(`连接成功${result.serverName ? ` · ${result.serverName}` : ""}${typeof result.toolCount === "number" ? ` · ${result.toolCount} 个工具` : ""}；已同步给 Codex，新建对话后即可使用。`);
+      setMessage(context === "desire" ? "Connected and tools synced. Return to Desire to refresh." : `Connected${result.serverName ? ` · ${result.serverName}` : ""}${typeof result.toolCount === "number" ? ` · ${result.toolCount} tools` : ""}. Synced to Codex; start a new conversation to use them.`);
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "MCP 连接失败");
+      setMessage(reason instanceof Error ? reason.message : "MCP connection failed");
     } finally {
       setTestingId("");
     }
@@ -5585,51 +5545,51 @@ function ExternalMcpModal({ onClose }: { onClose: () => void }) {
       {editor ? (
         <section className="connection-modal external-mcp-modal mcp-editor-modal">
           <div className="modal-head">
-            <button className="settings-back" onClick={closeEditor} aria-label="返回"><Icon name="chevron" /></button>
-            <div><small>MCP SERVER</small><h2>{editor.name ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</h2></div>
+            <button className="settings-back" onClick={closeEditor} aria-label="Back"><Icon name="chevron" /></button>
+            <div><small>MCP SERVER</small><h2>{editor.name ? "Edit MCP server" : "Add MCP server"}</h2></div>
             <span className="mcp-editor-head-spacer" aria-hidden="true" />
           </div>
           <div className="mcp-editor-scroll">
-            <label className="profile-field"><span>名称</span><input value={editor.name} onChange={(event) => updateEditor({ name: event.target.value })} /></label>
-            <label className="profile-field"><span>Streamable HTTP 地址</span><input value={editor.url} placeholder="https://example.com/mcp" autoCapitalize="none" autoCorrect="off" onChange={(event) => updateEditor({ url: event.target.value })} /></label>
-            <div className="mcp-auth-choice"><span>OAuth 授权</span><div><button className={(editor.authMode || "none") === "none" ? "selected" : ""} onClick={() => updateEditor({ authMode: "none" })}>无</button><button className={editor.authMode === "oauth" ? "selected" : ""} onClick={() => updateEditor({ authMode: "oauth" })}>有</button></div></div>
-            {editor.authMode === "oauth" ? <><p className="settings-hint">Vesper 会自动发现 OAuth 页面并跳转授权；若服务要求预先登记回调地址，请填写 <code>https://vesper.r-vera.com/mcp/oauth/callback</code>。</p><label className="profile-field"><span>Client ID（服务要求时填写）</span><input value={editor.clientId || ""} onChange={(event) => updateEditor({ clientId: event.target.value })} /></label></> : <label className="profile-field"><span>Bearer Token（可选）</span><input type="password" value={editor.token} onChange={(event) => updateEditor({ token: event.target.value })} /></label>}
-            <button className={editor.enabled ? "mcp-enable on" : "mcp-enable"} onClick={() => updateEditor({ enabled: !editor.enabled })}><span>{editor.enabled ? "已启用" : "已停用"}</span><i><u /></i></button>
+            <label className="profile-field"><span>Name</span><input value={editor.name} onChange={(event) => updateEditor({ name: event.target.value })} /></label>
+            <label className="profile-field"><span>Streamable HTTP URL</span><input value={editor.url} placeholder="https://example.com/mcp" autoCapitalize="none" autoCorrect="off" onChange={(event) => updateEditor({ url: event.target.value })} /></label>
+            <div className="mcp-auth-choice"><span>OAuth authorization</span><div><button className={(editor.authMode || "none") === "none" ? "selected" : ""} onClick={() => updateEditor({ authMode: "none" })}>None</button><button className={editor.authMode === "oauth" ? "selected" : ""} onClick={() => updateEditor({ authMode: "oauth" })}>Yes</button></div></div>
+            {editor.authMode === "oauth" ? <><p className="settings-hint">Vesper discovers and opens the OAuth page automatically. If the service requires a registered callback URL, use <code>https://vesper.r-vera.com/mcp/oauth/callback</code>。</p><label className="profile-field"><span>Client ID (if required)</span><input value={editor.clientId || ""} onChange={(event) => updateEditor({ clientId: event.target.value })} /></label></> : <label className="profile-field"><span>Bearer Token (optional)</span><input type="password" value={editor.token} onChange={(event) => updateEditor({ token: event.target.value })} /></label>}
+            <button className={editor.enabled ? "mcp-enable on" : "mcp-enable"} onClick={() => updateEditor({ enabled: !editor.enabled })}><span>{editor.enabled ? "Enabled" : "Disabled"}</span><i><u /></i></button>
             {editorMessage && <p className="connection-message">{editorMessage}</p>}
           </div>
-          <div className="mcp-editor-actions"><button onClick={closeEditor}>取消</button><button className="save-profile" onClick={saveEditor}>保存</button></div>
+          <div className="mcp-editor-actions"><button disabled={saving} onClick={closeEditor}>Cancel</button><button className="save-profile" disabled={saving} onClick={() => void saveEditor()}>{saving ? "Connecting…" : context === "desire" && editor.authMode !== "oauth" ? "Save and connect" : "Save"}</button></div>
         </section>
       ) : (
         <section className="connection-modal external-mcp-modal">
           <div className="modal-head">
-            <button className="settings-back" onClick={onClose} aria-label="返回"><Icon name="chevron" /></button>
-            <div><small>TOOL CONNECTIONS</small><h2>MCP 工具</h2></div>
-            <button onClick={add} aria-label="添加 MCP"><Icon name="plus" /></button>
+            <button className="settings-back" onClick={onClose} aria-label="Back"><Icon name="chevron" /></button>
+            <div><small>TOOL CONNECTIONS</small><h2>{context === "desire" ? "Desire connection" : "MCP Tools"}</h2></div>
+            <button onClick={add} aria-label="Add MCP"><Icon name="plus" /></button>
           </div>
           <div className="mcp-list-scroll">
-            <p className="mcp-list-intro">在这里接入搜索、文件、记忆库或其他第三方 MCP。AI 连接中的 MCP 是对话运行端，这里则是提供给 AI 使用的工具目录。</p>
+            <p className="mcp-list-intro">{context === "desire" ? "Connect your Desire MCP URL. For OAuth services, save, authorize, then test to sync. Return here to view the state." : "Connect search, files, memory or other MCP tools here. These tools are available to your AI; the MCP option in AI Connection is the conversation service."}</p>
             <div className="mcp-server-list">
-              {!configuredServers.length && <EmptyState text="还没有接入第三方 MCP。" />}
+              {!configuredServers.length && <EmptyState text="No external MCP servers connected yet." />}
               {configuredServers.map((server) => (
                 <article className="mcp-server-card" key={server.id}>
                   <div className="mcp-server-summary">
                     <span className={server.enabled ? "mcp-live-dot" : "mcp-live-dot off"} />
-                    <div><b>{server.name || "未命名 MCP"}</b><small>{server.url || "尚未填写地址"} · {server.authMode === "oauth" ? `OAuth ${server.oauthStatus === "authorized" ? "已授权" : "待授权"}` : "Bearer / 无授权"}</small></div>
+                    <div><b>{server.name || "Untitled MCP"}</b><small>{server.url || "No URL set"} · {server.authMode === "oauth" ? `OAuth ${server.oauthStatus === "authorized" ? "Allowed" : "Authorization needed"}` : "Bearer / No authorization"}</small></div>
                   </div>
                   <div className="mcp-card-actions">
-                    <button disabled={testingId === server.id} onClick={() => void test(server)}>{testingId === server.id ? "测试中" : "测试"}</button>
-                    {server.authMode === "oauth" && <button onClick={() => void authorize(server)}>授权</button>}
-                    <button onClick={() => openEditor(server)}>编辑</button>
+                    <button disabled={testingId === server.id} onClick={() => void test(server)}>{testingId === server.id ? "Testing" : "Test"}</button>
+                    {server.authMode === "oauth" && <button disabled={Boolean(authorizingId)} onClick={() => void authorize(server)}>{authorizingId === server.id ? "Authorizing…" : "Authorize"}</button>}
+                    <button onClick={() => openEditor(server)}>Edit</button>
                     <button onClick={() => void (async () => {
                       try {
                         const response = await fetch(`${apiUrl("/api/mcp/connections")}?id=${encodeURIComponent(server.id)}`, { method: "DELETE", headers: appHeaders(true), cache: "no-store" });
                         const result = await response.json().catch(() => ({})) as { error?: string };
-                        if (!response.ok) throw new Error(result.error || "无法删除服务端 MCP 凭证");
+                        if (!response.ok) throw new Error(result.error || "Could not delete server-side MCP credentials");
                         setServers((current) => current.filter((item) => item.id !== server.id));
                       } catch (reason) {
-                        setMessage(reason instanceof Error ? reason.message : "删除 MCP 失败");
+                        setMessage(reason instanceof Error ? reason.message : "Could not delete MCP");
                       }
-                    })()}>删除</button>
+                    })()}>Delete</button>
                   </div>
                 </article>
               ))}
@@ -5655,7 +5615,7 @@ function VesperMcpModal({ onClose }: { onClose: () => void }) {
   };
   const setup = async (rotate = false) => {
     const nextToken = rotate ? generateToken() : draft.trim() || generateToken();
-    if (nextToken.length < 16) return setMessage("访问令牌至少需要 16 位。");
+    if (nextToken.length < 16) return setMessage("The access token must be at least 16 characters.");
     setVerified(false);
     setToolCount(null);
     setBusy(true);
@@ -5667,7 +5627,7 @@ function VesperMcpModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ token: nextToken }),
       });
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error || `配置失败（${response.status}）`);
+      if (!response.ok) throw new Error(result.error || `Setup failed (${response.status})`);
       setToken(nextToken);
       setDraft(nextToken);
       setVerified(true);
@@ -5677,17 +5637,17 @@ function VesperMcpModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ url: VESPER_MCP_URL, token: nextToken }),
       });
       const tested = (await testResponse.json()) as { toolCount?: number; error?: string };
-      if (!testResponse.ok) throw new Error(`令牌已保存，但连接测试未通过：${tested.error || "请稍后重试"}`);
+      if (!testResponse.ok) throw new Error(`Token saved, but the connection test failed: ${tested.error || "Please try again later."}`);
       setToolCount(tested.toolCount ?? 0);
-      setMessage(`MCP 已启用并连接成功，发现 ${tested.toolCount ?? 0} 个 tools。`);
+      setMessage(`MCP enabled and connected. Found ${tested.toolCount ?? 0} tools.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "MCP 配置失败");
+      setMessage(error instanceof Error ? error.message : "MCP setup failed");
     } finally {
       setBusy(false);
     }
   };
   const testTools = async () => {
-    if (!draft.trim()) return setMessage("请先生成并启用连接令牌");
+    if (!draft.trim()) return setMessage("Generate and enable a connection token first.");
     setVerified(false);
     setBusy(true);
     setMessage("");
@@ -5698,26 +5658,26 @@ function VesperMcpModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ url: VESPER_MCP_URL, token: draft.trim() }),
       });
       const result = (await response.json()) as { toolCount?: number; serverName?: string; error?: string };
-      if (!response.ok) throw new Error(result.error || "MCP tools 测试失败");
+      if (!response.ok) throw new Error(result.error || "MCP tools test failed");
       setToken(draft.trim());
       setVerified(true);
       setToolCount(result.toolCount ?? 0);
-      setMessage(`${result.serverName || "Vesper"} 已连接，发现 ${result.toolCount ?? 0} 个 tools。`);
+      setMessage(`${result.serverName || "Vesper"} connected. Found ${result.toolCount ?? 0} tools.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "MCP tools 测试失败");
+      setMessage(error instanceof Error ? error.message : "MCP tools test failed");
     } finally {
       setBusy(false);
     }
   };
   const copy = async (tokenOnly = false) => {
-    if (!verified || draft.trim() !== token) return setMessage("请先保存或测试通过，再复制连接参数。");
+    if (!verified || draft.trim() !== token) return setMessage("Save or test the connection before copying its settings.");
     try {
       await navigator.clipboard.writeText(
         tokenOnly ? token : JSON.stringify({ url: VESPER_MCP_URL, headers: { Authorization: `Bearer ${token}` } }, null, 2),
       );
-      setMessage(tokenOnly ? "访问令牌已复制，可直接粘贴到 OAuth 授权页。" : "连接参数已复制");
+      setMessage(tokenOnly ? "Access token copied. Paste it into the OAuth authorization page." : "Connection settings copied");
     } catch {
-      setMessage("无法访问剪贴板，请允许浏览器复制权限后重试。令牌仍已保存，无需重新生成。");
+      setMessage("Clipboard unavailable. Allow copying and try again. Your token is still saved.");
     }
   };
   return (
@@ -5725,29 +5685,29 @@ function VesperMcpModal({ onClose }: { onClose: () => void }) {
       <button className="modal-scrim" onClick={onClose} />
       <section className="connection-modal ai-connection-modal">
         <div className="modal-head">
-          <button className="settings-back" onClick={onClose} aria-label="返回"><Icon name="chevron" /></button>
+          <button className="settings-back" onClick={onClose} aria-label="Back"><Icon name="chevron" /></button>
           <div><small>VESPER MCP</small><h2>Vesper MCP</h2></div>
         </div>
         <div className="connection-symbol"><Icon name="link" /></div>
-        <p>Vesper 会作为一台 MCP 工具服务器，向 Codex 等支持远程 MCP 的 AI 提供便笺、提醒、日记、纪念日、记忆与通知工具。</p>
+        <p>Vesper provides notes, reminders, journals, dates, memory and notification tools to Codex and other AI clients that support remote MCP.</p>
         <div className="parameter-form">
           <label className="profile-field">
-            <span>Streamable HTTP 地址</span>
+            <span>Streamable HTTP URL</span>
             <input value={VESPER_MCP_URL} readOnly />
           </label>
           <label className="profile-field">
-            <span>访问令牌</span>
-            <input type="password" disabled={busy} value={draft} autoCapitalize="none" autoCorrect="off" placeholder="留空时自动生成安全令牌" onChange={(event) => { setDraft(event.target.value); setVerified(false); setToolCount(null); }} />
+            <span>Access token</span>
+            <input type="password" disabled={busy} value={draft} autoCapitalize="none" autoCorrect="off" placeholder="Leave blank to generate a secure token" onChange={(event) => { setDraft(event.target.value); setVerified(false); setToolCount(null); }} />
           </label>
         </div>
-        <p className="settings-hint">保存成功后，ChatGPT 连接时选择 OAuth，在授权页只粘贴访问令牌，不带 Bearer。旧令牌遗失或失效时，可用当前已配对设备生成新令牌；替换后，旧 Bearer 连接需改用新令牌。</p>
+        <p className="settings-hint">After saving, choose OAuth in ChatGPT and paste only the access token, without “Bearer”. A paired device can replace a lost or expired token. Existing Bearer connections must then use the new token.</p>
         {message && <p className="connection-message">{message}</p>}
-        {toolCount !== null && <p className="settings-hint">当前远程目录：{toolCount} 个 MCP tools</p>}
-        <button className="save-profile" disabled={busy} onClick={() => void setup()}>{busy ? "配置中…" : token ? "保存并测试 MCP" : "生成令牌并启用 MCP"}</button>
-        <button className="reset-background" disabled={busy} onClick={() => void setup(true)}>生成新令牌并替换</button>
-        <button className="reset-background" disabled={busy || !draft.trim()} onClick={() => void testTools()}>测试 MCP tools</button>
-        <button className="reset-background" disabled={busy || !verified || draft.trim() !== token} onClick={() => void copy(true)}>复制访问令牌（OAuth）</button>
-        <button className="reset-background" disabled={busy || !verified || draft.trim() !== token} onClick={() => void copy()}>复制 AI 官端连接参数</button>
+        {toolCount !== null && <p className="settings-hint">Remote catalog: {toolCount}  MCP tools</p>}
+        <button className="save-profile" disabled={busy} onClick={() => void setup()}>{busy ? "Configuring…" : token ? "Save and test MCP" : "Generate token and enable MCP"}</button>
+        <button className="reset-background" disabled={busy} onClick={() => void setup(true)}>Generate replacement token</button>
+        <button className="reset-background" disabled={busy || !draft.trim()} onClick={() => void testTools()}>Test MCP tools</button>
+        <button className="reset-background" disabled={busy || !verified || draft.trim() !== token} onClick={() => void copy(true)}>Copy access token (OAuth)</button>
+        <button className="reset-background" disabled={busy || !verified || draft.trim() !== token} onClick={() => void copy()}>Copy AI client connection settings</button>
       </section>
     </div>
   );
@@ -5795,8 +5755,8 @@ function CodexConnectionModal({ onClose }: { onClose: () => void }) {
         </div>
         <p className="settings-hint">Your private Codex tunnel is preconfigured. Keep this endpoint as <code>wss://codex.r-vera.com</code> and enter your Vesper device token.</p>
         <label className="profile-field"><span>WebSocket endpoint (optional)</span><input value={endpoint} placeholder="wss://codex.example.com" onChange={(event) => setEndpoint(event.target.value)} /></label>
-        <label className="profile-field"><span>项目工作目录（可选）</span><input value={workspace} placeholder="/home/ubuntu/Vesper" onChange={e => setWorkspace(e.target.value)} /></label>
-        <p className="settings-hint">填写 app-server 所在机器上的项目路径，下次发送消息时使用。代码和依赖需已在该目录；文件修改、命令和网络访问仍按服务器权限审批。</p>
+        <label className="profile-field"><span>Project workspace (optional)</span><input value={workspace} placeholder="/home/ubuntu/Vesper" onChange={e => setWorkspace(e.target.value)} /></label>
+        <p className="settings-hint">Enter the project path on the app-server machine for your next message. Code and dependencies must already be there. Server permissions still control file changes, commands and network access.</p>
         <label className="profile-field"><span>Vesper device token</span><input type="password" value={token} placeholder="The VESPER_APP_TOKEN value" onChange={(event) => setToken(event.target.value)} /></label>
         {message && <p className="connection-message">{message}</p>}
         <button className="save-profile" disabled={busy} onClick={() => void save()}>{busy ? "Testing…" : "Save and test"}</button>
@@ -5831,21 +5791,21 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
   ];
   const fields: Record<AiConnectionStore["active"], Array<{ key: string; label: string; placeholder?: string; type?: string }>> = {
     api: [
-      { key: "baseUrl", label: "API 地址", placeholder: "https://api.openai.com/v1" },
+      { key: "baseUrl", label: "API URL", placeholder: "https://api.openai.com/v1" },
       { key: "apiKey", label: "API Key", type: "password", placeholder: "sk-…" },
     ],
     mcp: [
-      { key: "url", label: "MCP 服务地址", placeholder: "https://…/mcp" },
-      { key: "transport", label: "传输方式", placeholder: "Streamable HTTP / SSE" },
-      { key: "token", label: "授权令牌", type: "password", placeholder: "Bearer token（可选）" },
-      { key: "serverName", label: "服务名称", placeholder: "我的 MCP" },
-      { key: "toolName", label: "对话工具名称", placeholder: "chat" },
+      { key: "url", label: "MCP server URL", placeholder: "https://…/mcp" },
+      { key: "transport", label: "Transport", placeholder: "Streamable HTTP / SSE" },
+      { key: "token", label: "Access token", type: "password", placeholder: "Bearer token (optional)" },
+      { key: "serverName", label: "Service name", placeholder: "My MCP" },
+      { key: "toolName", label: "Chat tool name", placeholder: "chat" },
     ],
     cyberboss: [
-      { key: "endpoint", label: "运行端地址", placeholder: "https://api.vesper.r-vera.com" },
-      { key: "deviceToken", label: "设备配对口令", type: "password", placeholder: "vsp_…" },
-      { key: "runtime", label: "运行时名称", placeholder: "CyberBoss / Codex" },
-      { key: "workspace", label: "工作区", placeholder: "/path/to/workspace（可选）" },
+      { key: "endpoint", label: "Service URL", placeholder: "https://api.vesper.r-vera.com" },
+      { key: "deviceToken", label: "Device pairing code", type: "password", placeholder: "vsp_…" },
+      { key: "runtime", label: "Runtime name", placeholder: "CyberBoss / Codex" },
+      { key: "workspace", label: "Workspace", placeholder: "/path/to/workspace (optional)" },
     ],
   };
   const switchChoice = (next: AiConnectionStore["active"]) => {
@@ -5864,13 +5824,13 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ baseUrl: form.baseUrl, apiKey: form.apiKey }),
       });
       const result = await response.json() as { models?: string[]; error?: string };
-      if (!response.ok) throw new Error(result.error || "获取模型失败");
+      if (!response.ok) throw new Error(result.error || "Could not load models");
       const available = result.models || [];
       setModels(available);
       setForm((current) => ({ ...current, availableModels: JSON.stringify(available), model: current.model || available[0] || "" }));
-      setMessage(available.length ? `已获取 ${available.length} 个可用模型` : "接口没有返回可用模型");
+      setMessage(available.length ? `Loaded ${available.length} available models` : "The API returned no available models.");
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "获取模型失败");
+      setMessage(reason instanceof Error ? reason.message : "Could not load models");
     } finally {
       setBusy(false);
     }
@@ -5885,39 +5845,39 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
     try {
       if (active === "api") {
         if (!form.baseUrl || !form.apiKey || !form.model)
-          throw new Error("请填写 Base URL、模型和 API Key");
+          throw new Error("Enter a Base URL, model and API Key.");
         const response = await fetch("/api/ai/models", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ baseUrl: form.baseUrl, apiKey: form.apiKey }),
         });
-        if (!response.ok) throw new Error(`API 返回 ${response.status}`);
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
       } else if (active === "mcp") {
-        if (!form.url) throw new Error("请填写 MCP 服务地址");
+        if (!form.url) throw new Error("Enter the MCP server URL.");
         const response = await fetch("/api/mcp", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ url: form.url, token: form.token }),
         });
         const result = await response.json() as { toolCount?: number; error?: string };
-        if (!response.ok) throw new Error(result.error || `MCP 返回 ${response.status}`);
-        setMessage(`参数已保存，发现 ${result.toolCount || 0} 个 MCP tools`);
+        if (!response.ok) throw new Error(result.error || `MCP returned ${response.status}`);
+        setMessage(`Settings saved. Found ${result.toolCount || 0} MCP tools.`);
         return;
       } else {
-        if (!form.deviceToken) throw new Error("请填写设备配对口令");
+        if (!form.deviceToken) throw new Error("Enter the device pairing code.");
         const endpoint = (form.endpoint || VESPER_API_ORIGIN).replace(/\/$/, "");
         const response = await fetch(`${endpoint}/api/chat?conversationId=main`, {
           headers: { "x-vesper-device-token": form.deviceToken.trim() },
           cache: "no-store",
         });
-        if (!response.ok) throw new Error("配对口令或运行端地址无效");
+        if (!response.ok) throw new Error("Invalid pairing code or service URL");
       }
-      setMessage("参数已保存，连接测试成功");
+      setMessage("Settings saved and connection test passed");
     } catch (reason) {
       setMessage(
         reason instanceof Error
-          ? `参数已保存；${reason.message}`
-          : "参数已保存，测试失败",
+          ? `Settings saved; ${reason.message}`
+          : "Settings saved, but the test failed",
       );
     } finally {
       setBusy(false);
@@ -5928,7 +5888,7 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
       <button className="modal-scrim" onClick={onClose} />
       <section className="connection-modal ai-connection-modal">
         <div className="modal-head">
-          <div><small>AI CONNECTION</small><h2>选择连接方式</h2></div>
+          <div><small>AI CONNECTION</small><h2>Choose connection</h2></div>
           <button onClick={onClose}><Icon name="close" /></button>
         </div>
         <div className="ai-connection-tabs">
@@ -5945,7 +5905,7 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="parameter-form">
           {active === "api" && (
-            <label className="profile-field"><span>接口类型</span>
+            <label className="profile-field"><span>API type</span>
               <select value={form.provider || "OpenAI-compatible"} onChange={(event) => setForm({ ...form, provider: event.target.value })}>
                 <option value="OpenAI-compatible">OpenAI-compatible</option>
                 <option value="Anthropic">Anthropic</option>
@@ -5968,11 +5928,11 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
           {active === "api" && (
             <>
               <button className="model-fetch-button" disabled={busy || !form.baseUrl || !form.apiKey} onClick={() => void fetchModels()}>
-                {busy ? "正在读取…" : "读取这个 Key 的可用模型"}
+                {busy ? "Loading…" : "Load models available to this key"}
               </button>
-              <label className="profile-field"><span>当前模型</span>
+              <label className="profile-field"><span>Current model</span>
                   <select value={form.model || ""} onChange={(event) => setForm({ ...form, model: event.target.value })}>
-                    <option value="">先读取模型</option>
+                    <option value="">Load models first</option>
                     {form.model && !models.includes(form.model) && <option value={form.model}>{form.model}</option>}
                     {models.map((model) => <option value={model} key={model}>{model}</option>)}
                   </select>
@@ -5982,7 +5942,7 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
         </div>
         {message && <p className="connection-message">{message}</p>}
         <button className="save-profile" disabled={busy} onClick={() => void save()}>
-          {busy ? "测试中…" : "保存并测试"}
+          {busy ? "Testing…" : "Save and test"}
         </button>
       </section>
     </div>
@@ -6002,7 +5962,7 @@ function CyberbossConnectionModal({
   const verify = async () => {
     const value = token.trim();
     if (!value) {
-      setMessage("请输入设备配对口令");
+      setMessage("Enter the device pairing code");
       return;
     }
     setBusy(true);
@@ -6014,9 +5974,9 @@ function CyberbossConnectionModal({
       if (!response.ok) throw new Error();
       window.localStorage.setItem("vesper-device-token", value);
       onPaired(true);
-      setMessage("设备已配对。启动 CyberBoss 后会自动上线。");
+      setMessage("Device paired. It will connect when CyberBoss starts.");
     } catch {
-      setMessage("配对口令不正确");
+      setMessage("Incorrect pairing code");
     } finally {
       setBusy(false);
     }
@@ -6025,7 +5985,7 @@ function CyberbossConnectionModal({
     window.localStorage.removeItem("vesper-device-token");
     setToken("");
     onPaired(false);
-    setMessage("已移除此设备的配对信息");
+    setMessage("Pairing information removed from this device");
   };
   return (
     <div className="modal-layer">
@@ -6034,7 +5994,7 @@ function CyberbossConnectionModal({
         <div className="modal-head">
           <div>
             <small>CYBERBOSS BRIDGE</small>
-            <h2>连接运行端</h2>
+            <h2>Connect service</h2>
           </div>
           <button onClick={onClose}>
             <Icon name="close" />
@@ -6044,18 +6004,17 @@ function CyberbossConnectionModal({
           <Icon name="chat" />
         </div>
         <p>
-          Vesper 负责手机界面，CyberBoss 在你的电脑或服务器上运行 Codex /
-          Claude、提醒、日记和主动关心。
+          Vesper provides the mobile interface. CyberBoss runs Codex or Claude, reminders, journals and proactive care on your computer or server.
         </p>
         <label className="bridge-token-field">
-          <span>设备配对口令</span>
+          <span>Device pairing code</span>
           <input
             type="password"
             autoCapitalize="none"
             autoCorrect="off"
             value={token}
             onChange={(event) => setToken(event.target.value)}
-            placeholder="粘贴配对口令"
+            placeholder="Paste pairing code"
           />
         </label>
         {message && <p className="connection-message">{message}</p>}
@@ -6064,11 +6023,11 @@ function CyberbossConnectionModal({
           disabled={busy}
           onClick={() => void verify()}
         >
-          {busy ? "验证中…" : "验证并保存到此设备"}
+          {busy ? "Verifying…" : "Verify and save on this device"}
         </button>
         {deviceToken() && (
           <button className="reset-background" onClick={remove}>
-            移除此设备
+            Remove this device
           </button>
         )}
       </section>
@@ -6089,18 +6048,18 @@ function AppearanceModal({
 }) {
   const [color, setColor] = useState("#e4e4e0");
   const accents = [
-    ["灰蓝", "#647e94"],
-    ["雾蓝", "#8299ad"],
-    ["石墨", "#4a4a48"],
-    ["岩灰", "#6b6b68"],
-    ["雾灰", "#878783"],
-    ["浅灰", "#a3a39f"],
+    ["Slate blue", "#647e94"],
+    ["Mist blue", "#8299ad"],
+    ["Graphite", "#4a4a48"],
+    ["Stone", "#6b6b68"],
+    ["Mist gray", "#878783"],
+    ["Light gray", "#a3a39f"],
   ];
   const backgrounds = [
-    ["冰灰蓝", "#eaf0f5"],
-    ["浅雾蓝", "#e1eaf2"],
-    ["纸灰", "#eeeeeb"],
-    ["雾灰", "#e2e2df"],
+    ["Default marble", DEFAULT_APP_BACKGROUND],
+    ["Pale mist blue", "#e1eaf2"],
+    ["Paper gray", "#eeeeeb"],
+    ["Mist gray", "#e2e2df"],
   ];
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -6120,7 +6079,7 @@ function AppearanceModal({
         <div className="modal-head">
           <div>
             <small>APPEARANCE</small>
-            <h2>外观</h2>
+            <h2>Appearance</h2>
           </div>
           <button onClick={onClose}>
             <Icon name="close" />
@@ -6128,8 +6087,8 @@ function AppearanceModal({
         </div>
         <div className="appearance-section">
           <div className="appearance-title">
-            <b>主题色</b>
-            <small>用于选中状态与细节高光</small>
+            <b>Accent color</b>
+            <small>Used for selection and subtle highlights</small>
           </div>
           <div className="accent-options">
             {accents.map(([name, value]) => (
@@ -6147,8 +6106,8 @@ function AppearanceModal({
         </div>
         <div className="appearance-section">
           <div className="appearance-title">
-            <b>背景</b>
-            <small>选择预设、导入图片或用颜色生成</small>
+            <b>Background</b>
+            <small>Choose a preset, import an image or generate from a color</small>
           </div>
           <div className="background-presets">
             {backgrounds.map(([name, value]) => (
@@ -6164,7 +6123,7 @@ function AppearanceModal({
           <div className="appearance-tools">
             <label>
               <Icon name="upload" />
-              <span>导入图片</span>
+              <span>Import image</span>
               <input
                 type="file"
                 accept="image/*"
@@ -6173,7 +6132,7 @@ function AppearanceModal({
             </label>
             <div>
               <input
-                aria-label="背景颜色"
+                aria-label="Background color"
                 type="color"
                 value={color}
                 onChange={(e) => setColor(e.target.value)}
@@ -6181,16 +6140,16 @@ function AppearanceModal({
               <button
                 onClick={() => onBackground(color)}
               >
-                用颜色生成
+                Generate from color
               </button>
             </div>
           </div>
           <button className="reset-background" onClick={() => onBackground("")}>
-            恢复暖白背景
+            Restore warm white background
           </button>
         </div>
         <button className="save-profile" onClick={onClose}>
-          完成
+          Done
         </button>
       </section>
     </div>
@@ -6217,6 +6176,8 @@ function SettingRow({
   status,
   badge,
   onClick,
+  expanded,
+  controls,
 }: {
   icon: string;
   title: string;
@@ -6224,9 +6185,11 @@ function SettingRow({
   status?: boolean;
   badge?: string;
   onClick?: () => void;
+  expanded?: boolean;
+  controls?: string;
 }) {
   return (
-    <button className="setting-row" onClick={onClick}>
+    <button className="setting-row" onClick={onClick} aria-expanded={expanded} aria-controls={controls}>
       <span className="setting-icon">
         <Icon name={icon} />
       </span>
@@ -6306,9 +6269,9 @@ function FunctionalSettingsModal({
     try {
       await exportVesperData();
       onPreferences({ ...preferences, lastExportAt: new Date().toISOString() });
-      setMessage("备份文件已生成");
+      setMessage("Backup file created");
     } catch {
-      setMessage("导出失败，请稍后重试");
+      setMessage("Export failed. Please try again.");
     }
   };
   return (
@@ -6318,7 +6281,7 @@ function FunctionalSettingsModal({
         <div className="modal-head">
           <div>
             <small>SETTINGS</small>
-            <h2>{type}</h2>
+            <h2>{uiLabel(type)}</h2>
           </div>
           <button onClick={onClose}>
             <Icon name="close" />
@@ -6327,20 +6290,20 @@ function FunctionalSettingsModal({
         {type === "通知偏好" && (
           <div className="preference-list">
             <PreferenceToggle
-              label="提醒"
-              detail="待办事项到期时通知"
+              label="Reminders"
+              detail="Notify when a reminder is due"
               value={preferences.reminders}
               onChange={() => toggle("reminders")}
             />
             <PreferenceToggle
-              label="纪念日"
-              detail="重要日期临近时通知"
+              label="Dates"
+              detail="Notify before important dates"
               value={preferences.anniversaries}
               onChange={() => toggle("anniversaries")}
             />
             <PreferenceToggle
-              label="Agent 留言"
-              detail="允许 Vesper 主动留下消息"
+              label="Rowan’s notes"
+              detail="Allow Vesper to leave messages"
               value={preferences.agentNotes}
               onChange={() => toggle("agentNotes")}
             />
@@ -6350,9 +6313,9 @@ function FunctionalSettingsModal({
           <div className="choice-list">
             {(
               [
-                ["daily", "每天一次"],
-                ["twice-weekly", "每周两次"],
-                ["off", "关闭"],
+                ["daily", "Daily"],
+                ["twice-weekly", "Twice a week"],
+                ["off", "Close"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -6373,20 +6336,20 @@ function FunctionalSettingsModal({
         {type === "记忆权限" && (
           <div className="preference-list">
             <PreferenceToggle
-              label="日记"
-              detail="允许 Agent 读取日记用于回忆"
+              label="Journal"
+              detail="Allow Rowan to read journals for memories"
               value={preferences.memoryDiary}
               onChange={() => toggle("memoryDiary")}
             />
             <PreferenceToggle
-              label="便笺"
-              detail="允许 Agent 整理与关联便笺"
+              label="Notes"
+              detail="Allow Rowan to organize and connect notes"
               value={preferences.memoryNotes}
               onChange={() => toggle("memoryNotes")}
             />
             <PreferenceToggle
-              label="聊天"
-              detail="允许从对话中形成长期记忆"
+              label="Chat"
+              detail="Allow long-term memories from conversations"
               value={preferences.memoryChat}
               onChange={() => toggle("memoryChat")}
             />
@@ -6395,19 +6358,18 @@ function FunctionalSettingsModal({
         {type === "导出与备份" && (
           <div className="export-panel">
             <Icon name="archive" />
-            <h3>导出 Vesper 数据</h3>
+            <h3>Export Vesper data</h3>
             <p>
-              Vesper 以当前设备为主存储，发布新版只替换程序和缓存，不会清空已填写的数据。
-              导出文件会同时收录本地数据与可用的云端镜像。
+              Vesper stores data on this device. Updates replace the app and cache without clearing your data. Exports include local data and available cloud copies.
             </p>
             <button className="save-profile" onClick={doExport}>
-              下载备份文件
+              Download backup
             </button>
             {message && <small>{message}</small>}
           </div>
         )}
         <button className="save-profile secondary-save" onClick={onClose}>
-          完成
+          Done
         </button>
       </section>
     </div>
@@ -6450,15 +6412,15 @@ function VoiceSettingsModal({ onClose }: { onClose: () => void }) {
   }));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [micStatus, setMicStatus] = useState("尚未测试");
-  const [apiStatus, setApiStatus] = useState("尚未测试");
+  const [micStatus, setMicStatus] = useState("Not tested");
+  const [apiStatus, setApiStatus] = useState("Not tested");
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const requestMic = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((track) => track.stop());
-      setMicStatus("已授权");
-    } catch { setMicStatus("未授权"); }
+      setMicStatus("Allowed");
+    } catch { setMicStatus("Not authorized"); }
   };
   const testVoice = async () => {
     setBusy(true); setMessage("");
@@ -6466,22 +6428,22 @@ function VoiceSettingsModal({ onClose }: { onClose: () => void }) {
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: "Vesper 声音连接成功。", connection: form }),
+        body: JSON.stringify({ text: "Vesper’s voice connection is working.", connection: form }),
       });
       if (!response.ok) {
         const result = await response.json() as { error?: string };
-        throw new Error(result.error || "声音服务测试失败");
+        throw new Error(result.error || "Voice service test failed");
       }
       setSettings({ ...settings, "Agent 声音": form });
-      setApiStatus("可调用");
+      setApiStatus("Available");
       const url = URL.createObjectURL(await response.blob());
       const audio = new Audio(url);
       audio.onended = () => URL.revokeObjectURL(url);
       await audio.play();
-      setMessage("参数已保存并完成试听");
+      setMessage("Settings saved and voice preview completed");
     } catch (reason) {
-      setApiStatus("调用失败");
-      setMessage(reason instanceof Error ? reason.message : "声音服务测试失败");
+      setApiStatus("Request failed");
+      setMessage(reason instanceof Error ? reason.message : "Voice service test failed");
     } finally { setBusy(false); }
   };
   const eleven = /eleven/i.test(form.provider || "");
@@ -6489,23 +6451,23 @@ function VoiceSettingsModal({ onClose }: { onClose: () => void }) {
     <div className="modal-layer settings-subpage-layer">
       <button className="modal-scrim" onClick={onClose} />
       <section className="connection-modal voice-settings-modal">
-        <div className="modal-head"><button className="settings-back" aria-label="返回" onClick={onClose}><Icon name="chevron" /></button><div><small>VOICE</small><h2>语音</h2></div></div>
+        <div className="modal-head"><button className="settings-back" aria-label="Back" onClick={onClose}><Icon name="chevron" /></button><div><small>VOICE</small><h2>Voice</h2></div></div>
         <div className="parameter-form">
-          <label className="profile-field"><span>声音服务</span><select value={form.provider} onChange={(event) => {
+          <label className="profile-field"><span>Voice service</span><select value={form.provider} onChange={(event) => {
             const provider = event.target.value;
             const minimax = provider === "MiniMax";
             setForm((current) => ({ ...current, provider, baseUrl: provider === "ElevenLabs" ? "https://api.elevenlabs.io" : minimax ? "https://api.minimax.chat" : "https://api.openai.com/v1", model: provider === "ElevenLabs" ? "eleven_multilingual_v2" : minimax ? "speech-2.6-hd" : "gpt-4o-mini-tts" }));
           }}><option>ElevenLabs</option><option>MiniMax</option><option>OpenAI-compatible</option></select></label>
           <label className="profile-field"><span>API Base URL</span><input value={form.baseUrl || ""} onChange={(event) => update("baseUrl", event.target.value)} /></label>
           <label className="profile-field"><span>{eleven ? "ElevenLabs API Key" : "API Key"}</span><input type="password" value={form.apiKey || ""} onChange={(event) => update("apiKey", event.target.value)} /></label>
-          <label className="profile-field"><span>{eleven ? "ElevenLabs Voice ID" : "声音 ID"}</span><input value={form.voiceId || ""} placeholder={form.provider === "MiniMax" ? "male-qn-qingse" : "alloy / 自定义声音 ID"} onChange={(event) => update("voiceId", event.target.value)} /></label>
-          {form.provider === "MiniMax" && <label className="profile-field"><span>MiniMax Group ID（可选）</span><input value={form.groupId || ""} onChange={(event) => update("groupId", event.target.value)} /></label>}
-          <label className="profile-field"><span>{eleven ? "ElevenLabs 模型" : "TTS 模型"}</span><input value={form.model || ""} onChange={(event) => update("model", event.target.value)} /></label>
-          <label className="voice-speed"><span>语速 {Number(form.speed || 1).toFixed(1)}×</span><input type="range" min="0.7" max="1.3" step="0.1" value={form.speed || "1"} onChange={(event) => update("speed", event.target.value)} /></label>
-          <button className="voice-autoplay" onClick={() => update("autoPlay", form.autoPlay === "false" ? "true" : "false")}><i className={form.autoPlay === "false" ? "switch" : "switch on"}><u /></i><span><b>语音消息自动播放</b><small>收到语音消息时直接响，不用点</small></span></button>
+          <label className="profile-field"><span>{eleven ? "ElevenLabs Voice ID" : "Voice ID"}</span><input value={form.voiceId || ""} placeholder={form.provider === "MiniMax" ? "male-qn-qingse" : "alloy / custom voice ID"} onChange={(event) => update("voiceId", event.target.value)} /></label>
+          {form.provider === "MiniMax" && <label className="profile-field"><span>MiniMax Group ID (optional)</span><input value={form.groupId || ""} onChange={(event) => update("groupId", event.target.value)} /></label>}
+          <label className="profile-field"><span>{eleven ? "ElevenLabs model" : "TTS model"}</span><input value={form.model || ""} onChange={(event) => update("model", event.target.value)} /></label>
+          <label className="voice-speed"><span>Speed {Number(form.speed || 1).toFixed(1)}×</span><input type="range" min="0.7" max="1.3" step="0.1" value={form.speed || "1"} onChange={(event) => update("speed", event.target.value)} /></label>
+          <button className="voice-autoplay" onClick={() => update("autoPlay", form.autoPlay === "false" ? "true" : "false")}><i className={form.autoPlay === "false" ? "switch" : "switch on"}><u /></i><span><b>Autoplay voice messages</b><small>Play received voice messages automatically</small></span></button>
         </div>
-        <button className="save-profile" disabled={busy} onClick={() => void testVoice()}>{busy ? "试听中…" : "试听"}</button>
-        <section className="voice-test-panel"><div><b>语音测试</b><button onClick={() => void Promise.all([requestMic(), testVoice()])}>全部测试</button></div><p><span>1　麦克风权限</span><em><i className={micStatus === "已授权" ? "voice-status-dot ok" : "voice-status-dot"} />{micStatus}</em><button onClick={() => void requestMic()}>请求权限</button></p><p><span>2　声音服务可否调用</span><em><i className={apiStatus === "可调用" ? "voice-status-dot ok" : "voice-status-dot"} />{apiStatus}</em></p><p><span>3　当前打开界面</span><em><i className="voice-status-dot ok" />{window.matchMedia("(display-mode: standalone)").matches ? "iPhone 主屏幕 PWA" : "浏览器"}</em></p></section>
+        <button className="save-profile" disabled={busy} onClick={() => void testVoice()}>{busy ? "Playing preview…" : "Preview"}</button>
+        <section className="voice-test-panel"><div><b>Voice test</b><button onClick={() => void Promise.all([requestMic(), testVoice()])}>Test all</button></div><p><span>1  Microphone permission</span><em><i className={micStatus === "Allowed" ? "voice-status-dot ok" : "voice-status-dot"} />{micStatus}</em><button onClick={() => void requestMic()}>Request permission</button></p><p><span>2  Voice service availability</span><em><i className={apiStatus === "Available" ? "voice-status-dot ok" : "voice-status-dot"} />{apiStatus}</em></p><p><span>3  Current environment</span><em><i className="voice-status-dot ok" />{window.matchMedia("(display-mode: standalone)").matches ? "iPhone Home Screen PWA" : "Browser"}</em></p></section>
         {message && <p className="connection-message">{message}</p>}
       </section>
     </div>
@@ -6540,36 +6502,36 @@ function ConnectionModal({
   > = {
     "AI 连接": [
       {
-        label: "服务商",
+        label: "Provider",
         key: "provider",
-        placeholder: "OpenAI / Anthropic / 自定义",
+        placeholder: "OpenAI / Anthropic / Custom",
       },
       {
         label: "API Base URL",
         key: "baseUrl",
         placeholder: "https://api.openai.com/v1",
       },
-      { label: "模型", key: "model", placeholder: "模型 ID" },
+      { label: "Model", key: "model", placeholder: "Model ID" },
       { label: "API Key", key: "apiKey", type: "password" },
     ],
     "Agent 声音": [
-      { label: "TTS 服务商", key: "provider", placeholder: "OpenAI / ElevenLabs / 兼容服务" },
+      { label: "TTS provider", key: "provider", placeholder: "OpenAI / ElevenLabs / Compatible service" },
       { label: "API Base URL", key: "baseUrl", placeholder: "https://api.openai.com/v1" },
-      { label: "完整请求地址（可选）", key: "endpoint", placeholder: "服务不兼容标准接口时填写" },
-      { label: "模型", key: "model", placeholder: "gpt-4o-mini-tts" },
-      { label: "声音 ID", key: "voiceId", placeholder: "alloy / 自定义声音 ID" },
+      { label: "Full request URL (optional)", key: "endpoint", placeholder: "Use if your service does not support the standard API" },
+      { label: "Model", key: "model", placeholder: "gpt-4o-mini-tts" },
+      { label: "Voice ID", key: "voiceId", placeholder: "alloy / custom voice ID" },
       { label: "API Key", key: "apiKey", type: "password" },
     ],
     "MCP 服务": [
-      { label: "MCP 服务地址", key: "url", placeholder: "https://…" },
-      { label: "授权令牌", key: "token", type: "password" },
+      { label: "MCP server URL", key: "url", placeholder: "https://…" },
+      { label: "Access token", key: "token", type: "password" },
     ],
     "Web Push": [],
   };
   const fields = definitions[type] || [];
   const save = () => {
     setSettings({ ...settings, [type]: form });
-    setMessage("参数已保存在此设备");
+    setMessage("Settings saved on this device");
   };
   const test = async () => {
     setBusy(true);
@@ -6578,46 +6540,47 @@ function ConnectionModal({
       if (type === "AI 连接") {
         const base = (form.baseUrl || "").replace(/\/$/, "");
         if (!base || !form.apiKey)
-          throw new Error("请填写 Base URL 和 API Key");
+          throw new Error("Enter a Base URL and API Key.");
         const response = await fetch(`${base}/models`, {
           headers: { authorization: `Bearer ${form.apiKey}` },
         });
-        if (!response.ok) throw new Error(`连接失败（${response.status}）`);
+        if (!response.ok) throw new Error(`Connection failed (${response.status})`);
       } else if (type === "MCP 服务") {
-        if (!form.url) throw new Error("请填写 MCP 服务地址");
+        if (!form.url) throw new Error("Enter the MCP server URL.");
         const response = await fetch(form.url, {
           headers: form.token
             ? { authorization: `Bearer ${form.token}` }
             : undefined,
         });
-        if (!response.ok) throw new Error(`连接失败（${response.status}）`);
+        if (!response.ok) throw new Error(`Connection failed (${response.status})`);
       } else if (type === "Agent 声音") {
         if (!form.baseUrl || !form.apiKey)
-          throw new Error("请填写 TTS Base URL 和 API Key");
+          throw new Error("Enter the TTS Base URL and API Key.");
         const response = await fetch("/api/tts", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: "Vesper 声音连接成功。", connection: form }),
+          body: JSON.stringify({ text: "Vesper’s voice connection is working.", connection: form }),
         });
         if (!response.ok) {
           const result = (await response.json()) as { error?: string };
-          throw new Error(result.error || "TTS 测试失败");
+          throw new Error(result.error || "TTS test failed");
         }
         await new Audio(URL.createObjectURL(await response.blob())).play();
       } else if (type === "Web Push") {
+        if (Capacitor.isNativePlatform()) throw new Error("Enable Web Push in a browser or Home Screen PWA. Use Apple notification permission in the native app.");
         if (!window.matchMedia("(display-mode: standalone)").matches && /iPhone|iPad|iPod/.test(navigator.userAgent))
-          throw new Error("iPhone 需要先将 Vesper 添加到主屏幕，再从 PWA 内启用推送");
+          throw new Error("On iPhone, add Vesper to the Home Screen and enable push from the PWA.");
         await navigator.serviceWorker.register("/sw.js", { scope: "/" });
         const configResponse = await fetch(apiUrl("/api/push"));
         const config = (await configResponse.json()) as { configured?: boolean; publicKey?: string };
         if (!configResponse.ok || !config.configured || !config.publicKey)
-          throw new Error("推送服务端尚未完成配置");
+          throw new Error("The push server is not configured yet.");
         const result = await subscribe(config.publicKey);
         if (result.status === "denied") {
           onNotificationPermission("denied");
-          throw new Error("通知权限未授权");
+          throw new Error("Notification permission denied");
         }
-        if (result.status === "unsupported") throw new Error("当前环境不支持 Web Push");
+        if (result.status === "unsupported") throw new Error("Web Push is not supported in this environment.");
         onNotificationPermission("granted");
         const subscription = serializeSubscription(result.subscription);
         const response = await fetch(apiUrl("/api/push"), {
@@ -6625,19 +6588,19 @@ function ConnectionModal({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ action: "test", subscription }),
         });
-        if (!response.ok) throw new Error("订阅已建立，但服务端测试推送失败");
+        if (!response.ok) throw new Error("Subscribed, but the server test notification failed.");
       }
       save();
-      setMessage("连接测试成功");
+      setMessage("Connection test passed");
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "连接失败");
+      setMessage(reason instanceof Error ? reason.message : "Connection failed");
     } finally {
       setBusy(false);
     }
   };
   const locate = () => {
     if (!navigator.geolocation) {
-      setMessage("当前浏览器不支持定位");
+      setMessage("Location is not supported in this browser.");
       return;
     }
     setBusy(true);
@@ -6662,16 +6625,16 @@ function ConnectionModal({
             timezone: data.timezone,
             updatedAt: new Date().toISOString(),
           });
-          setMessage("定位与天气已更新");
+          setMessage("Location and weather updated");
         } catch {
           onEnvironment({
             permission: "granted",
             latitude,
             longitude,
             updatedAt: new Date().toISOString(),
-            error: "天气获取失败",
+            error: "Could not load weather",
           });
-          setMessage("定位成功，天气获取失败");
+          setMessage("Location updated, but weather could not be loaded.");
         } finally {
           setBusy(false);
         }
@@ -6692,7 +6655,7 @@ function ConnectionModal({
         <div className="modal-head">
           <div>
             <small>CONNECTION</small>
-            <h2>{type}</h2>
+            <h2>{uiLabel(type)}</h2>
           </div>
           <button onClick={onClose}>
             <Icon name="close" />
@@ -6704,14 +6667,14 @@ function ConnectionModal({
               <span>
                 {environment.latitude
                   ? `${environment.latitude.toFixed(4)}, ${environment.longitude?.toFixed(4)}`
-                  : "尚未定位"}
+                  : "Location not set"}
               </span>
             </div>
           </div>
         ) : (
           <div className="parameter-form">
             {type === "Web Push" && (
-              <p className="settings-hint">Vesper 会自动使用 Cloudflare 推送服务。授权后将发送一条真实测试通知，不需要手工填写 VAPID 参数。</p>
+              <p className="settings-hint">Vesper uses Cloudflare push automatically. Authorization sends a real test notification; no manual VAPID setup is needed.</p>
             )}
             {fields.map((field) => (
               <label className="profile-field" key={field.key}>
@@ -6737,12 +6700,12 @@ function ConnectionModal({
           onClick={isLocation ? locate : () => void test()}
         >
           {busy
-            ? "处理中…"
+            ? "Working…"
             : isLocation
-              ? "获取定位与天气"
+              ? "Get location and weather"
               : type === "Agent 声音"
-                ? "保存参数"
-                : "保存并测试"}
+                ? "Save settings"
+                : "Save and test"}
         </button>
       </section>
     </div>
@@ -6767,10 +6730,10 @@ function useTogetherDuration(state: MusicTogetherState) {
 }
 
 function togetherTimeLabel(state: MusicTogetherState, totalSeconds: number) {
-  if (state.status === "connected") return `一起听了 ${Math.floor(totalSeconds / 3600)} 小时 ${Math.floor(totalSeconds % 3600 / 60)} 分钟`;
-  if (state.status === "invited") return "一起听邀请已发出";
-  if (state.status === "offline") return "对方暂时离线";
-  return "尚未开始一起听";
+  if (state.status === "connected") return `Listening together for ${Math.floor(totalSeconds / 3600)}h ${Math.floor(totalSeconds % 3600 / 60)}m`;
+  if (state.status === "invited") return "Listen-together invitation sent";
+  if (state.status === "offline") return "The other listener is offline.";
+  return "Listen together has not started.";
 }
 
 function MusicPlayerUI({
@@ -6807,11 +6770,13 @@ function MusicPlayerUI({
   const queueListRef = useRef<HTMLDivElement>(null);
   const canSeek = state.canSeek;
   const displayedTime = scrubValue ?? state.currentTime;
-  const modeLabels: Record<MusicPlayMode, string> = { order: "顺序播放", repeat: "列表循环", single: "单曲循环", random: "随机播放" };
+  const modeLabels: Record<MusicPlayMode, string> = { order: "Play in order", repeat: "Repeat queue", single: "Repeat one", random: "Shuffle" };
   const modeIcons: Record<MusicPlayMode, string> = { order: "menu", repeat: "repeat", single: "one", random: "shuffle" };
   const totalTogetherSeconds = useTogetherDuration(together);
   const playbackProgress = canSeek ? `${Math.max(0, Math.min(100, displayedTime / Math.max(state.duration, 1) * 100))}%` : "0%";
-  const roomStyle = { "--music-tint": "99, 99, 96", "--music-on-tint": "17, 17, 17", "--playback-progress": playbackProgress } as CSSProperties;
+  const roomStyle = {
+    "--music-tint": "99, 99, 96", "--music-on-tint": "17, 17, 17", "--playback-progress": playbackProgress,
+  } as CSSProperties;
 
   useEffect(() => {
     const openQueue = () => setQueueOpen(true);
@@ -6837,24 +6802,24 @@ function MusicPlayerUI({
   };
   return <div className="page-body listening-player" style={roomStyle}>
     <section className="listening-player-main">
-      <div className="listening-library-bar"><button onClick={() => setLibraryOpen(true)}><Icon name="library" /><span>我的音乐</span></button></div>
-      <button className="listening-together" onClick={together.status === "connected" ? undefined : onInvite} aria-label={together.status === "connected" ? `${agentName} 与 ${userName} 正在一起听` : "邀请一起听"}>
+      <div className="listening-library-bar"><button onClick={() => setLibraryOpen(true)}><Icon name="library" /><span>My Music</span></button></div>
+      <button className="listening-together" onClick={together.status === "connected" ? undefined : onInvite} aria-label={together.status === "connected" ? `${agentName} and ${userName} are listening together` : "Invite to listen together"}>
         <span className="listening-avatars"><AvatarMark src={userAvatar} label={userName} kind="user" /><i /><AvatarMark src={agentAvatar} label={agentName} kind="agent" /></span>
         <span>{togetherTimeLabel(together, totalTogetherSeconds)}</span>
       </button>
       {track ? <>
-        <section className="listening-disc-stage" aria-label={`正在播放：${track.title}`}>
+        <section className="listening-disc-stage" aria-label={`Now playing: ${track.title}`}>
           <div className={state.playing ? "sound-halo is-playing" : "sound-halo"}>
-            <div className="listening-disc">{track.cover ? <img src={track.cover} alt={`${track.title} 封面`} /> : <span>V</span>}</div>
+            <div className="listening-disc">{track.cover ? <img src={track.cover} alt={`${track.title} cover`} /> : <span>V</span>}</div>
           </div>
         </section>
-        <section className="listening-track-copy"><h2>{track.title}</h2><p>{track.artist || "未知歌手"}{track.album ? ` · ${track.album}` : ""}</p></section>
-        <section className="listening-progress" aria-label="播放进度"><input aria-label="播放进度" type="range" min="0" max={Math.max(state.duration, 1)} step="0.1" disabled={!canSeek} value={Math.min(displayedTime, Math.max(state.duration, 1))} onChange={(event) => setScrubValue(Number(event.target.value))} onPointerUp={commitSeek} onKeyUp={commitSeek} /><div><span>{canSeek ? formatPlaybackTime(displayedTime) : "--:--"}</span><span>{canSeek ? formatPlaybackTime(state.duration) : "--:--"}</span></div></section>
-        <section className="listening-controls"><button className="listening-mode" aria-label={modeLabels[playMode]} title={modeLabels[playMode]} onClick={onCycleMode}><Icon name={modeIcons[playMode]} /></button><button aria-label="上一首" onClick={adapter.previous}><Icon name="back" /></button><button className="listening-play" aria-label={state.playing ? "暂停" : "播放"} onClick={adapter.toggle}><Icon name={state.playing ? "pause" : "play"} /></button><button aria-label="下一首" onClick={adapter.next}><Icon name="forward" /></button><button className="listening-queue-button" aria-label="打开播放队列" onClick={() => setQueueOpen(true)}><Icon name="queue" /><em>{queue.length}</em></button></section>
-      </> : <section className="listening-empty"><Icon name="music" /><h2>还没有播放队列</h2><p>在我的音乐中连接网易云账号，选择歌单或搜索歌曲后即可播放。</p><button onClick={() => setLibraryOpen(true)}>打开我的音乐</button></section>}
+        <section className="listening-track-copy"><h2>{track.title}</h2><p>{track.artist || "Unknown artist"}{track.album ? ` · ${track.album}` : ""}</p></section>
+        <section className="listening-progress" aria-label="Playback progress"><input aria-label="Playback progress" type="range" min="0" max={Math.max(state.duration, 1)} step="0.1" disabled={!canSeek} value={Math.min(displayedTime, Math.max(state.duration, 1))} onChange={(event) => setScrubValue(Number(event.target.value))} onPointerUp={commitSeek} onKeyUp={commitSeek} /><div><span>{canSeek ? formatPlaybackTime(displayedTime) : "--:--"}</span><span>{canSeek ? formatPlaybackTime(state.duration) : "--:--"}</span></div></section>
+        <section className="listening-controls"><button className="listening-mode" aria-label={modeLabels[playMode]} title={modeLabels[playMode]} onClick={onCycleMode}><Icon name={modeIcons[playMode]} /></button><button aria-label="Previous track" onClick={adapter.previous}><Icon name="back" /></button><button className="listening-play" aria-label={state.playing ? "Pause" : "Play"} onClick={adapter.toggle}><Icon name={state.playing ? "pause" : "play"} /></button><button aria-label="Next track" onClick={adapter.next}><Icon name="forward" /></button><button className="listening-queue-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}><Icon name="queue" /><em>{queue.length}</em></button></section>
+      </> : <section className="listening-empty"><Icon name="music" /><h2>No playback queue yet</h2><p>Connect NetEase in My Music, then select a playlist or search for songs.</p><button onClick={() => setLibraryOpen(true)}>Open My Music</button></section>}
     </section>
     {toast && <div className="music-toast" role="status">{toast}</div>}
-    {queueOpen && <div className="music-queue-layer"><button className="music-queue-scrim" aria-label="关闭播放队列" onClick={() => setQueueOpen(false)} /><section className="music-queue-sheet" style={{ transform: `translateY(${queueDragY}px)` }}><div className="music-queue-drag-handle" onTouchStart={(event) => { queueDragStart.current = event.touches[0]?.clientY ?? null; }} onTouchMove={(event) => { const start = queueDragStart.current; const current = event.touches[0]?.clientY; if (start != null && current != null && current > start) setQueueDragY(Math.min(240, current - start)); }} onTouchEnd={() => { if (queueDragY > 88) setQueueOpen(false); setQueueDragY(0); queueDragStart.current = null; }} /><header><div><small>正在播放队列</small><h2>{queue.length} 首歌曲</h2></div><div><button className="queue-sync-action" onClick={() => { setQueueOpen(false); setLibraryOpen(true); }}>我的音乐</button><button aria-label="关闭播放队列" onClick={() => setQueueOpen(false)}><Icon name="close" /></button></div></header><div className="music-queue-list" ref={queueListRef}>{queue.length ? queue.map((item, index) => <article className={selected === index ? "active" : ""} key={item.id}><button className="music-queue-track" onClick={() => { adapter.select(index); setQueueOpen(false); }}>{item.cover ? <img src={item.cover} alt="" /> : <span>{index + 1}</span>}<div><b>{item.title}</b><small>{item.artist || "未知歌手"}</small></div><time>{item.duration || "--:--"}</time>{selected === index && <i className="music-queue-eq" aria-label="正在播放" />}</button><button className="music-queue-remove" aria-label={`移除 ${item.title}`} onClick={() => onRemoveQueueItem(index)}><Icon name="close" /></button></article>) : <EmptyState text="播放队列为空。" />}</div></section></div>}
+    {queueOpen && <div className="music-queue-layer"><button className="music-queue-scrim" aria-label="Close queue" onClick={() => setQueueOpen(false)} /><section className="music-queue-sheet" style={{ transform: `translateY(${queueDragY}px)` }}><div className="music-queue-drag-handle" onTouchStart={(event) => { queueDragStart.current = event.touches[0]?.clientY ?? null; }} onTouchMove={(event) => { const start = queueDragStart.current; const current = event.touches[0]?.clientY; if (start != null && current != null && current > start) setQueueDragY(Math.min(240, current - start)); }} onTouchEnd={() => { if (queueDragY > 88) setQueueOpen(false); setQueueDragY(0); queueDragStart.current = null; }} /><header><div><small>Now playing queue</small><h2>{queue.length}  songs</h2></div><div><button className="queue-sync-action" onClick={() => { setQueueOpen(false); setLibraryOpen(true); }}>My Music</button><button aria-label="Close queue" onClick={() => setQueueOpen(false)}><Icon name="close" /></button></div></header><div className="music-queue-list" ref={queueListRef}>{queue.length ? queue.map((item, index) => <article className={selected === index ? "active" : ""} key={item.id}><button className="music-queue-track" onClick={() => { adapter.select(index); setQueueOpen(false); }}>{item.cover ? <img src={item.cover} alt="" /> : <span>{index + 1}</span>}<div><b>{item.title}</b><small>{item.artist || "Unknown artist"}</small></div><time>{item.duration || "--:--"}</time>{selected === index && <i className="music-queue-eq" aria-label="Now playing" />}</button><button className="music-queue-remove" aria-label={`Remove ${item.title}`} onClick={() => onRemoveQueueItem(index)}><Icon name="close" /></button></article>) : <EmptyState text="The queue is empty." />}</div></section></div>}
     {libraryOpen && <NeteaseMusicLibrary onClose={() => { setLibraryOpen(false); setPendingPlaylistTrack(null); }} queue={queue} onQueue={onQueue} onTracks={onTracks} pendingPlaylistTrack={pendingPlaylistTrack} onPendingPlaylistTrackHandled={() => setPendingPlaylistTrack(null)} />}
   </div>;
 }
@@ -6903,13 +6868,13 @@ function NeteaseMusicLibrary({
       });
       return result;
     } catch (reason) {
-      const detail = reason instanceof Error ? reason.message : "网易云音乐服务暂时不可用";
+      const detail = reason instanceof Error ? reason.message : "NetEase Music is unavailable.";
       const normalized = detail.trim();
       setMessage(
         /^(load failed|failed to fetch|networkerror)$/i.test(normalized)
-          ? "暂时无法连接音乐服务，请稍后重试。"
+          ? "Could not connect to the music service. Try again later."
           : normalized === "Device not paired"
-            ? "请先在 Vesper 设置中连接这台设备，再使用网易云音乐。"
+            ? "Connect this device in Vesper Settings before using NetEase Music."
             : detail,
       );
       return null;
@@ -6920,7 +6885,7 @@ function NeteaseMusicLibrary({
 
   const connect = async () => {
     if (!isConnected) {
-      setMessage("请填写网易云 UID 和 MUSIC_U");
+      setMessage("Enter your NetEase UID and MUSIC_U.");
       return;
     }
     setSavedMusicCookie(account.cookie.trim());
@@ -6929,7 +6894,7 @@ function NeteaseMusicLibrary({
     if (!result) return;
     setPlaylists(result.playlists || []);
     setAccountOpen(false);
-    setMessage(result.summary || "已连接网易云音乐");
+    setMessage(result.summary || "Connected to NetEase Music");
   };
 
   const showCollection = async (
@@ -6952,7 +6917,7 @@ function NeteaseMusicLibrary({
   const searchSongs = async () => {
     const query = search.trim();
     if (!query) {
-      setMessage("请输入歌名、歌手或专辑");
+      setMessage("Enter a song, artist or album");
       return;
     }
     setTab("discover");
@@ -6974,21 +6939,21 @@ function NeteaseMusicLibrary({
       return true;
     });
     onQueue(nextQueue, { autoplay, trackId: resolved[0]?.id });
-    setMessage(replaceQueue ? `已同步 ${resolved.length} 首歌曲到当前播放列表` : result?.summary || `已加入 ${resolved.length} 首歌曲`);
+    setMessage(replaceQueue ? `Synced ${resolved.length} songs to the current queue` : result?.summary || `Added ${resolved.length} songs`);
   }
 
   const updateRemotePlaylist = async (action: "playlist-add" | "playlist-remove", playlistId: string, track: MusicPlaylistIntent | Track) => {
     if (!isConnected) {
-      setMessage("请先连接网易云账号");
+      setMessage("Connect your NetEase account first.");
       return;
     }
-    const neteaseId = track.neteaseId || track.id.replace(/^netease-/, "");
+    const neteaseId = "trackId" in track ? track.trackId.replace(/^netease-/, "") : track.neteaseId || track.id.replace(/^netease-/, "");
     const target = playlists.find((playlist) => playlist.id === playlistId);
-    const verb = action === "playlist-add" ? "加入" : "移除";
-    if (!window.confirm(`确定将《${track.title}》${verb}${target?.name || "这个网易云歌单"}吗？`)) return;
+    const verb = action === "playlist-add" ? "Add" : "Remove";
+    if (!window.confirm(`${verb} “${track.title}” ${action === "playlist-add" ? "to" : "from"} ${target?.name || "this NetEase playlist"}?`)) return;
     const result = await invoke(action, { playlistId, songIds: [neteaseId] });
     if (!result) return;
-    setMessage(result.summary || `已${verb}歌单`);
+    setMessage(result.summary || `Playlist updated`);
     if (action === "playlist-add") {
       setPlaylistPickerOpen(false);
       onPendingPlaylistTrackHandled();
@@ -6998,34 +6963,34 @@ function NeteaseMusicLibrary({
   };
 
   const contentTracks = (collection?.tracks || []) as Track[];
-  return <div className="netease-library-layer" role="dialog" aria-modal="true" aria-label="网易云音乐">
+  return <div className="netease-library-layer" role="dialog" aria-modal="true" aria-label="NetEase Music">
     <section className="netease-library-sheet">
       <header className="netease-library-head">
-        <button onClick={onClose} aria-label="关闭我的音乐"><Icon name="chevron" /></button>
-        <div><small>NETEASE MUSIC</small><h2>网易云音乐</h2></div>
-        <button className={busy ? "is-busy" : ""} disabled={busy} onClick={() => { if (tab === "mine") void connect(); else void searchSongs(); }} aria-label="刷新"><Icon name="repeat" /></button>
+        <button onClick={onClose} aria-label="Close My Music"><Icon name="chevron" /></button>
+        <div><small>NETEASE MUSIC</small><h2>NetEase Music</h2></div>
+        <button className={busy ? "is-busy" : ""} disabled={busy} onClick={() => { if (tab === "mine") void connect(); else void searchSongs(); }} aria-label="Refresh"><Icon name="repeat" /></button>
       </header>
-      <nav className="netease-library-tabs" aria-label="音乐分类">
-        <button className={tab === "mine" ? "active" : ""} onClick={() => { setTab("mine"); setCollection(null); }}>我的</button>
-        <button className={tab === "discover" ? "active" : ""} onClick={() => { setTab("discover"); setCollection(null); }}>发现</button>
+      <nav className="netease-library-tabs" aria-label="Music categories">
+        <button className={tab === "mine" ? "active" : ""} onClick={() => { setTab("mine"); setCollection(null); }}>My Music</button>
+        <button className={tab === "discover" ? "active" : ""} onClick={() => { setTab("discover"); setCollection(null); }}>Discover</button>
       </nav>
       <main className="netease-library-content">
         {collection ? <section className="netease-collection">
-          <div className="netease-collection-head"><button onClick={() => setCollection(null)} aria-label="返回"><Icon name="chevron" /></button><div><small>{collection.subtitle || "网易云音乐"}</small><h3>{collection.title || "歌曲"}</h3></div><button disabled={busy || !contentTracks.length} onClick={() => void prepareTracks(contentTracks, true, true)}>播放全部</button></div>
-          {contentTracks.length ? <div className="netease-track-list">{contentTracks.map((track, index) => <article className={activeNeteasePlaylistId ? "is-remote-playlist" : ""} key={`${track.id}-${index}`}><button className="netease-track-main" onClick={() => void prepareTracks([track], false, true)}>{track.cover ? <img src={track.cover} alt="" /> : <span>{index + 1}</span>}<div><b>{track.title}</b><small>{track.artist}{track.album ? ` · ${track.album}` : ""}</small></div><time>{track.duration || "--:--"}</time></button><button className="netease-track-more" onClick={() => void prepareTracks([track])} aria-label={`加入 ${track.title} 到播放队列`}><Icon name="plus" /></button>{activeNeteasePlaylistId && <button className="netease-track-remove" onClick={() => void updateRemotePlaylist("playlist-remove", activeNeteasePlaylistId, track)} aria-label={`从网易云歌单移除 ${track.title}`}><Icon name="trash" /></button>}</article>)}</div> : <div className="netease-library-empty"><Icon name="music" /><p>这里还没有可展示的歌曲。</p></div>}
+          <div className="netease-collection-head"><button onClick={() => setCollection(null)} aria-label="Back"><Icon name="chevron" /></button><div><small>{collection.subtitle || "NetEase Music"}</small><h3>{collection.title || "Songs"}</h3></div><button disabled={busy || !contentTracks.length} onClick={() => void prepareTracks(contentTracks, true, true)}>Play all</button></div>
+          {contentTracks.length ? <div className="netease-track-list">{contentTracks.map((track, index) => <article className={activeNeteasePlaylistId ? "is-remote-playlist" : ""} key={`${track.id}-${index}`}><button className="netease-track-main" onClick={() => void prepareTracks([track], false, true)}>{track.cover ? <img src={track.cover} alt="" /> : <span>{index + 1}</span>}<div><b>{track.title}</b><small>{track.artist}{track.album ? ` · ${track.album}` : ""}</small></div><time>{track.duration || "--:--"}</time></button><button className="netease-track-more" onClick={() => void prepareTracks([track])} aria-label={`Add ${track.title} to queue`}><Icon name="plus" /></button>{activeNeteasePlaylistId && <button className="netease-track-remove" onClick={() => void updateRemotePlaylist("playlist-remove", activeNeteasePlaylistId, track)} aria-label={`Remove ${track.title} from NetEase playlist`}><Icon name="trash" /></button>}</article>)}</div> : <div className="netease-library-empty"><Icon name="music" /><p>No songs to show yet.</p></div>}
           {collection.lyrics && <pre className="netease-lyrics">{collection.lyrics}</pre>}
         </section> : tab === "mine" ? <>
           <section className={accountOpen ? "netease-account-card open" : "netease-account-card"}>
-            <button className="netease-account-toggle" onClick={() => setAccountOpen((value) => !value)}><span><i className={isConnected ? "connected" : ""} />{isConnected ? "网易云账号已连接" : "连接网易云账号"}</span><Icon name="chevron" /></button>
-            {accountOpen && <div className="netease-account-fields"><label><span>网易云 UID</span><input inputMode="numeric" autoComplete="off" value={account.uid} placeholder="例如 123456789" onChange={(event) => setAccount({ ...account, uid: event.target.value })} /></label><label><span>MUSIC_U</span><input type="password" autoComplete="off" value={account.cookie} placeholder="仅保存在此设备" onChange={(event) => setAccount({ ...account, cookie: event.target.value })} /></label><button disabled={busy} onClick={() => void connect()}>{busy ? "连接中…" : "连接并读取歌单"}</button></div>}
+            <button className="netease-account-toggle" onClick={() => setAccountOpen((value) => !value)}><span><i className={isConnected ? "connected" : ""} />{isConnected ? "NetEase account connected" : "Connect NetEase account"}</span><Icon name="chevron" /></button>
+            {accountOpen && <div className="netease-account-fields"><label><span>NetEase UID</span><input inputMode="numeric" autoComplete="off" value={account.uid} placeholder="For example, 123456789" onChange={(event) => setAccount({ ...account, uid: event.target.value })} /></label><label><span>MUSIC_U</span><input type="password" autoComplete="off" value={account.cookie} placeholder="Saved only on this device" onChange={(event) => setAccount({ ...account, cookie: event.target.value })} /></label><button disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect and load playlists"}</button></div>}
           </section>
-          {pendingPlaylistTrack && <section className="netease-pending-playlist"><div><small>FROM CHAT</small><b>{pendingPlaylistTrack.title}</b><span>{pendingPlaylistTrack.artist || "未知歌手"}</span></div>{!isConnected ? <button onClick={() => setAccountOpen(true)}>先连接账号</button> : !playlists.length ? <button disabled={busy} onClick={() => void connect()}>读取歌单</button> : <button onClick={() => setPlaylistPickerOpen((value) => !value)}>加入歌单</button>}{playlistPickerOpen && <div className="netease-playlist-picker">{playlists.map((playlist) => <button key={playlist.id} disabled={busy} onClick={() => void updateRemotePlaylist("playlist-add", playlist.id, pendingPlaylistTrack)}><span>{playlist.name}</span><small>{playlist.trackCount || 0} 首</small></button>)}</div>}<button className="netease-pending-dismiss" onClick={onPendingPlaylistTrackHandled}>取消</button></section>}
-          <section className="netease-shortcuts"><button disabled={busy || !isConnected} onClick={() => void showCollection("recommendations")}><Icon name="sparkles" /><span>每日推荐</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("personal-fm")}><Icon name="music" /><span>私人 FM</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("recent-plays")}><Icon name="repeat" /><span>最近播放</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("liked-songs")}><Icon name="heart" /><span>我喜欢的</span></button></section>
-          <section className="netease-playlists"><div className="netease-section-heading"><div><small>MY PLAYLISTS</small><h3>我的歌单</h3></div><button disabled={busy || !isConnected} onClick={() => void connect()}>刷新</button></div>{playlists.length ? <div className="netease-playlist-list">{playlists.map((playlist) => <button key={playlist.id} onClick={() => void showCollection("playlist", { playlistId: playlist.id })}>{playlist.cover ? <img src={playlist.cover} alt="" /> : <span><Icon name="music" /></span>}<div><b>{playlist.name}</b><small>{playlist.trackCount || 0} 首歌曲{playlist.description ? ` · ${playlist.description}` : ""}</small></div><Icon name="chevron" /></button>)}</div> : <div className="netease-library-empty"><Icon name="library" /><p>{isConnected ? "点击刷新读取你的歌单。" : "连接账号后查看你的歌单、红心和播放记录。"}</p></div>}</section>
+          {pendingPlaylistTrack && <section className="netease-pending-playlist"><div><small>FROM CHAT</small><b>{pendingPlaylistTrack.title}</b><span>{pendingPlaylistTrack.artist || "Unknown artist"}</span></div>{!isConnected ? <button onClick={() => setAccountOpen(true)}>Connect account first</button> : !playlists.length ? <button disabled={busy} onClick={() => void connect()}>Load playlists</button> : <button onClick={() => setPlaylistPickerOpen((value) => !value)}>Add to playlist</button>}{playlistPickerOpen && <div className="netease-playlist-picker">{playlists.map((playlist) => <button key={playlist.id} disabled={busy} onClick={() => void updateRemotePlaylist("playlist-add", playlist.id, pendingPlaylistTrack)}><span>{playlist.name}</span><small>{playlist.trackCount || 0}  tracks</small></button>)}</div>}<button className="netease-pending-dismiss" onClick={onPendingPlaylistTrackHandled}>Cancel</button></section>}
+          <section className="netease-shortcuts"><button disabled={busy || !isConnected} onClick={() => void showCollection("recommendations")}><Icon name="sparkles" /><span>Daily mix</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("personal-fm")}><Icon name="music" /><span>Personal FM</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("recent-plays")}><Icon name="repeat" /><span>Recently played</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("liked-songs")}><Icon name="heart" /><span>Liked songs</span></button></section>
+          <section className="netease-playlists"><div className="netease-section-heading"><div><small>MY PLAYLISTS</small><h3>My playlists</h3></div><button disabled={busy || !isConnected} onClick={() => void connect()}>Refresh</button></div>{playlists.length ? <div className="netease-playlist-list">{playlists.map((playlist) => <button key={playlist.id} onClick={() => void showCollection("playlist", { playlistId: playlist.id })}>{playlist.cover ? <img src={playlist.cover} alt="" /> : <span><Icon name="music" /></span>}<div><b>{playlist.name}</b><small>{playlist.trackCount || 0}  songs{playlist.description ? ` · ${playlist.description}` : ""}</small></div><Icon name="chevron" /></button>)}</div> : <div className="netease-library-empty"><Icon name="library" /><p>{isConnected ? "Refresh to load your playlists." : "Connect to view playlists, favorites and listening history."}</p></div>}</section>
         </> : <>
-          <form className="netease-search" onSubmit={(event) => { event.preventDefault(); void searchSongs(); }}><Icon name="search" /><input value={search} placeholder="搜索歌曲、歌手或专辑" onChange={(event) => setSearch(event.target.value)} /><button disabled={busy} type="submit">搜索</button></form>
-          <section className="netease-discover-intro"><small>DISCOVER</small><h3>听见此刻想听的歌</h3><p>搜索任意歌曲，或连接账号后查看每日推荐、私人 FM 和本周常听。</p></section>
-          <section className="netease-discover-actions"><button disabled={busy || !isConnected} onClick={() => void showCollection("recommendations")}><b>每日推荐</b><span>今天的 30 首专属歌曲</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("play-history")}><b>本周常听</b><span>回到最近循环的旋律</span></button></section>
+          <form className="netease-search" onSubmit={(event) => { event.preventDefault(); void searchSongs(); }}><Icon name="search" /><input value={search} placeholder="Search songs, artists or albums" onChange={(event) => setSearch(event.target.value)} /><button disabled={busy} type="submit">Search</button></form>
+          <section className="netease-discover-intro"><small>DISCOVER</small><h3>Find your next song</h3><p>Search for songs or connect your account for daily recommendations, Personal FM and weekly favorites.</p></section>
+          <section className="netease-discover-actions"><button disabled={busy || !isConnected} onClick={() => void showCollection("recommendations")}><b>Daily mix</b><span>30 songs selected for you today</span></button><button disabled={busy || !isConnected} onClick={() => void showCollection("play-history")}><b>Weekly favorites</b><span>Return to your recent favorites</span></button></section>
         </>}
         {message && <p className="netease-library-message" role="status">{message}</p>}
       </main>
@@ -7054,10 +7019,10 @@ type MemoryLibraryDetail = {
   revisions: Array<{ id: string; body: string; mood: string; tags: string[]; reason: string; action: string; createdAt: string }>;
 };
 const memoryTypeLabel: Record<MemoryLibraryRecord["type"], string> = {
-  core: "核心记忆",
-  long_term: "长期记忆",
-  feeling: "感受",
-  dream: "梦",
+  core: "Core memories",
+  long_term: "Long-term memories",
+  feeling: "Feelings",
+  dream: "Dreams",
 };
 
 function MemoryLibrary() {
@@ -7084,11 +7049,11 @@ function MemoryLibrary() {
       const payload = response.headers.get("content-type")?.includes("application/json")
         ? await response.json() as { memories?: MemoryLibraryRecord[]; error?: string }
         : {};
-      if (!response.ok) throw new Error(payload.error || "记忆暂时无法读取");
+      if (!response.ok) throw new Error(payload.error || "Could not load memories");
       setMemories(payload.memories || []);
       setMessage("");
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "记忆暂时无法读取");
+      setMessage(reason instanceof Error ? reason.message : "Could not load memories");
     } finally {
       setLoading(false);
     }
@@ -7105,11 +7070,11 @@ function MemoryLibrary() {
       const payload = response.headers.get("content-type")?.includes("application/json")
         ? await response.json() as MemoryLibraryDetail & { error?: string }
         : {} as MemoryLibraryDetail & { error?: string };
-      if (!response.ok || !payload.memory) throw new Error(payload.error || "记忆详情暂时无法读取");
+      if (!response.ok || !payload.memory) throw new Error(payload.error || "Could not load memory details");
       setDetail(payload);
       setCorrecting(false);
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "记忆详情暂时无法读取");
+      setMessage(reason instanceof Error ? reason.message : "Could not load memory details");
     }
   };
 
@@ -7122,11 +7087,11 @@ function MemoryLibrary() {
       const payload = response.headers.get("content-type")?.includes("application/json")
         ? await response.json() as MemoryLibraryDetail & { error?: string }
         : {} as MemoryLibraryDetail & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "记忆没有更新");
+      if (!response.ok) throw new Error(payload.error || "Memory was not updated");
       if (payload.memory) setDetail(payload);
       await load();
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "记忆没有更新");
+      setMessage(reason instanceof Error ? reason.message : "Memory was not updated");
     }
   };
 
@@ -7139,12 +7104,12 @@ function MemoryLibrary() {
       const payload = response.headers.get("content-type")?.includes("application/json")
         ? await response.json() as { error?: string }
         : {} as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "核心记忆没有保存");
+      if (!response.ok) throw new Error(payload.error || "Core memory was not saved");
       setAddingCore(false);
       setCoreDraft({ body: "", mood: "", tags: "", reason: "" });
       await load();
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "核心记忆没有保存");
+      setMessage(reason instanceof Error ? reason.message : "Core memory was not saved");
     }
   };
 
@@ -7161,12 +7126,12 @@ function MemoryLibrary() {
       const payload = response.headers.get("content-type")?.includes("application/json")
         ? await response.json() as MemoryLibraryDetail & { error?: string }
         : {} as MemoryLibraryDetail & { error?: string };
-      if (!response.ok || !payload.memory) throw new Error(payload.error || "修正没有保存");
+      if (!response.ok || !payload.memory) throw new Error(payload.error || "Correction was not saved");
       setDetail(payload);
       setCorrecting(false);
       await load();
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "修正没有保存");
+      setMessage(reason instanceof Error ? reason.message : "Correction was not saved");
     }
   };
 
@@ -7178,46 +7143,46 @@ function MemoryLibrary() {
   const number = (type: MemoryLibraryRecord["type"]) => memories.filter((memory) => memory.type === type && !memory.demotedAt).length;
   const date = (value: string) => {
     const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(timestamp)) : "时间未知";
+    return Number.isFinite(timestamp) ? new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" }).format(new Date(timestamp)) : "Unknown time";
   };
 
   return (
     <div className="page-body memory-library-page">
-      <PageIntro eyebrow="SHARED MEMORY" title="记忆" text="Rowan 会把真正重要的事留在这里，不属于某一个聊天窗口。" />
+      <PageIntro eyebrow="SHARED MEMORY" title="Memory" text="Rowan keeps what matters here, beyond any single conversation." />
       <section className="memory-library-intro surface">
-        <div><small>只属于你和 Rowan</small><b>跨设备、跨对话保存</b></div>
-        <button onClick={() => setAddingCore(true)}><Icon name="plus" />新增核心记忆</button>
+        <div><small>Just you and Rowan</small><b>Saved across devices and conversations</b></div>
+        <button onClick={() => setAddingCore(true)}><Icon name="plus" />Add core memory</button>
       </section>
       <div className="memory-library-tools">
-        <label><Icon name="search" /><input value={query} placeholder="搜索共同记忆" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") setAppliedQuery(event.currentTarget.value); }} /></label>
-        <button onClick={() => setAppliedQuery(query)} aria-label="搜索记忆"><Icon name="refresh" /></button>
+        <label><Icon name="search" /><input value={query} placeholder="Search shared memories" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") setAppliedQuery(event.currentTarget.value); }} /></label>
+        <button onClick={() => setAppliedQuery(query)} aria-label="Search memories"><Icon name="refresh" /></button>
       </div>
-      <nav className="memory-library-tabs" aria-label="记忆分类">
-        <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部</button>
+      <nav className="memory-library-tabs" aria-label="Memory categories">
+        <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All</button>
         {(["core", "long_term", "feeling", "dream"] as const).map((type) => <button key={type} className={filter === type ? "active" : ""} onClick={() => setFilter(type)}>{memoryTypeLabel[type]} <i>{number(type)}</i></button>)}
-        <button className={showDemoted ? "active" : ""} onClick={() => setShowDemoted((value) => !value)}>沉底</button>
+        <button className={showDemoted ? "active" : ""} onClick={() => setShowDemoted((value) => !value)}>Archive</button>
       </nav>
       {message && <p className="memory-library-message" role="status">{message}</p>}
-      {loading ? <div className="memory-library-loading">正在整理记忆…</div> : groups.filter((group) => filter === "all" || group.type === filter).map((group) => (
+      {loading ? <div className="memory-library-loading">Organizing memories…</div> : groups.filter((group) => filter === "all" || group.type === filter).map((group) => (
         <section className="memory-library-section" key={group.type}>
           <div className="memory-library-section-head"><div><small>{group.type === "feeling" ? "ROWAN · FIRST PERSON" : group.type.toUpperCase()}</small><h2>{group.label}</h2></div><span>{group.items.length}</span></div>
           {group.items.length ? <div className="memory-card-list">{group.items.map((memory) => (
             <article className={"memory-card" + (memory.pinned ? " pinned" : "") + (memory.demotedAt ? " demoted" : "")} key={memory.id}>
               <button className="memory-card-open" onClick={() => void openMemory(memory.id)}>
-                <div className="memory-card-meta"><span>{memory.reviewStatus === "candidate" ? "待确认" : memory.mood || memoryTypeLabel[memory.type]}</span><time>{date(memory.updatedAt)}</time></div>
+                <div className="memory-card-meta"><span>{memory.reviewStatus === "candidate" ? "Pending review" : memory.mood || memoryTypeLabel[memory.type]}</span><time>{date(memory.updatedAt)}</time></div>
                 <p>{memory.body}</p>
                 {memory.tags.length > 0 && <div className="memory-card-tags">{memory.tags.map((tag) => <span key={tag}>{"#" + tag}</span>)}</div>}
               </button>
               <div className="memory-card-actions">
-                <button aria-label={memory.pinned ? "取消钉住" : "钉住记忆"} title={memory.pinned ? "取消钉住" : "钉住"} onClick={() => void change(memory.id, "pin", !memory.pinned)}><Icon name="bookmark" /></button>
-                <button aria-label={memory.demotedAt ? "恢复记忆" : "沉底记忆"} title={memory.demotedAt ? "恢复记忆" : "沉底"} onClick={() => void change(memory.id, memory.demotedAt ? "restore" : "demote")}><Icon name={memory.demotedAt ? "refresh" : "chevron"} /></button>
+                <button aria-label={memory.pinned ? "Unpin" : "Pin memory"} title={memory.pinned ? "Unpin" : "Pin"} onClick={() => void change(memory.id, "pin", !memory.pinned)}><Icon name="bookmark" /></button>
+                <button aria-label={memory.demotedAt ? "Restore memory" : "Archive memory"} title={memory.demotedAt ? "Restore memory" : "Archive"} onClick={() => void change(memory.id, memory.demotedAt ? "restore" : "demote")}><Icon name={memory.demotedAt ? "refresh" : "chevron"} /></button>
               </div>
             </article>
-          ))}</div> : <div className="memory-library-empty">{group.type === "dream" ? "梦会在准备好时住进这里。" : "还没有值得留下的内容。"}</div>}
+          ))}</div> : <div className="memory-library-empty">{group.type === "dream" ? "Dreams will appear here when they are ready." : "Nothing saved yet."}</div>}
         </section>
       ))}
-      {addingCore && <div className="memory-modal-layer"><button className="memory-modal-scrim" aria-label="关闭" onClick={() => setAddingCore(false)} /><section className="memory-modal" role="dialog" aria-modal="true" aria-label="新增核心记忆"><header><div><small>CORE MEMORY</small><h2>留下一件长期重要的事</h2></div><button onClick={() => setAddingCore(false)} aria-label="关闭"><Icon name="close" /></button></header><label><span>内容</span><textarea value={coreDraft.body} placeholder="例如：我希望 Rowan 一直用这个称呼叫我。" onChange={(event) => setCoreDraft({ ...coreDraft, body: event.target.value })} /></label><label><span>感受（可选）</span><input value={coreDraft.mood} onChange={(event) => setCoreDraft({ ...coreDraft, mood: event.target.value })} /></label><label><span>标签（用逗号分开）</span><input value={coreDraft.tags} onChange={(event) => setCoreDraft({ ...coreDraft, tags: event.target.value })} /></label><button className="memory-primary-action" onClick={() => void addCore()}>保存核心记忆</button></section></div>}
-      {detail && <div className="memory-modal-layer"><button className="memory-modal-scrim" aria-label="关闭" onClick={() => setDetail(null)} /><section className="memory-modal memory-detail-modal" role="dialog" aria-modal="true" aria-label="记忆详情"><header><div><small>{memoryTypeLabel[detail.memory.type].toUpperCase()}</small><h2>这段记忆</h2></div><button onClick={() => setDetail(null)} aria-label="关闭"><Icon name="close" /></button></header>{correcting ? <><label><span>修正内容</span><textarea value={coreDraft.body} onChange={(event) => setCoreDraft({ ...coreDraft, body: event.target.value })} /></label><label><span>修正原因</span><input value={coreDraft.reason} placeholder="例如：称呼改成新的名字" onChange={(event) => setCoreDraft({ ...coreDraft, reason: event.target.value })} /></label><button className="memory-primary-action" onClick={() => void correctCore()}>保存修正</button><button className="memory-secondary-action" onClick={() => setCorrecting(false)}>取消</button></> : <><p className="memory-detail-body">{detail.memory.body}</p>{detail.memory.tags.length > 0 && <div className="memory-card-tags">{detail.memory.tags.map((tag) => <span key={tag}>{"#" + tag}</span>)}</div>}<div className="memory-detail-actions"><button onClick={() => void change(detail.memory.id, "pin", !detail.memory.pinned)}><Icon name="bookmark" />{detail.memory.pinned ? "取消钉住" : "钉住"}</button>{detail.memory.type === "core" && detail.memory.reviewStatus === "candidate" && <button onClick={() => void change(detail.memory.id, "approve_core")}><Icon name="check" />确认核心记忆</button>}{detail.memory.type === "core" && detail.memory.reviewStatus === "approved" && <button onClick={() => { setCoreDraft({ body: detail.memory.body, mood: detail.memory.mood, tags: detail.memory.tags.join("，"), reason: "" }); setCorrecting(true); }}><Icon name="edit" />修正</button>}<button className="danger" onClick={() => void change(detail.memory.id, "demote")}><Icon name="chevron" />沉底</button></div><section className="memory-revision-list"><small>修改记录</small>{detail.revisions.length ? detail.revisions.map((revision) => <article key={revision.id}><b>{revision.action === "created" ? "创建" : "修正"}</b><span>{date(revision.createdAt)} · {revision.reason}</span></article>) : <p>还没有修正记录。</p>}</section></>}</section></div>}
+      {addingCore && <div className="memory-modal-layer"><button className="memory-modal-scrim" aria-label="Close" onClick={() => setAddingCore(false)} /><section className="memory-modal" role="dialog" aria-modal="true" aria-label="Add core memory"><header><div><small>CORE MEMORY</small><h2>Save something that matters for the long term</h2></div><button onClick={() => setAddingCore(false)} aria-label="Close"><Icon name="close" /></button></header><label><span>Content</span><textarea value={coreDraft.body} placeholder="For example: I want Rowan to keep calling me by this name." onChange={(event) => setCoreDraft({ ...coreDraft, body: event.target.value })} /></label><label><span>Feeling (optional)</span><input value={coreDraft.mood} onChange={(event) => setCoreDraft({ ...coreDraft, mood: event.target.value })} /></label><label><span>Tags (comma-separated)</span><input value={coreDraft.tags} onChange={(event) => setCoreDraft({ ...coreDraft, tags: event.target.value })} /></label><button className="memory-primary-action" onClick={() => void addCore()}>Save core memory</button></section></div>}
+      {detail && <div className="memory-modal-layer"><button className="memory-modal-scrim" aria-label="Close" onClick={() => setDetail(null)} /><section className="memory-modal memory-detail-modal" role="dialog" aria-modal="true" aria-label="Memory details"><header><div><small>{memoryTypeLabel[detail.memory.type].toUpperCase()}</small><h2>This memory</h2></div><button onClick={() => setDetail(null)} aria-label="Close"><Icon name="close" /></button></header>{correcting ? <><label><span>Correct content</span><textarea value={coreDraft.body} onChange={(event) => setCoreDraft({ ...coreDraft, body: event.target.value })} /></label><label><span>Reason for correction</span><input value={coreDraft.reason} placeholder="For example: use my new name" onChange={(event) => setCoreDraft({ ...coreDraft, reason: event.target.value })} /></label><button className="memory-primary-action" onClick={() => void correctCore()}>Save correction</button><button className="memory-secondary-action" onClick={() => setCorrecting(false)}>Cancel</button></> : <><p className="memory-detail-body">{detail.memory.body}</p>{detail.memory.tags.length > 0 && <div className="memory-card-tags">{detail.memory.tags.map((tag) => <span key={tag}>{"#" + tag}</span>)}</div>}<div className="memory-detail-actions"><button onClick={() => void change(detail.memory.id, "pin", !detail.memory.pinned)}><Icon name="bookmark" />{detail.memory.pinned ? "Unpin" : "Pin"}</button>{detail.memory.type === "core" && detail.memory.reviewStatus === "candidate" && <button onClick={() => void change(detail.memory.id, "approve_core")}><Icon name="check" />Confirm core memory</button>}{detail.memory.type === "core" && detail.memory.reviewStatus === "approved" && <button onClick={() => { setCoreDraft({ body: detail.memory.body, mood: detail.memory.mood, tags: detail.memory.tags.join("，"), reason: "" }); setCorrecting(true); }}><Icon name="edit" />Corrected</button>}<button className="danger" onClick={() => void change(detail.memory.id, "demote")}><Icon name="chevron" />Archive</button></div><section className="memory-revision-list"><small>Revision history</small>{detail.revisions.length ? detail.revisions.map((revision) => <article key={revision.id}><b>{revision.action === "created" ? "Created" : "Corrected"}</b><span>{date(revision.createdAt)} · {revision.reason}</span></article>) : <p>No revisions yet.</p>}</section></>}</section></div>}
     </div>
   );
 }
@@ -7268,7 +7233,7 @@ function PageIntro({
   return (
     <header className="page-intro">
       <span>{eyebrow}</span>
-      <h1>{title}</h1>
+      <h1>{uiLabel(title)}</h1>
       <p>{text}</p>
     </header>
   );
@@ -7304,8 +7269,13 @@ function Placeholder({ title }: { title: string }) {
   return (
     <div className="page-body placeholder">
       <Icon name={nav.find((x) => x.label === title)?.icon || "sparkles"} />
-      <h1>{title}</h1>
-      <p>暂时没有内容。</p>
+      <h1>{uiLabel(title)}</h1>
+      <p>Nothing here yet.</p>
     </div>
   );
+}
+
+function InternalReadingRoom() {
+  const [books, setBooks] = usePersistentDocument<ReadingBook[]>("readingRoom", []);
+  return <ReadingRoom books={books} setBooks={setBooks} />;
 }
