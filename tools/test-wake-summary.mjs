@@ -8,9 +8,9 @@ const rows = wakeActivities([
   { ...base, id: 'three', title: 'unknown_tool', status: 'inProgress' },
 ]);
 assert.equal(rows.length, 3);
-assert.deepEqual(rows.map(item => item.status), ['已完成', '未完成', '执行中']);
-assert.equal(rows[0].label, '翻阅记忆');
-assert.equal(rows[2].label, '调用工具');
+assert.deepEqual(rows.map(item => item.status), ['Completed', 'Incomplete', 'Running']);
+assert.equal(rows[0].label, 'Read memories');
+assert.equal(rows[2].label, 'Call tool');
 assert.ok(!JSON.stringify(rows).includes('private content'));
 assert.deepEqual(wakeActivities([]), []);
 console.log('Wake activity summary: passed');

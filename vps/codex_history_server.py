@@ -191,6 +191,14 @@ class Handler(BaseHTTPRequestHandler):
         return TOKEN_PATH.read_text(encoding="utf-8").strip()
 
     def dispatch(self) -> None:
+        try:
+            self.dispatch_request()
+        except (ValueError, UnicodeDecodeError):
+            self.send_json(400, {"error": "Invalid request body"})
+        except sqlite3.Error:
+            self.send_json(503, {"error": "History storage unavailable; operation not confirmed"})
+
+    def dispatch_request(self) -> None:
         parts = urlparse(self.path).path.strip("/").split("/")
         if len(parts) == 3 and parts[0] == "watch" and parts[2] == "stream" and self.command == "GET":
             watch.serve(self, parts[1])
@@ -307,7 +315,20 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError: limit = 200
             before = query.get("before", [""])[0]
             cursor = connection.execute("SELECT created_at,rowid FROM messages WHERE id=? AND vesper_conversation_id=?", (before, conversation_id)).fetchone() if before else None
-            if paginated:
+            around = query.get("around", [""])[0]
+            if before and not cursor:
+                self.send_json(400, {"error": "Invalid history cursor"}); return
+            if around:
+                target = connection.execute("SELECT created_at,rowid FROM messages WHERE id=? AND vesper_conversation_id=?", (around, conversation_id)).fetchone()
+                if not target:
+                    self.send_json(404, {"error": "Message not found"}); return
+                args = (conversation_id, target["created_at"], target["rowid"])
+                older = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=? AND (created_at,rowid) <= (?,?) ORDER BY created_at DESC,rowid DESC LIMIT ?", (*args, (limit+1)//2)).fetchall()
+                newer = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=? AND (created_at,rowid) > (?,?) ORDER BY created_at,rowid LIMIT ?", (*args, limit//2)).fetchall()
+                messages = list(reversed(older)) + list(newer)
+                first = connection.execute("SELECT created_at,rowid FROM messages WHERE id=?", (messages[0]["id"],)).fetchone()
+                has_more = bool(connection.execute("SELECT 1 FROM messages WHERE vesper_conversation_id=? AND (created_at,rowid) < (?,?) LIMIT 1", (conversation_id, first["created_at"], first["rowid"])).fetchone())
+            elif paginated:
                 clause = " AND (created_at,rowid) < (?,?)" if cursor else ""
                 args = (conversation_id,) + ((cursor["created_at"], cursor["rowid"]) if cursor else ()) + (limit+1,)
                 batch = connection.execute("SELECT * FROM messages WHERE vesper_conversation_id=?" + clause + " ORDER BY created_at DESC,rowid DESC LIMIT ?", args).fetchall()
@@ -459,6 +480,9 @@ class Handler(BaseHTTPRequestHandler):
     def delete_message(self, conversation_id: str, message_id: str) -> None:
         body = self.body()
         with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute("SELECT 1 FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone():
+                self.send_json(200, {"ok": True, "deleted": 0}); return
             row = connection.execute(
                 "SELECT item_id, metadata_json FROM messages WHERE vesper_conversation_id = ? AND id = ?",
                 (conversation_id, message_id),

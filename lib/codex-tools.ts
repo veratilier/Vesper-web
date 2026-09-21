@@ -141,7 +141,15 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!memoryScope || !bindings.VESPER_APP_TOKEN) throw new Error('Owner context required');
     const owner = await memoryScopeFromRequest(new Request('https://vesper.internal', { headers: { 'x-vesper-device-token': bindings.VESPER_APP_TOKEN } }));
     if (owner.userId !== memoryScope.userId) throw new Error('Owner context mismatch');
+    // Never initialize defaults when production storage or existing state is missing.
+    if (!bindings.DB) throw new Error('Vesper Desire storage is unavailable');
+    const existing = await bindings.DB.prepare('SELECT user_id FROM vesper_desire_state WHERE user_id = ?').bind('vesper').first();
+    if (!existing) throw new Error('Existing Vesper Desire state was not found; no values have been initialized.');
     return executeDesire(bindings, name, input);
+  }
+  if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
+    if (!memoryScope) throw new Error("Memory scope is unavailable");
+    return sharedMemoryTool(name, input, context);
   }
   await ensureSchema();
   if (['album_save_photo', 'album_search_photos', 'album_send_photos'].includes(name)) {
@@ -340,10 +348,6 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const track = findMusicTrack(tracks, trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     return { ok: true, alreadyInPlaylist: true, trackId: track.id, playlist: "Vesper music" };
-  }
-  if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
-    if (!memoryScope) throw new Error("Memory scope is unavailable");
-    return sharedMemoryTool(name, input, context);
   }
   if (name === "sticker_search") {
     if (!memoryScope) throw new Error("Sticker scope is unavailable");

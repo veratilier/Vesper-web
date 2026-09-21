@@ -11,6 +11,7 @@ import { WatchPlayer } from "./watch-player";
 import type { WatchFrame } from "./watch-context";
 import { ReadingRoom, type ReadingBook } from "./reading-room";
 import { SubscriptionUsage } from "./subscription-usage";
+import { SharedMemoryLibrary } from "./shared-memory-library";
 import { AppCenter } from "./app-center";
 import { DesirePanel, HomeDesire } from "./desire-panel";
 import { WakeCard } from "./wake-card";
@@ -869,7 +870,7 @@ export default function Home() {
   useEffect(() => {
     const refreshLibrary = () => {
       void fetch(apiUrl("/api/state?key=music"), { cache: "no-store", headers: appHeaders() })
-        .then((response) => response.ok ? response.json() : Promise.reject())
+        .then((response) => response.ok ? response.json() as Promise<{ value?: Track[] | null }> : Promise.reject())
         .then((result: { value?: Track[] | null }) => {
           if (!Array.isArray(result.value)) return;
           window.dispatchEvent(new CustomEvent("vesper-document-change", { detail: { key: "music", value: result.value } }));
@@ -1518,7 +1519,7 @@ export default function Home() {
           ) : section === "相册" ? (
             <PhotoAlbum apiUrl={apiUrl} headers={appHeaders} active={active === "相册"} />
           ) : section === "记忆库" ? (
-            <MemoryLibrary />
+            <SharedMemoryLibrary apiUrl={apiUrl} headers={appHeaders} legacy={<MemoryLibrary />} />
           ) : section === "Pandora" ? (
             <AppCenter renderReading={() => <InternalReadingRoom />} renderWatch={() => conversationId === watchConversationId && active !== "Pandora" ? null : <ConnectedChat key={watchConversationId} watchMode watchActive={active === "Pandora"} conversationId={watchConversationId} onSelectConversation={setWatchConversationId} agentName={agentName} userName={userName} favorites={favorites} setFavorites={setFavorites} playing={playing} onToggleMusic={() => setPlaying(value => !value)} onNextMusic={() => { if (activeTracks.length) setTrackIndex(index => (index + 1) % activeTracks.length); }} onOpenMusic={() => navigateTo("音乐")} onAddMusicToPlaylist={card => { setMusicPlaylistIntent(card); navigateTo("音乐"); }} />} onDesire={() => navigateTo("欲望")} onWake={() => { setWakeRequest(crypto.randomUUID()); navigateTo("聊天"); }} />
           ) : section === "欲望" ? (
@@ -6946,7 +6947,7 @@ function NeteaseMusicLibrary({
       setMessage("Connect your NetEase account first.");
       return;
     }
-    const neteaseId = track.neteaseId || track.id.replace(/^netease-/, "");
+    const neteaseId = "trackId" in track ? track.trackId.replace(/^netease-/, "") : track.neteaseId || track.id.replace(/^netease-/, "");
     const target = playlists.find((playlist) => playlist.id === playlistId);
     const verb = action === "playlist-add" ? "Add" : "Remove";
     if (!window.confirm(`${verb} “${track.title}” ${action === "playlist-add" ? "to" : "from"} ${target?.name || "this NetEase playlist"}?`)) return;
