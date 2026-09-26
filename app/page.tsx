@@ -3,7 +3,7 @@ import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { nativeMcpOAuth } from "./native-mcp-oauth";
-import { nativeOAuthCode, NATIVE_OAUTH_PREFIX } from "@/lib/mcp-oauth-callback";
+import { nativeOAuthCode } from "@/lib/mcp-oauth-callback";
 import { documentSyncAction } from "@/lib/document-sync";
 import { NotificationSettings } from "./notification-settings";
 import { WindowOpening } from "./window-opening";
@@ -5479,7 +5479,7 @@ function ExternalMcpModal({ onClose, context }: { onClose: () => void; context?:
     try {
       const native = Capacitor.getPlatform() === "ios";
       setMessage(`${stage}…`);
-      const redirectUri = native ? "https://vesper.r-vera.com/mcp/oauth/callback" : `${window.location.origin}/mcp/oauth/callback`;
+      const redirectUri = native ? "https://api.vesper.r-vera.com/mcp/oauth/callback?native=1" : `${window.location.origin}/mcp/oauth/callback`;
       const discoveryResponse = await fetch(apiUrl("/api/mcp/oauth/discover"), {
         method: "POST",
         signal: AbortSignal.timeout(60000),
@@ -5517,7 +5517,7 @@ function ExternalMcpModal({ onClose, context }: { onClose: () => void; context?:
         .replaceAll("+", "-")
         .replaceAll("/", "_")
         .replaceAll("=", "");
-      const state = `${native ? NATIVE_OAUTH_PREFIX : ""}${crypto.randomUUID()}`;
+      const state = crypto.randomUUID();
       const pending = {
         serverId: server.id, state, verifier,
         tokenUrl: discovered.tokenUrl, clientId: discovered.clientId,
