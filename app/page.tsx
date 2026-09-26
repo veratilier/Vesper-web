@@ -3,7 +3,7 @@ import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { nativeMcpOAuth } from "./native-mcp-oauth";
-import { nativeOAuthCode, NATIVE_OAUTH_PREFIX } from "@/lib/mcp-oauth-callback";
+import { nativeOAuthCode } from "@/lib/mcp-oauth-callback";
 import { documentSyncAction } from "@/lib/document-sync";
 import { NotificationSettings } from "./notification-settings";
 import { WindowOpening } from "./window-opening";
@@ -3966,6 +3966,38 @@ function ConnectedChat({
     }, 30_100);
     updateApprovalQueue((queue) => removeCodexApproval(queue, approval.requestKey));
   };
+  // Preserve the normal completion path (stickers, Wake, memory distillation).
+  // Only failed/aborted/disconnected turns use this fallback teardown.
+  const finishFailedTurn = (message: string, expectedTurnId = "") => {
+    if (expectedTurnId && activeTurnId.current && expectedTurnId !== activeTurnId.current) return;
+    if (!activeTurnUserId.current && !activeTurnId.current) return;
+    const failedTurnId = activeTurnId.current || expectedTurnId;
+    if (failedTurnId) {
+      completedQuestionTurns.current.add(failedTurnId);
+      clearApprovalQueue({ threadId: threadId.current, turnId: failedTurnId });
+    }
+    setToolQuestions(current => current.filter(request => request.params.turnId !== failedTurnId));
+    flushExecutions();
+    if (activeTurnUserId.current) updateMessage(activeTurnUserId.current, item => ({
+      ...item, status: "error", metadata: {
+        ...item.metadata, turnId: failedTurnId || item.metadata?.turnId, turnStatus: "error",
+        wake: item.metadata?.wake ? { ...item.metadata.wake, endedAt: new Date().toISOString() } : undefined,
+      },
+    }));
+    setBusy(false);
+    sending.current = false;
+    setError(message);
+    setStreamingItems({});
+    streamBuffers.current.clear();
+    streamStartedAt.current.clear();
+    reasoningBuffers.current.clear();
+    reasoningSummaries.current = [];
+    pendingAgentStickers.current = [];
+    turnDone.current?.();
+    turnDone.current = null;
+    activeTurnId.current = "";
+    activeTurnUserId.current = "";
+  };
   const handleSocketMessage = (message: CodexSocketMessage) => {
     if (typeof message.id === "number" && rpc.current.has(message.id) && !message.method) {
       const pendingRpc = rpc.current.get(message.id)!;
@@ -3979,6 +4011,14 @@ function ConnectedChat({
       if (message.id != null && message.method && CODEX_DYNAMIC_TOOL_METHODS.has(message.method)) {
         socket.current?.send(JSON.stringify({ id: message.id, error: { code: -32602, message: "Tool request belongs to another thread" } }));
       }
+      return;
+    }
+    if (message.method === "turn/failed" || message.method === "turn/aborted") {
+      const failedTurn = params.turn as { id?: string; error?: { message?: string } } | undefined;
+      const failure = params.error as { message?: string } | undefined;
+      finishFailedTurn(failure?.message || failedTurn?.error?.message ||
+        (message.method === "turn/aborted" ? "The reply was cancelled." : "Codex could not finish the reply."),
+        String(failedTurn?.id || params.turnId || ""));
       return;
     }
     // App-server versions have used each of these request names for dynamic tools.
@@ -4121,6 +4161,7 @@ function ConnectedChat({
     }
     if (message.method === "turn/completed") {
       const questionTurnId = (params.turn as { id?: string } | undefined)?.id || params.turnId || activeTurnId.current;
+      if (questionTurnId && activeTurnId.current && questionTurnId !== activeTurnId.current) return;
       if (questionTurnId) completedQuestionTurns.current.add(String(questionTurnId));
       setToolQuestions(current => current.filter(request => request.params.turnId !== questionTurnId));
       flushExecutions();
@@ -4295,6 +4336,7 @@ function ConnectedChat({
       rpc.current.clear();
       clearApprovalQueue();
       approvalResponses.current.clear();
+      finishFailedTurn("Codex disconnected before the reply finished. Reconnect to continue.");
       if (hadPendingApproval) setError("Codex disconnected. Pending approvals were not sent.");
     };
     ws.onerror = () => setError("Codex app-server is offline");
@@ -4304,6 +4346,7 @@ function ConnectedChat({
       ws.onopen = () => { ws.removeEventListener("close", closedBeforeOpen); resolve(); };
       ws.onerror = () => { ws.removeEventListener("close", closedBeforeOpen); reject(new Error("Codex app-server is offline")); };
     });
+    ws.onerror = () => setError("Codex app-server is offline");
     try {
       await sendRpc("initialize", { clientInfo: { name: "vesper_web", title: "Vesper", version: "0.6.0" }, capabilities: { experimentalApi: true, requestAttestation: false } });
       ws.send(JSON.stringify({ method: "initialized" }));
@@ -4343,9 +4386,10 @@ function ConnectedChat({
   const cancelActiveTurn = async () => {
     if (!activeTurnId.current || !threadId.current) return;
     clearApprovalQueue({ threadId: threadId.current, turnId: activeTurnId.current });
+    const cancelledTurnId = activeTurnId.current;
     try {
-      await sendRpc("turn/interrupt", { threadId: threadId.current, turnId: activeTurnId.current });
-      setError("Cancellation requested.");
+      await sendRpc("turn/interrupt", { threadId: threadId.current, turnId: cancelledTurnId });
+      finishFailedTurn("Cancellation requested.", cancelledTurnId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not cancel the active turn");
     }
@@ -4476,6 +4520,8 @@ function ConnectedChat({
         nextModelRef.current = null;
         setNextModel(null);
       }
+      // A terminal event can arrive before the turn/start RPC resolves.
+      if (activeTurnUserId.current !== userMessage.id) return;
       const turn = (started.result?.turn || {}) as { id?: string; createdAt?: unknown };
       activeTurnId.current = turn.id || `turn-${userMessage.id}`;
       sending.current = false;
@@ -5433,7 +5479,7 @@ function ExternalMcpModal({ onClose, context }: { onClose: () => void; context?:
     try {
       const native = Capacitor.getPlatform() === "ios";
       setMessage(`${stage}…`);
-      const redirectUri = native ? "https://vesper.r-vera.com/mcp/oauth/callback" : `${window.location.origin}/mcp/oauth/callback`;
+      const redirectUri = native ? "https://api.vesper.r-vera.com/mcp/oauth/callback?native=1" : `${window.location.origin}/mcp/oauth/callback`;
       const discoveryResponse = await fetch(apiUrl("/api/mcp/oauth/discover"), {
         method: "POST",
         signal: AbortSignal.timeout(60000),
@@ -5471,7 +5517,7 @@ function ExternalMcpModal({ onClose, context }: { onClose: () => void; context?:
         .replaceAll("+", "-")
         .replaceAll("/", "_")
         .replaceAll("=", "");
-      const state = `${native ? NATIVE_OAUTH_PREFIX : ""}${crypto.randomUUID()}`;
+      const state = crypto.randomUUID();
       const pending = {
         serverId: server.id, state, verifier,
         tokenUrl: discovered.tokenUrl, clientId: discovered.clientId,
@@ -6587,7 +6633,7 @@ function ConnectionModal({
         const subscription = serializeSubscription(result.subscription);
         const response = await fetch(apiUrl("/api/push"), {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: appHeaders(true),
           body: JSON.stringify({ action: "test", subscription }),
         });
         if (!response.ok) throw new Error("Subscribed, but the server test notification failed.");

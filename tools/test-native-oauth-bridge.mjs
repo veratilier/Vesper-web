@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { authorizeWithBridge, withOAuthDeadline } from '../app/native-mcp-oauth.ts';
 const calls = [];
-const bridge = { nativePromise: async (...args) => { calls.push(args); return { url: 'com.rvera.vesper://mcp/oauth/callback?code=test' }; } };
+const bridge = { nativePromise: async (...args) => { calls.push(args); return { url: 'vesper://oauth/callback?code=test' }; } };
 assert.equal((await authorizeWithBridge(bridge, {url:'https://example.com/authorize'})).url.includes('code=test'), true);
 assert.deepEqual(calls, [['VesperOAuth','authorize',{url:'https://example.com/authorize'}]]);
 await assert.rejects(authorizeWithBridge({}, {url:'https://example.com'}), /bridge is unavailable/);
