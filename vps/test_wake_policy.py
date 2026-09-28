@@ -41,13 +41,24 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(runner.token_budget({'totalTokens':34247,'cachedInputTokens':16640}),(34247,17607))
         self.assertEqual(runner.token_budget({'totalTokens':33000}),(33000,33000))
 
-    def test_interval_bounds_and_longing_direction(self):
-        low=[policy.interval(0,{},random.Random(n)) for n in range(100)]
-        high=[policy.interval(100,{},random.Random(n)) for n in range(100)]
-        self.assertTrue(all(1800<=n<=7200 for n in low+high))
-        self.assertGreater(min(low),max(high))
+    def test_interval_bounds_and_all_three_values_shorten_it(self):
+        self.assertEqual(policy.interval(dict(longing=0,intensity=0,attachment=0),{}),7200)
+        self.assertEqual(policy.interval(dict(longing=100,intensity=100,attachment=100),{}),1800)
+        base=dict(longing=30,intensity=30,attachment=30)
+        for key in base:
+            higher={**base,key:60}
+            self.assertLess(policy.interval(higher,{}),policy.interval(base,{}))
+        self.assertEqual(policy.interval(dict(longing=100,intensity=100,attachment=100),{'less':True}),6300)
+        self.assertEqual(policy.interval(dict(longing=56,intensity=26,attachment=45),{}),4730)
+
+    def test_desire_fields_are_real_complete_and_finite(self):
+        self.assertIsNone(policy.desire_values({'longing':20}))
+        for invalid in ['40',float('nan'),True]:
+            with self.assertRaises(ValueError):policy.desire_values(dict(longing=invalid,intensity=10,attachment=10))
+        self.assertEqual(policy.desire_values({'content':[{'text':json.dumps(dict(longing=20,intensity=40,attachment=60))}]}),dict(longing=20,intensity=40,attachment=60))
+
     def test_schedule_survives_reopen_and_never_redraws_same_round(self):
-        with tempfile.TemporaryDirectory() as tmp,patch.object(store,'PATH',Path(tmp)/'wake.db'),patch.object(runner,'current_preferences',lambda:{}),patch.object(runner,'http',return_value={'result':{'state':{'longing':18}}}) as read:
+        with tempfile.TemporaryDirectory() as tmp,patch.object(store,'PATH',Path(tmp)/'wake.db'),patch.object(runner,'current_preferences',lambda:{}),patch.object(runner,'http',return_value={'result':{'state':{'longing':18,'intensity':30,'attachment':40}}}) as read:
             ident=store.request('one');runner.reschedule(ident)
             with store.db() as con:first=(store.get(con,'next_at'),store.get(con,'schedule'))
             runner.reschedule(ident);runner.reschedule()

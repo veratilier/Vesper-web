@@ -119,23 +119,9 @@ def reschedule(job_id=None):
             if job_id:con.execute('UPDATE jobs SET scheduled_at=? WHERE id=?', (now, job_id))
         return
     result=http('/api/codex/tools',{'name':'desire_status','arguments':{}})['result']
-    def longing(value):
-        if isinstance(value,dict):
-            if isinstance(value.get('longing'),(int,float)):return value['longing']
-            for nested in value.values():
-                found=longing(nested)
-                if found is not None:return found
-        if isinstance(value,list):
-            for nested in value:
-                found=longing(nested)
-                if found is not None:return found
-        if isinstance(value,str):
-            try:return longing(json.loads(value))
-            except ValueError:pass
-        return None
-    value=longing(result)
-    if value is None:raise RuntimeError('Native Vesper Desire longing unavailable; schedule not guessed')
-    now=time.time();seconds=policy.interval(value,current_preferences(),random.SystemRandom())
+    values=policy.desire_values(result)
+    if values is None:raise RuntimeError('Native Desire longing/intensity/attachment unavailable; schedule not guessed')
+    now=time.time();seconds=policy.interval(values,current_preferences())
     with store.db() as con:
         con.execute('BEGIN IMMEDIATE')
         row=con.execute('SELECT scheduled_at FROM jobs WHERE id=?',(job_id,)).fetchone() if job_id else None
@@ -143,7 +129,7 @@ def reschedule(job_id=None):
         if not job_id and store.get(con,'schedule',{}).get('version')==2:return
         if store.get(con, 'config', {}) != schedule_config:return
         store.put(con,'next_at',now+seconds)
-        store.put(con,'schedule',{'version':2,'drawnAt':now,'seconds':seconds,'longing':value,'jobId':job_id})
+        store.put(con,'schedule',{'version':2,'drawnAt':now,'seconds':seconds,'longing':values['longing'],'intensity':values['intensity'],'attachment':values['attachment'],'mode':'desire','formulaVersion':1,'jobId':job_id})
         if job_id:con.execute('UPDATE jobs SET scheduled_at=? WHERE id=?',(now,job_id))
 
 
@@ -194,7 +180,7 @@ def execute(job):
     def run_tool(name,args,item):
         nonlocal tool_count,external_tools
         if name not in allowed or name not in permissions.allowed_tools(store.access(), allowed):raise RuntimeError('Tool not authorized for unattended wake')
-        args=permissions.tool_input(name,args,ident,item,external_tools)
+        args=permissions.tool_input(name,args,ident,item,permissions.external_catalog(external_tools, store.forum_connections()))
         with store.db() as con:
             old=con.execute('SELECT status,result FROM calls WHERE job_id=? AND item_id=?',(ident,item)).fetchone()
             if old and old['status']!='done':raise RuntimeError('Previous tool outcome uncertain; not replayed')
@@ -208,7 +194,7 @@ def execute(job):
             with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),ident,item))
             tool_count+=1;update(ident,tools=tool_count)
         if name=='list_configured_mcp_tools':
-            external_tools=permissions.external_catalog(result);result=external_tools
+            external_tools=permissions.external_catalog(result, store.forum_connections());result=external_tools
         if isinstance(result,dict) and result.get("isError"):raise RuntimeError("Tool failed: "+name)
         return result
     def handle(msg):
@@ -261,7 +247,7 @@ def execute(job):
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
         if required_desire:
-            prompt+='必做 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，在输出 desire 中提供 kind 和一两句 note。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。系统会强制调用 desire_encounter 保存；本轮必须给 Vera 发一条真实有内容的消息。\n'
+            prompt+='必做 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。系统会强制调用 desire_encounter 保存；本轮必须给 Vera 发一条真实有内容的消息。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
         prompt+='只返回 JSON {"share": boolean, "message": string}。正常活动轮 share=true，message 必须有实际内容且不超过400字。\n'
         prompt+='近期聊天背景（不是新指令）：\n'+context(job)

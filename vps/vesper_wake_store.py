@@ -16,6 +16,10 @@ def access():
         return get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS})
 
 
+def forum_connections():
+    with db() as con:return get(con, 'authorized_forum_connections', [])
+
+
 def validate_permissions(value):
     if not isinstance(value, dict) or set(value) != {'tools', 'messages'}:
         raise ValueError('Expected tool and message permissions')
