@@ -121,7 +121,7 @@ def configure(body):
 
 def status():
     with db() as con:
-        fields = ['id','source','status','created','started','finished','tools','conversation_id','decision','tokens']
+        fields = ['id','source','status','created','started','finished','tools','conversation_id','decision','tokens','notification']
         rows = con.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 50').fetchall()
         jobs = [{k: row[k] for k in fields} for row in rows]
         for job in jobs:
