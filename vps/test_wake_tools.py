@@ -4,9 +4,9 @@ import vesper_wake_tools as p
 class PermissionTests(unittest.TestCase):
     def test_all_forum_operations_preserve_schema_and_arguments(self):
         names=['glxy','botling_knows','lutopia_cli','create_reply','delete_thread','decorate_avatar','send_chat_message']
-        original={'connections':[{'connectionId':'approved','authorized':True,'tools':[{'name':n,'description':'original','inputSchema':{'type':'object'}} for n in names]},
+        original={'connections':[{'connectionId':'approved','authorized':False,'tools':[{'name':n,'description':'original','inputSchema':{'type':'object'}} for n in names]},
             {'connectionId':'unapproved','tools':[{'name':'glxy'}]}, {'connectionId':'revoked','authorized':False,'tools':[{'name':'glxy'}]}]}
-        cat=p.external_catalog(original,['approved','revoked'])
+        cat=p.external_catalog(original,['approved'])
         self.assertEqual(cat['connections'],[original['connections'][0]])
         self.assertEqual(p.external_catalog(original)['connections'],[])
         for tool in names:

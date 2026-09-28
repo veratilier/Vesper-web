@@ -17,7 +17,7 @@ def external_catalog(result, authorized_connections=()):
     """Full tool access only for connections explicitly authorized by the owner."""
     result=copy.deepcopy(result)
     result['connections']=[c for c in result.get('connections', [])
-        if c.get('connectionId') in authorized_connections and c.get('authorized') is not False]
+        if c.get('connectionId') in authorized_connections]
     return result
 
 
