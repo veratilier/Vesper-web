@@ -390,8 +390,20 @@ class Handler(BaseHTTPRequestHandler):
         metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
         sticker = metadata.get("sticker") if isinstance(metadata.get("sticker"), dict) else {}
         valid_sticker = bool(sticker.get("assetId") and sticker.get("url") and sticker.get("mimeType"))
+        # Native photo/file messages keep the caption empty and store uploaded
+        # media in metadata. Do not reject them before the model turn can start.
+        attachments = metadata.get("attachments")
+        def valid_attachment(item: object) -> bool:
+            if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+                return False
+            try:
+                url = urlparse(item["url"])
+                return url.scheme in {"http", "https"} and bool(url.hostname) and isinstance(item.get("type"), str) and bool(item["type"].strip())
+            except ValueError:
+                return False
+        has_attachments = isinstance(attachments, list) and bool(attachments) and all(valid_attachment(item) for item in attachments)
         if (not message_id or role not in {"user", "agent", "system"} or message_type not in {"text", "sticker"}
-                or (message_type == "text" and not content) or (message_type == "sticker" and not valid_sticker)
+                or (message_type == "text" and not content and not has_attachments) or (message_type == "sticker" and not valid_sticker)
                 or len(content) > 120_000):
             self.send_json(400, {"error": "Invalid message"})
             return
