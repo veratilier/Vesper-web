@@ -4,7 +4,8 @@ from pathlib import Path
 
 PATH = Path(os.environ.get('VESPER_WAKE_DB', str(Path.home()/'.vesper/wake.sqlite3')))
 CONVERSATION = 'vesper-autonomous-wake'
-DEFAULT_PROMPT = '结合最近聊天和当前真实状态，自主选择一件适合现在做的小事。可以阅读、留下值得保留的想法，或自然续接未结束的话题。有值得分享的新内容时，给 Vera 留一条自然、具体的消息；没有新内容时不必强行问候。'
+from vesper_wake_policy import WAKE_PROMPT
+DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
 TOOL_OPTIONS = ['read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
 MESSAGE_OPTIONS = ['text', 'photos', 'files', 'stickers']
@@ -13,6 +14,10 @@ MESSAGE_OPTIONS = ['text', 'photos', 'files', 'stickers']
 def access():
     with db() as con:
         return get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS})
+
+
+def forum_connections():
+    with db() as con:return get(con, 'authorized_forum_connections', [])
 
 
 def validate_permissions(value):
@@ -126,7 +131,7 @@ def status():
         return {'configVersion': 3, 'permissionVersion': 1,
                 'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
                 'toolOptions': TOOL_OPTIONS, 'messageOptions': MESSAGE_OPTIONS,
-                'prompt': get(con, 'task_prompt', DEFAULT_PROMPT),
+                'prompt': DEFAULT_PROMPT if get(con, 'permission_mode', False) else get(con, 'task_prompt', DEFAULT_PROMPT),
                 'defaultPrompt': DEFAULT_PROMPT, 'promptMaxLength': PROMPT_LIMIT, 'config': config, 'enabled': config['enabled'],
                 'executor': 'vps', 'conversationId': jobs[0]['conversation_id'] if jobs else None,
                 'heartbeat': get(con, 'heartbeat', 0), 'nextAt': get(con, 'next_at'),

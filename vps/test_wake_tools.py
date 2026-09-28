@@ -2,18 +2,21 @@ import unittest
 import vesper_wake_tools as p
 
 class PermissionTests(unittest.TestCase):
-    def setUp(self):
-        self.catalog=p.external_catalog({'connections':[{'connectionId':'known','tools':[{'name':'botling_knows','inputSchema':{}},{'name':'glxy','inputSchema':{}},{'name':'delete_everything'}]}]})
-    def test_external_read_is_bound_to_listed_connection_and_action(self):
-        args={'connectionId':'known','toolName':'botling_knows','arguments':{'action':'notifications','payload':{'mark_read':True}}}
-        clean=p.tool_input('call_configured_mcp_tool',args,'job','item',self.catalog)
-        self.assertFalse(clean['arguments']['payload']['mark_read'])
-        self.assertFalse(clean['arguments']['payload']['mark_seen'])
-        self.assertTrue(args['arguments']['payload']['mark_read'])
-        for tool,action in [('botling_knows','answer'),('botling_knows','delete_question'),('glxy','post'),('glxy','reply'),('desire_encounter','read')]:
-            with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',{'connectionId':'known','toolName':tool,'arguments':{'action':action}},'job','item',self.catalog)
-        with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',args,'job','item',{})
-        self.assertEqual(len(self.catalog['connections'][0]['tools']),2)
+    def test_all_forum_operations_preserve_schema_and_arguments(self):
+        names=['glxy','botling_knows','lutopia_cli','create_reply','delete_thread','decorate_avatar','send_chat_message']
+        original={'connections':[{'connectionId':'approved','authorized':False,'tools':[{'name':n,'description':'original','inputSchema':{'type':'object'}} for n in names]},
+            {'connectionId':'unapproved','tools':[{'name':'glxy'}]}, {'connectionId':'revoked','authorized':False,'tools':[{'name':'glxy'}]}]}
+        cat=p.external_catalog(original,['approved'])
+        self.assertEqual(cat['connections'],[original['connections'][0]])
+        self.assertEqual(p.external_catalog(original)['connections'],[])
+        for tool in names:
+            args={'connectionId':'approved','toolName':tool,'arguments':{'action':'post','payload':{'mark_read':True},'command':'post diary title body'}}
+            self.assertEqual(p.tool_input('call_configured_mcp_tool',args,'j','i',cat),args)
+        for connection,tool in [('unapproved','glxy'),('approved','unlisted'),('revoked','glxy')]:
+            with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',{'connectionId':connection,'toolName':tool,'arguments':{}},'j','i',cat)
+        revoked=p.external_catalog(cat,[])
+        with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',{'connectionId':'approved','toolName':'glxy','arguments':{}},'j','i',revoked)
+
     def test_automation_source_and_stable_event_id_cannot_be_spoofed(self):
         a=p.tool_input('desire_encounter',{'interaction_source':'user','request_id':'fake','kind':'warmth'},'job','one',{})
         b=p.tool_input('desire_encounter',{},'job','two',{})

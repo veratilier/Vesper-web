@@ -10,6 +10,7 @@ class WakeTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.addCleanup(patch.stopall)
+        patch.object(runner,'HISTORY',Path(self.temp.name)/'history.db').start()
         patch.object(runner,'current_preferences',lambda:{}).start()
         self.old=store.PATH;store.PATH=Path(self.temp.name)/'wake.db';self.addCleanup(lambda:setattr(store,'PATH',self.old))
     def test_real_curl_preserves_utf8_and_json_escapes(self):
@@ -76,7 +77,7 @@ class WakeTests(unittest.TestCase):
         class Night(datetime):
             @classmethod
             def now(cls,tz=None):return datetime(2026,9,10,2,tzinfo=tz)
-        with patch.object(runner,'datetime',Night),patch.object(runner,'Rpc',Rpc),patch.object(runner,'http',http),patch.object(runner,'context',lambda job:''),patch.object(runner,'front_busy',lambda n:False),patch.object(policy,'history',lambda p:[{'id':'real-user','vesper_conversation_id':'chat-existing','metadata_json':'{}','content':'Hello'}]):
+        with patch.object(runner,'datetime',Night),patch.object(runner,'Rpc',Rpc),patch.object(runner,'http',http),patch.object(runner,'context',lambda job:''),patch.object(runner,'front_busy',lambda n:False),patch.object(policy,'history',lambda p,**kw:[{'id':'real-user','vesper_conversation_id':'chat-existing','metadata_json':'{}','content':'Hello'}]):
             runner.execute(job)
         self.assertEqual(len(calls),2)
         if not share:
