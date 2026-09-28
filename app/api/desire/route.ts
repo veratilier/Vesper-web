@@ -11,6 +11,11 @@ export async function GET(request: Request) {
   if (!['status', 'history'].includes(view)) return respond({ error: 'Unsupported view' }, 400);
   try {
     const input = view === 'history' ? { ...(query.has('limit') ? { limit: Number(query.get('limit')) } : {}), ...(query.has('cursor') ? { cursor: query.get('cursor') } : {}) } : {};
+    // Recovery is read-only: never seed defaults into a missing/wrong database.
+    const db = (env as NativeDesireEnv).DB;
+    if (!db) throw new DesireUnavailable('Vesper Desire storage is unavailable.');
+    const existing = await db.prepare('SELECT user_id FROM vesper_desire_state WHERE user_id = ?').bind('vesper').first();
+    if (!existing) throw new DesireUnavailable('Existing Vesper Desire state was not found; no values have been initialized.');
     return respond({ data: await executeDesire(env as NativeDesireEnv, `desire_${view}`, input), source: 'Vesper' });
   } catch (reason) {
     if (reason instanceof DesireUnavailable) return respond({ error: reason.message }, 503);

@@ -1,3 +1,4 @@
+import { KeyboardResize } from '@capacitor/keyboard';
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
@@ -18,7 +19,7 @@ const config: CapacitorConfig = {
   plugins: {
     Keyboard: {
       // Keep existing visualViewport sizing; only remove the native accessory bar.
-      resize: 'none',
+      resize: KeyboardResize.None,
     },
     StatusBar: {
       overlaysWebView: true,

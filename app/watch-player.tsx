@@ -28,7 +28,7 @@ export function WatchPlayer({ active, busy, captureRef, onShare }: {
     });
     if (response.status === 404) throw new Error("Video import is not installed on the server. Deploy the VPS update first.");
     if (response.status === 401) throw new Error("Connect your Codex service in Settings first.");
-    const data = await response.json();
+    const data = await response.json() as { id: string; status: string; streamPath?: string; title: string; subtitleText?: string; cues?: SubtitleCue[]; error?: string };
     if (!response.ok) throw new Error(data.error || "Video import failed.");
     return data;
   }

@@ -1,4 +1,4 @@
-const CACHE = "vesper-shell-v28-desire";
+const CACHE = "vesper-shell-v29-reconciled-memory";
 const SHELL = [
   "./",
   "./manifest.webmanifest?v=11",

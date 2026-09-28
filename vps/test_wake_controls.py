@@ -75,6 +75,9 @@ class WakeControlsTests(unittest.TestCase):
         self.assertEqual(len(state['jobs']), 50)
         self.assertEqual(state['jobs'][0]['id'], '54')
         self.assertEqual(state['jobs'][0]['calls'][0]['name'], 'atlas_note_list')
-        self.assertNotIn('private', str(state))
+        # 10b0f68 intentionally exposes the sent notification in the owner's ledger.
+        self.assertEqual(state['jobs'][0]['notification'], 'private reply')
+        self.assertNotIn('private error', str(state))
+        self.assertNotIn('private result', str(state))
 
 if __name__ == '__main__': unittest.main()

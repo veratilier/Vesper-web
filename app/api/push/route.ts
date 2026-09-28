@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { sendPushNotification, type PushSubscriptionData } from "@mmmike/web-push/send";
+import { authorizeApp } from "@/lib/bridge-auth";
 import { corsHeaders, optionsResponse } from "@/lib/cors";
 import { ensureSchema, getDb } from "@/lib/db";
 
@@ -35,6 +36,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (!(await authorizeApp(request))) return json(request, { error: "Device not paired" }, 401);
   await ensureSchema();
   const body = (await request.json()) as {
     action?: "subscribe" | "test" | "notify";

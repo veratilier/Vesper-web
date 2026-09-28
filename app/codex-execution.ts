@@ -53,6 +53,28 @@ export function executionFiles(value: unknown): { files: ExecutionFile[]; filesT
   }
   return { files, filesTruncated };
 }
+/** Legacy history can contain partial tool metadata; normalize only the display copy. */
+export function savedExecution(value: unknown, messageId: string, createdAt: string): Execution {
+  const raw = record(value);
+  const text = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
+  const files = executionFiles(raw.files);
+  return {
+    id: text(raw.id) || messageId,
+    type: text(raw.type, 'toolCall'),
+    title: text(raw.title) || text(raw.command) || text(raw.name) || 'Saved tool activity',
+    status: text(raw.status, 'unknown'),
+    output: typeof raw.output === 'string' ? raw.output : formatExecutionOutput(raw.output ?? raw.result),
+    updatedAt: text(raw.updatedAt) || createdAt,
+    command: text(raw.command) || undefined,
+    cwd: text(raw.cwd) || undefined,
+    exitCode: typeof raw.exitCode === 'number' ? raw.exitCode : undefined,
+    durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : undefined,
+    truncated: raw.truncated === true,
+    files: files.files,
+    filesTruncated: raw.filesTruncated === true || files.filesTruncated,
+  };
+}
+
 export function executionEvent(method: string, params: Record<string, unknown>, previous?: Execution): Execution | null {
   const item = record(params.item);
   const id = String(item.id || params.itemId || '');
