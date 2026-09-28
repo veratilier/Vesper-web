@@ -19,6 +19,22 @@ class SwitchTests(unittest.TestCase):
         with self.assertRaises(ValueError):store.configure({'enabled':True,'permissions':{'tools':['shell'],'messages':[]}})
         self.assertEqual(store.access(),value)
 
+    def test_prompt_addendum_uses_latest_rules_without_changing_permissions(self):
+        permissions={'tools':['read_vesper_state'],'messages':['text']}
+        store.configure({'enabled':True,'intervalMinutes':60,'permissions':permissions})
+        result=store.update_prompt({'prompt':'语气放轻一点'})
+        self.assertEqual(result['promptAddendum'],'语气放轻一点')
+        self.assertEqual(result['defaultPrompt'],store.DEFAULT_PROMPT)
+        self.assertEqual(result['permissions'],permissions)
+        self.assertEqual(result['config']['intervalMinutes'],60)
+        self.assertEqual(result['prompt'],store.task_prompt())
+        self.assertIn('语气放轻一点',store.task_prompt())
+        self.assertTrue(store.task_prompt().startswith(store.DEFAULT_PROMPT))
+        with self.assertRaises(ValueError):store.update_prompt({'prompt':'a'*8001})
+        self.assertEqual(store.status()['promptAddendum'],'语气放轻一点')
+        store.update_prompt({'prompt':''})
+        self.assertEqual(store.task_prompt(),store.DEFAULT_PROMPT)
+
     def test_tool_and_message_permissions_both_required(self):
         value={'tools':['album_send_photos','read_vesper_state'],'messages':[]}
         self.assertEqual(permissions.allowed_tools(value,runner.ALLOWED),{'read_vesper_state'})
