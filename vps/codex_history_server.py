@@ -232,6 +232,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(200, wake_store.configure(body))
                 except ValueError as error:
                     self.send_json(400, {"error": str(error)})
+            elif body.get("action") == "prompt":
+                try:
+                    self.send_json(200, wake_store.update_prompt(body))
+                except ValueError as error:
+                    self.send_json(400, {"error": str(error)})
             elif body.get("action") == "request":
                 ident = wake_store.request(body.get("requestId"))
                 self.send_json(202, {"ok": True, "requestId": ident, "conversationId": None})

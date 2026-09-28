@@ -31,8 +31,11 @@ def validate_permissions(value):
 
 def task_prompt():
     with db() as con:
-        if get(con, 'permission_mode', False):return DEFAULT_PROMPT
-        return get(con, 'task_prompt', DEFAULT_PROMPT)
+        # The checked-in WAKE_PROMPT remains the latest shared rule document.
+        # User wording preferences are an addendum, never a replacement for it.
+        base = DEFAULT_PROMPT if get(con, 'permission_mode', False) else get(con, 'task_prompt', DEFAULT_PROMPT)
+        addendum = get(con, 'prompt_addendum', '')
+        return base + ('\n\nVera 的补充提示词（不改变以上运行规则与后台权限）：\n' + addendum if addendum else '')
 
 
 class Connection(sqlite3.Connection):
@@ -119,6 +122,15 @@ def configure(body):
     return status()
 
 
+def update_prompt(body):
+    prompt = body.get('prompt')
+    if not isinstance(prompt, str) or len(prompt) > PROMPT_LIMIT:
+        raise ValueError('Prompt must contain at most 8000 characters')
+    with db() as con:
+        put(con, 'prompt_addendum', prompt.strip())
+    return status()
+
+
 def status():
     with db() as con:
         fields = ['id','source','status','created','started','finished','tools','conversation_id','decision','tokens','notification']
@@ -128,10 +140,14 @@ def status():
             job['calls'] = [dict(row) for row in con.execute(
                 'SELECT item_id,name,status,started,finished FROM calls WHERE job_id=? ORDER BY rowid', (job['id'],))]
         config = get(con, 'config', {'enabled': get(con, 'frequency', 'daily') != 'off', 'intervalMinutes': None})
-        return {'configVersion': 3, 'permissionVersion': 1,
+        permission_mode = get(con, 'permission_mode', False)
+        addendum = get(con, 'prompt_addendum', '')
+        base = DEFAULT_PROMPT if permission_mode else get(con, 'task_prompt', DEFAULT_PROMPT)
+        return {'configVersion': 4, 'permissionVersion': 1,
                 'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
                 'toolOptions': TOOL_OPTIONS, 'messageOptions': MESSAGE_OPTIONS,
-                'prompt': DEFAULT_PROMPT if get(con, 'permission_mode', False) else get(con, 'task_prompt', DEFAULT_PROMPT),
+                'prompt': base + ('\n\nVera 的补充提示词（不改变以上运行规则与后台权限）：\n' + addendum if addendum else ''),
+                'promptAddendum': addendum, 'promptMode': 'append',
                 'defaultPrompt': DEFAULT_PROMPT, 'promptMaxLength': PROMPT_LIMIT, 'config': config, 'enabled': config['enabled'],
                 'executor': 'vps', 'conversationId': jobs[0]['conversation_id'] if jobs else None,
                 'heartbeat': get(con, 'heartbeat', 0), 'nextAt': get(con, 'next_at'),
