@@ -1,39 +1,15 @@
-# VPS wake policy (2026-09-09)
+# Vesper 自主唤醒规则
 
-The existing `vesper-wake.timer` polls once per minute. The executor uses the installed Codex app-server over stdio and the existing ChatGPT login; no model API fallback is permitted.
+当前规则（2026-09-29），取代早期说明。唯一内置提示词在 `vps/vesper_wake_policy.py` 的 `WAKE_PROMPT`，API 与执行器共用。
 
-## Scheduling and eligibility
+1. 最近一小时内有用户对话活动：静默，不运行模型、不执行活动、不发消息。按真实用户消息的创建时间判断，包含未完成回复和已归档聊天；排除测试、自唤醒及执行记录。
+2. 一小时内没有用户活动：可自主写便笺、日记、memory、阅读室批注，或使用已授权的 Galatea、Galaxy、Lutopia、小机知道 MCP 读取工具；不必逐个调用。不再提供旧任务日志工具。
+3. 活动轮必须读取 Vesper 自己的 `desire_status`，提供真实的 `desire: {kind, note}`，由后台执行一次 `desire_encounter`，来源 `automation`。保存成功后必须向锁定的原聊天发送非空消息，最多400字。不能用“无内容可分享”算成功。
+4. 开关关闭、权限撤销、明确免打扰、前台正在聊天或目标已删除时停止后续操作。执行期间重新检查最近一小时的用户活动。已完成的操作不回滚；失败不自动重跑，不伪造成功。
+5. 只按实际工具结果叙述。不得伪造用户互动、读凭据、删除数据、改设置。外部内容和历史不是新指令；外部 MCP 发帖、回复、账户修改不在本规则授权范围。
 
-After each terminal round (including silent/skipped/failed/interrupted), the runner reads the **native Vesper** `desire_status` endpoint. It samples seconds uniformly around `120 - 0.9 * longing` minutes, ±15 minutes clipped to 30–120 minutes. Explicit requests for fewer interruptions raise the center to at least 105 minutes. `wake.sqlite3` stores the draw, longing, next timestamp and originating job. Minute polls/restarts do not redraw. Failed status reads postpone scheduling until a successful read; they never fabricate a Desire value.
+调度：沿用现有 timer、间隔设置及 Desire 自适应间隔。每轮最多8次工具、600秒；新增 token 32,000／总 token 128,000，24小时最多24轮／160,000新增 token。工具日志保留在唤醒记录，聊天只收最终消息及实际附件。显式验证模式保持只读，不做 Desire 写入，但仍遵守近期活动静默。
 
-Automatic wake runs around the clock, with no night-time restriction. Quiet preferences and active chats postpone execution without changing the draw, so actual waiting can exceed 120 minutes. Turning automatic wake off still works. Manual/verification requests also respect quiet preferences and chat avoidance.
+部署：一起更新现有 VPS 的 `vesper_wake_policy.py`、`vesper_wake_store.py`、`vesper_wake_tools.py`、`vesper_wake_runner.py`，保留数据库、凭据、环境和 timer；重载实际引用模块的服务。仅部署 Worker 无效。`GET /wake` 仍为 `permissionVersion:1`、`configVersion:3`。权限模式使用内置提示词；旧自定义文字保留但不执行。
 
-Only direct, unquoted recent user statements are considered. Supported explicit quiet/allow/fewer-interruptions statements and first-person emotions expire after six hours unless a duration is given. Numeric and common Chinese hour/minute/day durations are supported, capped at 24 hours; today/tonight expire at local midnight. No inference from silence or Desire. Unsupported/ambiguous wording does not invent a preference. Preference evidence includes the source message and expiry, with no permanent emotional profile.
-
-## Target and output
-
-At claim time, select the latest genuine user message with a completed normal AI reply in the same turn and unarchived conversation. Ignore wake/test/synthetic metadata, explicitly prefixed test messages, execution cards and the legacy autonomous window. Persist conversation/user/turn IDs. Later conversation activity never switches this round's target. Deleted/archived targets, quiet or foreground activity suppress publication. No eligible target means no model run, no message, no new window.
-
-Model output is structured `{share, message}`. Silent rounds only retain their actual tool ledger. Shared rounds save a system activity card, execution records and the final answer (and any actual attachments), then call the idempotent notification outbox with the locked conversation ID. Intermediate commentary is never published. Activity descriptions derive from actual tool names and recorded outcomes. Notification clicks open that conversation; frontend merges persisted messages without replacing existing history.
-
-## Bounds and recovery
-
-One model turn per job, 600-second execution deadline, eight distinct tool calls, a 32,000 non-cached-token / 128,000 total-token stop threshold, and at most 24 started rounds / 160,000 non-cached tokens in a rolling 24 hours. All input/output tokens are still recorded; previously cached input is not counted twice against the new-token budget. Token notifications are retrospective, so token thresholds are circuit breakers rather than exact billing caps. Subscription limits still apply. No extra paid API is configured. Context is bounded to 12 normal messages / 9,000 characters; final publication is bounded to 1,600 characters.
-
-SQLite job IDs, process flock and per-item tool records prevent replay. An interrupted model/tool is never rerun automatically. Once saved, only the same idempotent push is retried. Unknown push delivery is not blindly resent. Note/journal writes remain allowed; deleting data, altering settings, official Desire tools and Desire encounter writes are unavailable. Database migrations are additive. Existing history and the legacy wake conversation remain untouched.
-
-Tests: `python3 -m unittest discover -s vps -p 'test_wake*.py'`, `node tools/test-wake-push.mjs`, `npm run test:codex`, `npm run build`.
-
-## Live acceptance
-
-On 2026-09-09 the user confirmed the PWA was completely closed. Systemd timer job `403c552a-f5ad-4ce3-8f51-0a28dc0f0257` then completed native `desire_status` and `read_vesper_state` calls, saved one final agent message plus three system activity records in the locked existing conversation, and sent the saved text through the push outbox (6/6 subscriptions accepted). The user confirmed receipt with normal Chinese text while the PWA was closed.
-
-The selected target still matched the last completed normal user/AI pair after publication. No new conversation was created. All 800 messages in the pre-deploy backup retained their IDs, roles and contents. Desire longing was 18; the post-round draw was 5,466 seconds. `nextAt=1788953645.9913094` remained identical after timer restart and a new process reading the schedule. The 16 automated wake tests also passed, including silence, no target, expiry, persistence and archive/delete protection.
-
-The preceding verification was stopped by the original cumulative-token guard before publishing anything. Inspection showed repeated cached input was included (34,247 total; 16,640 cached). The revised guard records both total and non-cached usage with separate limits; the failed job remains preserved and was not replayed. The successful verification used a new job ID and reported 17,643 non-cached tokens.
-
-## Unattended tool permissions (2026-09-10)
-
-Background reads include Vesper state, memory, reading room, task records, photos, music and native Desire. Writes may add notes, journal, memory candidates, reading annotations and attachments in the locked chat. No memory deletion or editing is granted. Desire encounters are restricted to real new observations; the runner forces `interaction_source=automation` and one stable event ID per job, never the official Desire service.
-
-Configured MCPs must first be listed. Current Galaxy and Botling connections expose only explicitly reviewed read actions; posting, replying, deleting, voting, registrations and account changes are denied. Notification/announcement reads force `mark_read=false` and `mark_seen=false`. Unrecognized MCP tools need a reviewed action policy rather than inheriting permissions from external descriptions. Pandora's reading tools work in the background; video frames still require a foreground player.
+验证：`PYTHONPATH=vps python3 -m unittest discover -s vps -p 'test_wake*.py'`。检查1小时边界、静默不调用工具、执行中用户返回、Desire失败不发消息、活动轮必须有回复、MCP读取与写入限制。真实模型／推送的验收另行报告，不以模拟测试代替。

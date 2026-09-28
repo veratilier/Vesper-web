@@ -14,6 +14,14 @@ class PermissionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',{'connectionId':'known','toolName':tool,'arguments':{'action':action}},'job','item',self.catalog)
         with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',args,'job','item',{})
         self.assertEqual(len(self.catalog['connections'][0]['tools']),2)
+    def test_galatea_lutopia_reads_and_write_rejection(self):
+        cat=p.external_catalog({'connections':[{'connectionId':'c','tools':[{'name':n} for n in ['list_threads','get_thread','create_reply','list_notifications','lutopia_cli','lutopia_get_guide']]}]})
+        self.assertEqual({t['name'] for t in cat['connections'][0]['tools']},{'list_threads','get_thread','lutopia_cli','lutopia_get_guide'})
+        for cmd in ['whoami','discover --limit 12','activity --limit 10','show abc-123']:
+            p.tool_input('call_configured_mcp_tool',{'connectionId':'c','toolName':'lutopia_cli','arguments':{'command':cmd}},'j','i',cat)
+        for cmd in ['post diary a b','discover; post a b','discover\npost a b','show x --delete','list','discover --limit 100','$(post a b)']:
+            with self.assertRaises(RuntimeError):p.tool_input('call_configured_mcp_tool',{'connectionId':'c','toolName':'lutopia_cli','arguments':{'command':cmd}},'j','i',cat)
+
     def test_automation_source_and_stable_event_id_cannot_be_spoofed(self):
         a=p.tool_input('desire_encounter',{'interaction_source':'user','request_id':'fake','kind':'warmth'},'job','one',{})
         b=p.tool_input('desire_encounter',{},'job','two',{})

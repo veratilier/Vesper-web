@@ -12,6 +12,16 @@ def row(ident,role='user',turn='normal',conv='chat',at=1000,**meta):
       'metadata_json':json.dumps(meta),'message_type':'text'}
 
 class PolicyTests(unittest.TestCase):
+    def test_recent_user_activity_hour_boundary_and_synthetic_exclusion(self):
+        now=10000
+        self.assertTrue(policy.recent_user_activity([row('u',at=now-3599)],now))
+        self.assertFalse(policy.recent_user_activity([row('u',at=now-3600)],now))
+        self.assertFalse(policy.recent_user_activity([row('a','agent',at=now-1)],now))
+        self.assertFalse(policy.recent_user_activity([row('w',at=now-1,wakeRunId='auto')],now))
+        self.assertFalse(policy.recent_user_activity([row('t',at=now-1,test=True)],now))
+        pending=row('p',at=now-1);pending['status']='pending'
+        self.assertTrue(policy.recent_user_activity([pending],now))
+
     def test_select_completed_pair_not_wakes_tests_or_unfinished(self):
         rows=[row('pending',turn='pending',at=5000),row('test',turn='test',at=4000,test=True),
               row('test-answer','agent','test',at=4001),row('wake',at=3000,wakeRunId='wake'),
