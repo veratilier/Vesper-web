@@ -143,6 +143,9 @@ def status():
         permission_mode = get(con, 'permission_mode', False)
         addendum = get(con, 'prompt_addendum', '')
         base = DEFAULT_PROMPT if permission_mode else get(con, 'task_prompt', DEFAULT_PROMPT)
+        recovery = get(con, 'recovery', {})
+        paused = bool(recovery.get('reason') in {'quota', 'authentication'} or (recovery.get('retryAt') or 0) > time.time())
+        recovery = dict(recovery, paused=paused)
         return {'configVersion': 4, 'permissionVersion': 1,
                 'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
                 'toolOptions': TOOL_OPTIONS, 'messageOptions': MESSAGE_OPTIONS,
@@ -150,6 +153,14 @@ def status():
                 'promptAddendum': addendum, 'promptMode': 'append',
                 'defaultPrompt': DEFAULT_PROMPT, 'promptMaxLength': PROMPT_LIMIT, 'config': config, 'enabled': config['enabled'],
                 'executor': 'vps', 'conversationId': jobs[0]['conversation_id'] if jobs else None,
-                'heartbeat': get(con, 'heartbeat', 0), 'nextAt': get(con, 'next_at'),
+                'heartbeat': get(con, 'heartbeat', 0), 'nextAt': None if paused else get(con, 'next_at'), 'scheduledNextAt': get(con, 'next_at'),
                 'schedule': get(con, 'schedule'), 'frequency': get(con, 'frequency'),
-                'lastJob': jobs[0] if jobs else None, 'jobs': jobs, 'schedulerError': get(con, 'error')}
+                'lastJob': jobs[0] if jobs else None, 'jobs': jobs, 'schedulerError': get(con, 'error'),
+                'recoveryVersion': 1, 'recovery': recovery,
+                'toolRecovery': get(con, 'tool_recovery', {}),
+                'uncertainWrites': list(get(con, 'uncertain_writes', {}).values())}
+
+
+def request_health_check():
+    with db() as con:put(con, 'health_check_requested', True)
+    return status()

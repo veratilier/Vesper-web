@@ -83,4 +83,42 @@ class RequiredDesireTests(unittest.TestCase):
             self.execute({'kind':'absence','note':'Observation'})
         self.assertEqual(self.calls,[])
 
+class ExternalRecoveryTests(unittest.TestCase):
+    setUp = RequiredDesireTests.setUp
+    def test_uncertain_external_write_is_not_repeated_across_rounds(self):
+        owner=self; external_calls=[]
+        with store.db() as con:store.put(con, 'authorized_forum_connections', ['forum'])
+        class RPC:
+            handler=None
+            def call(self,method,params):
+                if method=='account/read':return {'account':{'type':'chatgpt'}}
+                if method=='thread/start':return {'thread':{'id':'thread'}}
+                if method=='turn/start':
+                    for item,name,args in [('catalog','list_configured_mcp_tools',{}),('post','call_configured_mcp_tool',{'connectionId':'forum','toolName':'post','arguments':{'text':'private test note'}})]:
+                        self.handler({'id':item,'method':'tool/call','params':{'name':name,'arguments':args}})
+                    self.handler({'method':'item/completed','params':{'item':{'type':'agentMessage','text':json.dumps({'share':True,'message':'A current observation','desire':{'kind':'absence','note':'Current thought'}})}}})
+                    self.handler({'method':'turn/completed','params':{'turn':{'status':'completed'}}})
+                    return {'turn':{'id':'turn'}}
+                return {}
+            def send(self,p):pass
+            def close(self):pass
+        def http(path,body=None,**kwargs):
+            if path.endswith('/messages'):owner.messages.append(body);return {}
+            if path=='/api/wake':return {'delivered':1}
+            if body is None:return {'tools':[{'name':n} for n in ['desire_status','desire_encounter','list_configured_mcp_tools','call_configured_mcp_tool']]}
+            if body['name']=='list_configured_mcp_tools':return {'result':{'connections':[{'connectionId':'forum','tools':[{'name':'post'}]}]}}
+            if body['name']=='call_configured_mcp_tool':
+                external_calls.append(body)
+                # The intent must be durable before the network operation even starts.
+                self.assertEqual(len(store.status()['uncertainWrites']),1)
+                raise TimeoutError('Uncertain external result')
+            return {'result':{'longing':22}}
+        with patch.object(runner,'Rpc',RPC),patch.object(runner,'http',side_effect=http),patch.object(runner,'context',return_value='Visible context'),patch.object(runner,'current_preferences',return_value={}),patch.object(runner,'front_busy',return_value=False),patch.object(runner.policy,'history',return_value=[{'id':'user','vesper_conversation_id':'chat'}]),patch.object(runner.policy,'normal',return_value=True):
+            runner.execute(self.job)
+            store.request('second',source='automation');runner.execute(dict(self.job,id='second'))
+        self.assertEqual(len(external_calls),1)
+        self.assertEqual(len(self.messages),2) # optional forum failure does not stop normal wake
+        self.assertEqual(store.status()['uncertainWrites'][0]['tool'],'mcp:forum:post')
+        self.assertNotIn('private test note',json.dumps(store.status()['uncertainWrites']))
+
 if __name__=='__main__':unittest.main()
