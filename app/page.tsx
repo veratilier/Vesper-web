@@ -758,13 +758,37 @@ export default function Home() {
   const [queue, setQueue] = usePersistentDocument<Track[]>("musicQueue", []);
   const avatarInput = useRef<HTMLInputElement>(null);
   const agentAvatarInput = useRef<HTMLInputElement>(null);
-  const changeAvatar = async (file: File | undefined, setter: (photo: string) => void) => {
+  const profileWriteQueue = useRef(Promise.resolve());
+  const saveAvatar = (field: "userAvatar" | "agentAvatar", photo: string) => {
+    const write = profileWriteQueue.current.then(async () => {
+      const response = await fetch(apiUrl("/api/state?key=profile"), { headers: appHeaders() });
+      if (!response.ok) throw new Error("Could not read the current profile.");
+      const document = await response.json() as { value?: unknown };
+      const current = document.value && typeof document.value === "object" && !Array.isArray(document.value)
+        ? document.value as Record<string, unknown> : {};
+      const saved = await fetch(apiUrl("/api/state"), {
+        method: "PUT",
+        headers: appHeaders(true),
+        body: JSON.stringify({ key: "profile", value: { ...current, [field]: photo } }),
+      });
+      if (!saved.ok) throw new Error("Could not save the avatar.");
+    });
+    profileWriteQueue.current = write.catch(() => {});
+    return write;
+  };
+  const changeAvatar = async (file: File | undefined, field: "userAvatar" | "agentAvatar") => {
     if (!file) return;
+    const setter = field === "userAvatar" ? setUserAvatar : setAgentAvatar;
+    let photo: string;
     try {
       const preview = await localImage(file, 640, 0.88);
       setter(preview);
-      try { const { url } = await uploadImage(file); setter(url); } catch { /* Keep the local preview for profile sync. */ }
-    } catch { window.alert("Could not read the image. Please select it again."); }
+      photo = preview;
+      try { const { url } = await uploadImage(file); photo = url; } catch { /* The local image can still be saved. */ }
+      setter(photo);
+    } catch { window.alert("Could not read the image. Please select it again."); return; }
+    try { await saveAvatar(field, photo); }
+    catch { window.alert("The avatar could not be saved. Check the connection and try again."); }
   };
   const [favorites, setFavorites] = usePersistentDocument<FavoriteItem[]>("favorites", []);
   const [musicControl, setMusicControl] = usePersistentDocument<MusicControl | null>("musicControl", null);
@@ -1271,12 +1295,9 @@ export default function Home() {
   }, [active]);
   useEffect(() => {
     let live = true;
-    let hasLocalProfile = false;
     let hasLocalAppearance = false;
     try {
-      const localProfile = window.localStorage.getItem("vesper-local-profile");
       const localAppearance = window.localStorage.getItem("vesper-local-appearance");
-      if (localProfile) hasLocalProfile = true;
       if (localAppearance) hasLocalAppearance = true;
     } catch {}
     fetch(apiUrl("/api/state"), { headers: appHeaders() })
@@ -1295,7 +1316,7 @@ export default function Home() {
           | undefined;
         const appearance = docs.appearance?.value as
           { accent?: string; background?: string } | undefined;
-        if (profile && !hasLocalProfile) {
+        if (profile) {
           setUserName(!profile.userName || profile.userName === "我" ? "Vera" : profile.userName);
           setAgentName(!profile.agentName || profile.agentName === "Vesper" ? "Rowan" : profile.agentName);
           setUserAvatar(profile.userAvatar || "");
@@ -1320,19 +1341,6 @@ export default function Home() {
       "vesper-local-profile",
       JSON.stringify({ userName, agentName, userAvatar, agentAvatar }),
     );
-    const timer = window.setTimeout(
-      () =>
-        fetch(apiUrl("/api/state"), {
-          method: "PUT",
-          headers: appHeaders(true),
-          body: JSON.stringify({
-            key: "profile",
-            value: { userName, agentName, userAvatar, agentAvatar },
-          }),
-        }).catch(() => {}),
-      260,
-    );
-    return () => window.clearTimeout(timer);
   }, [storageReady, userName, agentName, userAvatar, agentAvatar]);
   useEffect(() => {
     if (!storageReady) return;
@@ -1363,8 +1371,8 @@ export default function Home() {
   return (
     <main className="stage" style={shellStyle}>
       <WindowOpening />
-      <input ref={avatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], setUserAvatar); e.target.value = ""; }} />
-      <input ref={agentAvatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], setAgentAvatar); e.target.value = ""; }} />
+      <input ref={avatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "userAvatar"); e.target.value = ""; }} />
+      <input ref={agentAvatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "agentAvatar"); e.target.value = ""; }} />
       <audio
         ref={globalPlayer}
         src={currentTrack?.url}
