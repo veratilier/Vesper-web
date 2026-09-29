@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import vesper_wake_store as store
+import vesper_wake_recovery as recovery
 import vesper_wake_policy as policy
 import vesper_wake_tools as permissions
 
@@ -153,7 +154,7 @@ def update(ident,**fields):
         con.execute('UPDATE jobs SET '+','.join(k+'=?' for k in fields)+' WHERE id=?',(*fields.values(),ident))
 
 def execute(job):
-    ident=job['id'];rpc=None;completed=False;failed=False;final=[];tool_count=0;turn_id='';thread_id='';created=iso();external_tools={}
+    ident=job['id'];rpc=None;completed=False;failed=False;final=[];tool_count=0;turn_id='';thread_id='';created=iso();external_tools={};failure_reason=''
     if recent_chat():
         update(ident,status='silent',finished=time.time(),decision='recent_user_activity');return
     allowed=permissions.allowed_tools(store.access(), READ_ONLY if job['source']=='verification' else ALLOWED)
@@ -188,9 +189,44 @@ def execute(job):
                 if con.execute('SELECT count(*) FROM calls WHERE job_id=?',(ident,)).fetchone()[0]>=(7 if required_desire and name!='desire_encounter' else 8):raise RuntimeError('Wake tool budget exhausted (8)')
                 if not permitted():raise RuntimeError('Wake paused by current preference or foreground chat')
                 con.execute('INSERT INTO calls(job_id,item_id,status,name,started) VALUES(?,?,?,?,?)',(ident,item,'started',name,time.time()))
+        key = recovery.tool_key(name, args)
+        external = name == 'call_configured_mcp_tool'
+        connection = next((c for c in external_tools.get('connections', []) if c.get('connectionId') == args.get('connectionId')), {})
+        definition = next((t for t in connection.get('tools', []) if t.get('name') == args.get('toolName')), {})
+        write_risk = external and not definition.get('annotations', {}).get('readOnlyHint', False)
+        mark = recovery.fingerprint(key, args)
+        with store.db() as con:
+            if not old and recovery.blocked(store.get(con, 'tool_recovery', {}).get(key), time.time()):
+                raise RuntimeError('Tool temporarily paused: ' + key)
+            if not old and write_risk and mark in store.get(con, 'uncertain_writes', {}):
+                raise RuntimeError('Previous external action outcome requires owner confirmation; not replayed')
         if old:result=json.loads(old['result'])
         else:
-            result=http('/api/codex/tools',{'name':name,'arguments':args,'threadId':thread_id,'itemId':item,'turnId':turn_id,'conversationId':job['conversation_id']})['result']
+            if write_risk:
+                # Persist intent before sending: a killed executor cannot replay an uncertain write.
+                with store.db() as con:
+                    uncertain = store.get(con, 'uncertain_writes', {})
+                    uncertain[mark] = {'tool': key, 'at': time.time(), 'reason': 'outcome_uncertain'}
+                    store.put(con, 'uncertain_writes', uncertain)
+            try:
+                result=http('/api/codex/tools',{'name':name,'arguments':args,'threadId':thread_id,'itemId':item,'turnId':turn_id,'conversationId':job['conversation_id']})['result']
+            except Exception:
+                with store.db() as con:
+                    pauses = store.get(con, 'tool_recovery', {})
+                    pauses[key] = recovery.failure(pauses.get(key), ident + ':' + item, time.time())
+                    store.put(con, 'tool_recovery', pauses)
+                raise
+            with store.db() as con:
+                pauses = store.get(con, 'tool_recovery', {})
+                if isinstance(result, dict) and result.get('isError'):
+                    pauses[key] = recovery.failure(pauses.get(key), ident + ':' + item, time.time())
+                else:
+                    pauses[key] = recovery.success(pauses.get(key), ident + ':' + item)
+                    if write_risk:
+                        uncertain = store.get(con, 'uncertain_writes', {})
+                        uncertain.pop(mark, None)
+                        store.put(con, 'uncertain_writes', uncertain)
+                store.put(con, 'tool_recovery', pauses)
             with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),ident,item))
             tool_count+=1;update(ident,tools=tool_count)
         if name=='list_configured_mcp_tools':
@@ -198,7 +234,7 @@ def execute(job):
         if isinstance(result,dict) and result.get("isError"):raise RuntimeError("Tool failed: "+name)
         return result
     def handle(msg):
-        nonlocal completed,failed,tool_count,turn_id,external_tools
+        nonlocal completed,failed,tool_count,turn_id,external_tools,failure_reason
         method=msg.get('method','');p=msg.get('params',{})
         if method in {'item/tool/call','tool/call','tools/call'} and 'id' in msg:
             nested=p.get('toolCall',{});name=p.get('tool') or p.get('name') or nested.get('tool') or nested.get('name')
@@ -227,6 +263,7 @@ def execute(job):
             turn_id=p.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
         elif method=='turn/completed':
             completed=True;failed=p.get('turn',{}).get('status')!='completed'
+            if failed:failure_reason=recovery.kind(json.dumps(p.get('turn',{}).get('error') or {}))
         elif 'id' in msg and method:
             # No unattended approvals or invented answers to user-input requests.
             if 'requestApproval' in method:rpc.send({'id':msg['id'],'result':{'decision':'decline'}})
@@ -264,7 +301,7 @@ def execute(job):
         while not completed and time.time()<deadline:
             try:handle(rpc.next(timeout=min(30,max(.1,deadline-time.time()))))
             except queue.Empty:continue
-        if not completed or failed or not final:raise RuntimeError('Wake turn did not complete')
+        if not completed or failed or not final:raise RuntimeError('Wake turn did not complete: ' + failure_reason)
         decision=json.loads(final[-1])
         if not isinstance(decision.get('share'),bool) or not isinstance(decision.get('message'),str):raise RuntimeError('Invalid wake decision')
         if required_desire and (decision['share'] is not True or not decision['message'].strip() or len(decision['message'].strip()) > 400):
@@ -314,6 +351,49 @@ def deliver(ident,message):
     update(ident,status='completed' if receipt.get('delivered',0)>0 else 'push_failed',push_json=json.dumps(receipt),error=None)
 
 
+
+def record_outcome(ident):
+    with store.db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        row = con.execute('SELECT status,error FROM jobs WHERE id=?', (ident,)).fetchone()
+        state = store.get(con, 'recovery', {})
+        if row and row['status'] in recovery.FAILURES:
+            state = recovery.failure(state, ident, time.time(), recovery.kind(row['error'] or ''))
+        elif row and row['status'] in recovery.SUCCESS:
+            state = recovery.success(state, ident)
+        store.put(con, 'recovery', state)
+
+
+def recovery_ready(now):
+    with store.db() as con:
+        state = store.get(con, 'recovery', {})
+        force = store.get(con, 'health_check_requested', False)
+        if force:store.put(con, 'health_check_requested', False)
+    special = state.get('reason') in {'quota', 'authentication'}
+    if recovery.blocked(state, now) and not force:return False
+    if not special and not force:return True
+    rpc = None
+    try:
+        rpc = Rpc()
+        rpc.call('initialize', {'clientInfo': {'name': 'vesper_wake_health', 'version': '1.0'}})
+        rpc.send({'method': 'initialized'})
+        account = rpc.call('account/read', {'refreshToken': False}).get('account') or {}
+        if account.get('type') != 'chatgpt':raise RuntimeError('ChatGPT login required')
+        limits = rpc.call('account/rateLimits/read', {})
+        reset = recovery.quota_reset(limits, now)
+        if reset:
+            state.update(reason='quota', retryAt=max(now + 60, reset))
+        elif special:
+            # A read-only health check clears the login/quota gate, not the failed job.
+            state.update(reason='consecutive_failures', retryAt=None, probeReady=True)
+        state['lastCheckedAt'] = now
+    except Exception as error:
+        state.update(reason=recovery.kind(error), retryAt=now + 1800, lastCheckedAt=now)
+    finally:
+        if rpc:rpc.close()
+    with store.db() as con:store.put(con, 'recovery', state)
+    return not force and not recovery.blocked(state, now)
+
 def tick():
     now=time.time()
     settings=http('/api/state?key=settings').get('value') or {}
@@ -323,8 +403,20 @@ def tick():
         if config is not None:frequency = 'daily' if config['enabled'] else 'off'
     with store.db() as con:
         store.put(con,'heartbeat',now);store.put(con,'error',None);store.put(con,'frequency',frequency)
+        interrupted = [r['id'] for r in con.execute("SELECT id FROM jobs WHERE status='running'")]
         con.execute("UPDATE jobs SET status='interrupted',finished=?,error='Executor interrupted; not replayed' WHERE status='running'",(now,))
         pending=con.execute("SELECT id FROM jobs WHERE finished IS NOT NULL AND scheduled_at IS NULL ORDER BY finished DESC LIMIT 1").fetchone()
+    for ident in interrupted:record_outcome(ident)
+    if not recovery_ready(now):return
+    with store.db() as con:
+        state = store.get(con, 'recovery', {})
+        probe = state.get('probeReady') or (state.get('failureCount', 0) >= 3 and not recovery.blocked(state, now))
+        event = state.get('lastEvent')
+        if frequency != 'off' and probe and event and state.get('probeFor') != event:
+            state.update(probeFor=event, probeReady=False)
+            store.put(con, 'recovery', state)
+        else:probe = False
+    if probe:store.request('probe-' + recovery.fingerprint('run', {'event': event})[:32], source='automation')
     if pending:reschedule(pending['id'])
     else:reschedule()
     with store.db() as con:
@@ -336,10 +428,6 @@ def tick():
     for pending in saved:
         try:deliver(pending['id'],pending['notification'])
         except Exception:pass
-    with store.db() as con:
-        # Rolling 24h bounds, including failures; no paid API fallback or automatic model retries.
-        usage=con.execute('SELECT count(*),coalesce(sum(coalesce(budget_tokens,tokens)),0) FROM jobs WHERE started>?',(now-86400,)).fetchone()
-        if usage[0]>=24 or usage[1]>=160000:return
     if frequency!='off' and next_at is not None and now>=next_at:store.request('auto-'+str(int(next_at)),source='automation')
     with store.db() as con:
         con.execute('BEGIN IMMEDIATE')
@@ -359,7 +447,10 @@ def tick():
         if selected:execute(job)
     except Exception as error:
         update(job['id'],status='failed',finished=time.time(),error=str(error)[:220])
-    finally:reschedule(job['id'])
+    finally:
+        record_outcome(job['id'])
+        with store.db() as con:paused = recovery.blocked(store.get(con, 'recovery', {}), time.time())
+        if not paused:reschedule(job['id'])
     print(json.dumps({'job':job['id'],'status':store.status()['lastJob']['status']}),flush=True)
 
 def main():
@@ -372,7 +463,11 @@ def main():
         except BlockingIOError:return
         try:tick()
         except Exception as error:
-            with store.db() as con:store.put(con,'error',str(error)[:220]);store.put(con,'heartbeat',time.time())
-            print(json.dumps({'scheduler':'failed','error':str(error)[:220]}),flush=True)
+            with store.db() as con:
+                state = store.get(con, 'recovery', {})
+                event = state.get('lastEvent') if state.get('lastFailureAt', 0) > time.time() - 5 else 'scheduler:' + str(int(time.time() // 60))
+                store.put(con, 'recovery', recovery.failure(state, event, time.time(), recovery.kind(error)))
+                store.put(con,'error',str(error)[:220]);store.put(con,'heartbeat',time.time())
+            print(json.dumps({'scheduler':'failed','reason':recovery.kind(error)}),flush=True)
 
 if __name__=='__main__':main()
