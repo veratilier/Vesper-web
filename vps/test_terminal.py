@@ -118,6 +118,66 @@ class TerminalTests(unittest.TestCase):
             finally:
                 terminal.run('kill-session', '-t', '=' + name, check=False)
 
+class CurrentChatTerminalTests(unittest.TestCase):
+    thread = '11111111-2222-7333-8444-555555555555'
+
+    def test_thread_selector_cannot_escape_tmux_target(self):
+        self.assertEqual(terminal.session(self.thread), 'vesper-chat-' + self.thread.replace('-', ''))
+        for bad in ['../x', 'foo:1', 'x; rm', None, {}, '']:
+            if bad is None: continue  # Existing independent route remains backward compatible.
+            with self.subTest(bad=bad), self.assertRaises(ValueError): terminal.session(bad)
+
+    def test_chat_launch_uses_remote_attach_helper_without_secrets(self):
+        with patch.dict(os.environ, {'VESPER_TERMINAL_ENABLED': '1'}), patch.object(terminal, 'exists', return_value=False), patch.object(terminal.shutil, 'which', return_value='/usr/bin/codex'), patch.object(terminal, 'run') as run:
+            terminal.start(self.thread)
+            args = run.call_args.args
+            self.assertIn('vesper-chat-', args[3])
+            self.assertIn('--attach', args[-1])
+            self.assertIn(self.thread, args[-1])
+            self.assertNotIn('Bearer', args[-1])
+
+    def test_attach_passes_token_only_in_environment(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            token = Path(directory) / 'token'; token.write_text('synthetic-secret')
+            with patch.dict(os.environ, {'CODEX_TOKEN_FILE': str(token)}), patch.object(terminal.shutil, 'which', return_value='/usr/bin/codex'), patch.object(terminal.os, 'execvpe') as execute:
+                terminal.attach(self.thread)
+                _, args, env = execute.call_args.args
+                self.assertIn('resume', args)
+                self.assertIn('ws://127.0.0.1:4500', args)
+                self.assertEqual(args[-1], self.thread)
+                self.assertNotIn('synthetic-secret', repr(args))
+                self.assertEqual(env['VESPER_TERMINAL_REMOTE_TOKEN'], 'synthetic-secret')
+
+    def test_context_routes_use_durable_mapping_and_reject_missing_deleted_chats(self):
+        import tempfile
+        from pathlib import Path
+        import codex_history_server as history
+        with tempfile.TemporaryDirectory() as directory:
+            token = Path(directory) / 'token'; token.write_text('test-token')
+            with patch.object(history, 'TOKEN_PATH', token), patch.object(history, 'DB_PATH', Path(directory) / 'test.db'):
+                with history.db() as con:
+                    for conversation, thread in [('a', self.thread), ('new', None)]:
+                        con.execute("INSERT INTO conversations(vesper_conversation_id,codex_thread_id,title,created_at,updated_at) VALUES(?,?,?, ?,?)", (conversation,thread,'Test','now','now'))
+                handler = object.__new__(history.Handler); handler.send_json = Mock(); handler.headers = {'Authorization':'Bearer test-token'}
+                for method, tail, call in [('GET','', 'screen'),('POST','/start','start'),('POST','/input','input_event')]:
+                    handler.path='/conversations/a/terminal'+tail; handler.command=method; handler.body=Mock(return_value={'key':'Tab','threadId':'other'})
+                    with patch.object(terminal, call, return_value={'ok':True}) as route:
+                        handler.dispatch_request()
+                        self.assertEqual(handler.send_json.call_args.args[0],200)
+                        self.assertEqual(handler.send_json.call_args.args[1]['codexThreadId'], self.thread)
+                        self.assertEqual(route.call_args.args[-1],self.thread)
+                for conversation, code in [('missing',404),('new',409)]:
+                    handler.path='/conversations/'+conversation+'/terminal'; handler.command='GET'; handler.dispatch_request()
+                    self.assertEqual(handler.send_json.call_args.args[0],code)
+                with history.db() as con: history.conversation_delete.block(con,'a',self.thread)
+                handler.path='/conversations/a/terminal/start';handler.command='POST'
+                with patch.object(terminal,'start') as start:
+                    handler.dispatch_request();self.assertEqual(handler.send_json.call_args.args[0],404);start.assert_not_called()
+                handler.headers={};handler.path='/conversations/a/terminal';handler.command='GET';handler.dispatch_request()
+                self.assertEqual(handler.send_json.call_args.args[0],401)
+
 
 if __name__ == '__main__':
     unittest.main()

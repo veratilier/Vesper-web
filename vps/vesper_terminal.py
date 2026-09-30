@@ -1,7 +1,10 @@
 """A real, persistent tmux pane. No transcript files or model output replay."""
 import os
 import re
+import shlex
 import shutil
+import sys
+import uuid
 import subprocess
 import threading
 from pathlib import Path
@@ -14,7 +17,13 @@ class TerminalUnavailable(Exception):
     pass
 
 
-def session():
+def session(thread_id=None):
+    if thread_id is not None:
+        try:
+            ident = uuid.UUID(thread_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError('Invalid Codex thread ID') from exc
+        return 'vesper-chat-' + ident.hex
     name = os.environ.get('VESPER_TERMINAL_SESSION', 'vesper-codex')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name):
         raise TerminalUnavailable('Invalid server terminal session configuration')
@@ -40,36 +49,36 @@ def enabled():
         raise TerminalUnavailable('VPS terminal has not been enabled on the server yet')
 
 
-def exists():
-    return run('has-session', '-t', '=' + session(), check=False).returncode == 0
+def exists(thread_id=None):
+    return run('has-session', '-t', '=' + session(thread_id), check=False).returncode == 0
 
 
-def pane():
-    if not exists():
+def pane(thread_id=None):
+    if not exists(thread_id):
         raise TerminalUnavailable('Start the VPS Codex session first')
     # Fixed target: clients cannot select another tmux session or pane.
-    return run('display-message', '-p', '-t', session() + ':0.0', '#{pane_id}').stdout.strip()
+    return run('display-message', '-p', '-t', session(thread_id) + ':0.0', '#{pane_id}').stdout.strip()
 
 
-def screen():
+def screen(thread_id=None):
     enabled()
     with LOCK:
-        if not exists():
-            return {'running': False, 'screen': '', 'session': session()}
-        target = pane()
+        if not exists(thread_id):
+            return {'running': False, 'screen': '', 'session': session(thread_id)}
+        target = pane(thread_id)
         info = run('display-message', '-p', '-t', target,
                    '#{pane_dead}|#{pane_width}|#{pane_height}|#{cursor_x}|#{cursor_y}').stdout.strip().split('|')
         # Current terminal viewport, including redraws of a TUI; no old command files.
         output = run('capture-pane', '-p', '-t', target).stdout
-        return {'running': info[0] == '0', 'screen': output, 'session': session(),
+        return {'running': info[0] == '0', 'screen': output, 'session': session(thread_id),
                 'columns': int(info[1]), 'rows': int(info[2]),
                 'cursorX': int(info[3]), 'cursorY': int(info[4])}
 
 
-def start():
+def start(thread_id=None):
     enabled()
     with LOCK:
-        if exists():
+        if exists(thread_id):
             return {'ok': True, 'created': False}
         binary = shutil.which('codex')
         cwd = Path(os.environ.get('VESPER_TERMINAL_CWD', str(Path.home()))).resolve()
@@ -77,11 +86,12 @@ def start():
             raise TerminalUnavailable('Configure the VPS Codex executable and working directory')
         # Launch the installed CLI with its existing account and approval settings.
         # Executable and cwd are server-owned; request bodies never supply shell code.
-        run('new-session', '-d', '-s', session(), '-x', '48', '-y', '32', '-c', str(cwd), binary)
+        command = binary if thread_id is None else shlex.join([sys.executable, str(Path(__file__).resolve()), '--attach', str(uuid.UUID(thread_id))])
+        run('new-session', '-d', '-s', session(thread_id), '-x', '48', '-y', '32', '-c', str(cwd), command)
         return {'ok': True, 'created': True}
 
 
-def input_event(body):
+def input_event(body, thread_id=None):
     enabled()
     key, text = body.get('key'), body.get('text')
     if (key is None) == (text is None):
@@ -92,7 +102,7 @@ def input_event(body):
                              or any(ord(c) < 32 or ord(c) == 127 for c in text)):
         raise ValueError('Terminal text must be a single line under 4096 bytes')
     with LOCK:
-        target = pane()
+        target = pane(thread_id)
         if key is not None:
             run('send-keys', '-t', target, key)
         else:
@@ -100,3 +110,26 @@ def input_event(body):
             run('send-keys', '-l', '-t', target, '--', text)
             run('send-keys', '-t', target, 'Enter')
     return {'ok': True}
+
+
+def attach(thread_id):
+    """Attach the TUI to the existing runtime; never load a second local runtime."""
+    ident = str(uuid.UUID(thread_id))
+    binary = shutil.which('codex')
+    token_path = Path(os.environ.get('CODEX_TOKEN_FILE', '/home/ubuntu/.codex/app-server-token'))
+    token = token_path.read_text(encoding='utf-8').strip()
+    if not binary or not token:
+        raise TerminalUnavailable('Existing Codex runtime credentials are unavailable')
+    env = dict(os.environ, VESPER_TERMINAL_REMOTE_TOKEN=token)
+    os.execvpe(binary, [binary, 'resume', '--remote', 'ws://127.0.0.1:4500',
+                       '--remote-auth-token-env', 'VESPER_TERMINAL_REMOTE_TOKEN',
+                       '--no-alt-screen', ident], env)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3 or sys.argv[1] != '--attach':
+        sys.exit('A current chat thread is required')
+    try:
+        attach(sys.argv[2])
+    except (OSError, ValueError, TerminalUnavailable):
+        sys.exit('Could not connect this chat terminal to the existing Codex runtime')
