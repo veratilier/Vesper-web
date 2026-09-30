@@ -1,0 +1,20 @@
+name: VPS terminal
+on:
+  pull_request:
+    paths: ['vps/**', '.github/workflows/vps-terminal.yml']
+  push:
+    paths: ['vps/**', '.github/workflows/vps-terminal.yml']
+permissions:
+  contents: read
+jobs:
+  terminal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Test authenticated terminal and real PTY
+        run: python -m unittest discover -s vps -p test_terminal.py -v
