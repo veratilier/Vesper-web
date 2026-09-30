@@ -102,7 +102,7 @@ class TerminalTests(unittest.TestCase):
             try:
                 terminal.start()
                 time.sleep(.3)
-                terminal.input_event({'text': 'print("Vesper 中文 live")'})
+                terminal.input_event({'text': 'print("Vesper 中文" + " live")'})
                 deadline = time.monotonic() + 5
                 screen = {}
                 while time.monotonic() < deadline:
