@@ -34,11 +34,13 @@ class TerminalTests(unittest.TestCase):
             run.assert_any_call('capture-pane', '-p', '-t', '%7')
 
     def test_text_is_literal_and_enter_is_separate(self):
-        with patch.object(terminal, 'pane', return_value='%7'), patch.object(terminal, 'run') as run:
+        events = []
+        with patch.object(terminal, 'pane', return_value='%7'), patch.object(terminal, 'run', side_effect=lambda *args: events.append(args)) as run, patch.object(terminal.time, 'sleep', side_effect=lambda seconds: events.append(('wait', seconds))):
             terminal.input_event({'text': 'C-c ; $(touch /tmp/nope) 中文'})
             self.assertEqual(run.call_args_list[0].args,
                              ('send-keys', '-l', '-t', '%7', '--', 'C-c ; $(touch /tmp/nope) 中文'))
             self.assertEqual(run.call_args_list[1].args, ('send-keys', '-t', '%7', 'Enter'))
+            self.assertEqual(events, [run.call_args_list[0].args, ('wait', 0.2), run.call_args_list[1].args])
 
     def test_special_keys_only_target_fixed_pane(self):
         with patch.object(terminal, 'pane', return_value='%7'), patch.object(terminal, 'run') as run:

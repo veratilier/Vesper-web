@@ -7,6 +7,7 @@ import sys
 import uuid
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 LOCK = threading.Lock()
@@ -108,6 +109,9 @@ def input_event(body, thread_id=None):
         else:
             # -l prevents text such as C-c being interpreted as tmux key names.
             run('send-keys', '-l', '-t', target, '--', text)
+            # Let Codex finish detecting the literal text as a paste before
+            # submitting. An immediate Enter can be absorbed into that paste.
+            time.sleep(0.2)
             run('send-keys', '-t', target, 'Enter')
     return {'ok': True}
 
