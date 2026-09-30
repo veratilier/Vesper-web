@@ -18,7 +18,7 @@ class TerminalTests(unittest.TestCase):
                 terminal.start()
             run.assert_not_called()
 
-    def test_screen_captures_real_viewport_not_history(self):
+    def test_screen_captures_bounded_real_scrollback(self):
         def fake(*args, **kwargs):
             output = '%7\n' if args[0] == 'display-message' and args[-1] == '#{pane_id}' else ''
             if args[0] == 'display-message' and 'pane_dead' in args[-1]:
@@ -31,7 +31,16 @@ class TerminalTests(unittest.TestCase):
             self.assertTrue(value['running'])
             self.assertEqual(value['cursorY'], 27)
             self.assertEqual(value['screen'], 'Codex 正在执行…\n> ')
-            run.assert_any_call('capture-pane', '-p', '-t', '%7')
+            run.assert_any_call('capture-pane', '-p', '-J', '-S', '-1000', '-t', '%7')
+
+    def test_resize_only_current_thread_and_bounds(self):
+        thread='00000000-0000-0000-0000-000000000007'
+        with patch.object(terminal,'pane',return_value='%7') as pane, patch.object(terminal,'run') as run:
+            terminal.resize({'columns':42,'session':'other'},thread)
+            pane.assert_called_once_with(thread)
+            run.assert_called_once_with('resize-window','-t','%7','-x','42','-y','32')
+            for invalid in (0,121,True,'48',None):
+                with self.assertRaises(ValueError):terminal.resize({'columns':invalid},thread)
 
     def test_text_is_literal_and_enter_is_separate(self):
         events = []

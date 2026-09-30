@@ -1,3 +1,4 @@
+import { createBookmark, listBookmarks } from './bookmarks';
 import { legacyDesireRead } from './desire/routing.js';
 import { env } from 'cloudflare:workers';
 import { executeDesire, type NativeDesireEnv } from './desire/native';
@@ -14,7 +15,7 @@ import { recallSharedMemory, sharedMemoryTool } from "@/lib/shared-memory-tools"
 import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
 
 type ToolInput = Record<string, unknown>;
-type MusicTrack = { id: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string; url?: string; playable?: boolean };
+type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string; url?: string; playable?: boolean };
 type MusicPlayback = { trackId?: string; playing?: boolean; positionSeconds?: number; durationSeconds?: number; queueLength?: number; updatedAt?: string };
 type NeteaseSourceSong = { id?: string | number; name?: string; dt?: number; ar?: Array<{ name?: string }>; al?: { name?: string; picUrl?: string } };
 export type CodexToolContext = { conversationId?: string; turnId?: string; origin?: string };
@@ -150,6 +151,11 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
     if (!memoryScope) throw new Error("Memory scope is unavailable");
     return sharedMemoryTool(name, input, context);
+  }
+  if (name === 'bookmark_create' || name === 'bookmark_list') {
+    if (!memoryScope) throw new Error('Account context required');
+    return name === 'bookmark_create' ? createBookmark(memoryScope.userId,input)
+      : listBookmarks(memoryScope.userId,Number(input.limit || 30),String(input.before || ''));
   }
   await ensureSchema();
   if (['album_save_photo', 'album_search_photos', 'album_send_photos'].includes(name)) {
@@ -340,7 +346,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const trackId = String(input.trackId || "");
     const track = findMusicTrack(await readMusicLibrary(), trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
-    return { ok: true, musicCard: { trackId: track.id, title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || "", duration: track.duration || "", url: track.url || "", playable: Boolean(track.url && track.playable !== false), source: track.neteaseId ? "netease" : "vesper", message: typeof input.message === "string" ? input.message : "" } };
+    return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId || '', appleMusicURL: track.appleMusicURL || '', shareURL: track.neteaseId ? `https://music.163.com/song?id=${encodeURIComponent(track.neteaseId)}` : '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || "", duration: track.duration || "", url: track.url || "", playable: Boolean(track.url && track.playable !== false), source: track.source || (track.neteaseId ? "netease" : "vesper"), message: typeof input.message === "string" ? input.message : "" } };
   }
   if (name === "music_playlist_add") {
     const trackId = String(input.trackId || "");

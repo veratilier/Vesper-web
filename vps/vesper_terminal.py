@@ -69,11 +69,14 @@ def screen(thread_id=None):
         target = pane(thread_id)
         info = run('display-message', '-p', '-t', target,
                    '#{pane_dead}|#{pane_width}|#{pane_height}|#{cursor_x}|#{cursor_y}').stdout.strip().split('|')
-        # Current terminal viewport, including redraws of a TUI; no old command files.
-        output = run('capture-pane', '-p', '-t', target).stdout
+        # Bounded real pane scrollback, joined at soft wraps. Saved chat history
+        # is separately paged through the existing conversation endpoint.
+        output = run('capture-pane', '-p', '-J', '-S', '-1000', '-t', target).stdout
+        truncated = len(output) > 200000
+        output = output[-200000:]
         return {'running': info[0] == '0', 'screen': output, 'session': session(thread_id),
                 'columns': int(info[1]), 'rows': int(info[2]),
-                'cursorX': int(info[3]), 'cursorY': int(info[4])}
+                'cursorX': int(info[3]), 'cursorY': int(info[4]), 'historyTruncated': truncated}
 
 
 def start(thread_id=None):
@@ -90,6 +93,17 @@ def start(thread_id=None):
         command = binary if thread_id is None else shlex.join([sys.executable, str(Path(__file__).resolve()), '--attach', str(uuid.UUID(thread_id))])
         run('new-session', '-d', '-s', session(thread_id), '-x', '48', '-y', '32', '-c', str(cwd), command)
         return {'ok': True, 'created': True}
+
+
+def resize(body, thread_id):
+    enabled()
+    columns = body.get('columns')
+    if type(columns) is not int or not 24 <= columns <= 120:
+        raise ValueError('Terminal columns must be between 24 and 120')
+    with LOCK:
+        target = pane(thread_id)
+        run('resize-window', '-t', target, '-x', str(columns), '-y', '32')
+    return {'ok': True, 'columns': columns}
 
 
 def input_event(body, thread_id=None):

@@ -302,7 +302,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def conversation_terminal(self, path):
         action = path[3:] if len(path) > 3 else []
-        if not ((not action and self.command == "GET") or (action in (["start"], ["input"]) and self.command == "POST")):
+        if not ((not action and self.command == "GET") or (action in (["start"], ["input"], ["resize"]) and self.command == "POST")):
             self.send_json(405, {"error": "Method not allowed"}); return
         with db() as connection:
             row = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=? AND archived_at IS NULL", (path[1],)).fetchone()
@@ -316,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = terminal.screen(thread_id)
             elif action == ["start"]:
                 result = terminal.start(thread_id)
+            elif action == ["resize"]:
+                result = terminal.resize(self.body(), thread_id)
             else:
                 result = terminal.input_event(self.body(), thread_id)
             self.send_json(200, dict(result, conversationId=path[1], codexThreadId=thread_id))

@@ -17,9 +17,9 @@ HISTORY=Path(os.environ.get('VESPER_HISTORY_DB',str(Path.home()/'.vesper/chat-hi
 WORK=Path.home()/'.vesper/wake-workspace'
 ALLOWED={'read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
          'music_get_status','music_search','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
-         'reading_room_read','reading_room_annotate','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
+         'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
-READ_ONLY={'read_vesper_state','search_vesper_state','desire_status','desire_history','music_get_status','music_search','album_search_photos','sticker_search'}
+READ_ONLY={'bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','music_get_status','music_search','album_search_photos','sticker_search'}
 CONFIG={'apps._default.enabled':False,
         'apps.asdk_app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
         'apps.app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
