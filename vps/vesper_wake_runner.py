@@ -436,7 +436,7 @@ def generate_dream(cycle):
             configured = tomllib.loads(config_path.read_text()).get('mcp_servers', {})
             for name in configured:config['mcp_servers.' + name + '.enabled'] = False
         thread = rpc.call('thread/start', {'cwd': str(WORK), 'dynamicTools': [], 'approvalPolicy': 'never', 'sandbox': 'read-only',
-            'model': 'gpt-6.1-sol', 'config': config,
+            'model': 'gpt-6.1-sol', 'ephemeral': True, 'config': config,
             'developerInstructions': '写一段明确标为模拟梦境的第一人称小记。梦不是事实，不宣称真实睡眠或知道用户未提供的行为。无工具，无聊天消息，仅返回指定 JSON。'})['thread']['id']
         rows = [r for r in policy.history(HISTORY) if policy.normal(r) and r['role'] in ('user', 'agent')][:6]
         background = '\n'.join(r['role'] + ': ' + r['content'][:500] for r in reversed(rows))
