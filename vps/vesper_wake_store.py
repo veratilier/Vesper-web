@@ -4,6 +4,7 @@ from pathlib import Path
 
 PATH = Path(os.environ.get('VESPER_WAKE_DB', str(Path.home()/'.vesper/wake.sqlite3')))
 CONVERSATION = 'vesper-autonomous-wake'
+import vesper_wake_sleep as sleep
 from vesper_wake_policy import WAKE_PROMPT
 DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
@@ -54,6 +55,8 @@ def db():
       created REAL NOT NULL, started REAL, finished REAL, thread_id TEXT, turn_id TEXT,
       error TEXT, push_json TEXT, tools INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS runtime (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sleep_cycles (id TEXT PRIMARY KEY, start REAL NOT NULL, end REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending', body TEXT, memory_id TEXT, retry_at REAL, error TEXT);
       CREATE TABLE IF NOT EXISTS calls (job_id TEXT, item_id TEXT, status TEXT NOT NULL,
         result TEXT, PRIMARY KEY(job_id,item_id));''')
     for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL'}}.items():
@@ -100,20 +103,25 @@ def configure(body):
         raise ValueError('Prompt must contain 1 to 8000 characters')
     now = time.time()
     access_value = validate_permissions(body['permissions']) if 'permissions' in body else None
+    sleep_value = sleep.validate(body['sleep']) if 'sleep' in body else None
     with db() as con:
         con.execute('BEGIN IMMEDIATE')
         previous = get(con, 'config', {})
-        config = {'enabled': enabled, 'intervalMinutes': minutes}
-        changed = previous != config
+        config = {'enabled': enabled, 'intervalMinutes': minutes, 'sleep': sleep_value or previous.get('sleep', dict(sleep.DEFAULT))}
+        changed = previous.get('enabled') != enabled or previous.get('intervalMinutes') != minutes
         put(con, 'config', config)
         if 'prompt' in body:put(con, 'task_prompt', prompt)
         if access_value is not None:
             put(con, 'permissions', access_value)
             put(con, 'permission_mode', True)
 
+        if not enabled or not config['sleep']['enabled'] or not config['sleep']['dreamEnabled']:
+            con.execute("UPDATE sleep_cycles SET status='skipped' WHERE status='pending'")
         if not enabled:
             con.execute("UPDATE jobs SET status='cancelled',finished=?,decision='disabled' WHERE status='queued' AND source='automation'", (now,))
-        if changed and minutes is not None:
+        quiet = sleep.window(config['sleep'], now)
+        if quiet and enabled:put(con, 'next_at', quiet['end'])
+        elif changed and minutes is not None:
             put(con, 'next_at', now + minutes * 60)
             put(con, 'schedule', {'version': 2, 'drawnAt': now, 'seconds': minutes * 60, 'mode': 'fixed'})
         elif changed:
@@ -140,20 +148,24 @@ def status():
             job['calls'] = [dict(row) for row in con.execute(
                 'SELECT item_id,name,status,started,finished FROM calls WHERE job_id=? ORDER BY rowid', (job['id'],))]
         config = get(con, 'config', {'enabled': get(con, 'frequency', 'daily') != 'off', 'intervalMinutes': None})
+        config = dict(config, sleep=config.get('sleep', dict(sleep.DEFAULT)))
+        quiet = sleep.window(config['sleep'], time.time()) if config['enabled'] else None
+        dream = con.execute('SELECT id,end,status,memory_id,retry_at,error FROM sleep_cycles ORDER BY end DESC LIMIT 1').fetchone()
         permission_mode = get(con, 'permission_mode', False)
         addendum = get(con, 'prompt_addendum', '')
         base = DEFAULT_PROMPT if permission_mode else get(con, 'task_prompt', DEFAULT_PROMPT)
         recovery = get(con, 'recovery', {})
         paused = bool(recovery.get('reason') in {'quota', 'authentication'} or (recovery.get('retryAt') or 0) > time.time())
         recovery = dict(recovery, paused=paused)
-        return {'configVersion': 4, 'permissionVersion': 1,
+        return {'configVersion': 5, 'permissionVersion': 1, 'sleepVersion': 1,
+                'sleep': {'sleeping': bool(quiet), 'until': quiet['end'] if quiet else None, 'lastDream': dict(dream) if dream else None},
                 'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
                 'toolOptions': TOOL_OPTIONS, 'messageOptions': MESSAGE_OPTIONS,
                 'prompt': base + ('\n\nVera 的补充提示词（不改变以上运行规则与后台权限）：\n' + addendum if addendum else ''),
                 'promptAddendum': addendum, 'promptMode': 'append',
                 'defaultPrompt': DEFAULT_PROMPT, 'promptMaxLength': PROMPT_LIMIT, 'config': config, 'enabled': config['enabled'],
                 'executor': 'vps', 'conversationId': jobs[0]['conversation_id'] if jobs else None,
-                'heartbeat': get(con, 'heartbeat', 0), 'nextAt': None if paused else get(con, 'next_at'), 'scheduledNextAt': get(con, 'next_at'),
+                'heartbeat': get(con, 'heartbeat', 0), 'nextAt': quiet['end'] if quiet else None if paused else get(con, 'next_at'), 'scheduledNextAt': get(con, 'next_at'),
                 'schedule': get(con, 'schedule'), 'frequency': get(con, 'frequency'),
                 'lastJob': jobs[0] if jobs else None, 'jobs': jobs, 'schedulerError': get(con, 'error'),
                 'recoveryVersion': 1, 'recovery': recovery,

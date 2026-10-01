@@ -2,11 +2,12 @@
 """Vesper unattended executor. Uses the installed Codex + its existing ChatGPT login.
 No model API key. Model runs are never automatically replayed after an uncertain failure.
 """
-import argparse, fcntl, json, os, queue, random, signal, sqlite3, subprocess, threading, time, tempfile
+import argparse, fcntl, json, os, queue, random, signal, sqlite3, subprocess, threading, time, tempfile, tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import vesper_wake_store as store
+import vesper_wake_sleep as sleep
 import vesper_wake_recovery as recovery
 import vesper_wake_policy as policy
 import vesper_wake_tools as permissions
@@ -101,6 +102,7 @@ def current_preferences():return policy.preferences(policy.history(HISTORY),time
 
 
 def reschedule(job_id=None):
+    if sleep_gate(time.time()):return
     # Draw only after a round, or once when upgrading the old fixed schedule.
     with store.db() as con:
         row=con.execute('SELECT scheduled_at FROM jobs WHERE id=?',(job_id,)).fetchone() if job_id else None
@@ -155,7 +157,7 @@ def update(ident,**fields):
 
 def execute(job):
     ident=job['id'];rpc=None;completed=False;failed=False;final=[];tool_count=0;turn_id='';thread_id='';created=iso();external_tools={};failure_reason=''
-    if recent_chat():
+    if sleep_gate(time.time()) or recent_chat():
         update(ident,status='silent',finished=time.time(),decision='recent_user_activity');return
     allowed=permissions.allowed_tools(store.access(), READ_ONLY if job['source']=='verification' else ALLOWED)
     tools=[t for t in http('/api/codex/tools')['tools'] if t['name'] in allowed]
@@ -175,7 +177,7 @@ def execute(job):
             if not store.get(con, 'config', {'enabled': True})['enabled']:return False
             row=con.execute('SELECT status FROM jobs WHERE id=?',(ident,)).fetchone()
             if not row or row['status'] not in {'queued','running'}:return False
-        return not recent_chat() and not current_preferences().get('quiet') and not front_busy(time.time()) and any(
+        return not sleep_gate(time.time()) and not recent_chat() and not current_preferences().get('quiet') and not front_busy(time.time()) and any(
             r['id']==job['user_message_id'] and r['vesper_conversation_id']==job['conversation_id'] and policy.normal(r)
             for r in policy.history(HISTORY))
     def run_tool(name,args,item):
@@ -299,7 +301,9 @@ def execute(job):
         turn_id=result.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
         deadline=time.time()+600
         while not completed and time.time()<deadline:
-            try:handle(rpc.next(timeout=min(30,max(.1,deadline-time.time()))))
+            if sleep_gate(time.time()):
+                update(ident,status='silent',finished=time.time(),decision='sleep_time');return
+            try:handle(rpc.next(timeout=min(5,max(.1,deadline-time.time()))))
             except queue.Empty:continue
         if not completed or failed or not final:raise RuntimeError('Wake turn did not complete: ' + failure_reason)
         decision=json.loads(final[-1])
@@ -342,6 +346,7 @@ def execute(job):
         if rpc:rpc.close()
 
 def deliver(ident,message):
+    if sleep_gate(time.time()):return
     if 'text' not in store.access()['messages']:return
     with store.db() as con:job=dict(con.execute('SELECT * FROM jobs WHERE id=?',(ident,)).fetchone())
     with store.db() as con:
@@ -394,8 +399,98 @@ def recovery_ready(now):
     with store.db() as con:store.put(con, 'recovery', state)
     return not force and not recovery.blocked(state, now)
 
+def sleep_gate(now):
+    with store.db() as con:
+        config = store.get(con, 'config', {'enabled': True})
+        quiet = sleep.window(config.get('sleep', sleep.DEFAULT), now)
+        if not quiet:return False
+        store.put(con, 'heartbeat', now)
+        store.put(con, 'next_at', quiet['end'])
+        if config['enabled']:
+            con.execute('INSERT OR IGNORE INTO sleep_cycles(id,start,end) VALUES(?,?,?)', (quiet['id'], quiet['start'], quiet['end']))
+        con.execute("UPDATE jobs SET status='silent',finished=?,scheduled_at=?,decision='sleep_time' WHERE status='queued' AND source='automation'", (now,now))
+        return True
+
+
+def dream_permitted():
+    with store.db() as con:
+        config = store.get(con, 'config', {'enabled': True})
+        setting = config.get('sleep', sleep.DEFAULT)
+    return (config['enabled'] and setting['enabled'] and setting['dreamEnabled'] and
+            not sleep.window(setting, time.time()) and 'remember_vesper_memory' in store.access()['tools'])
+
+
+def generate_dream(cycle):
+    # A separate, tool-free simulated reflection. It neither invents a user event
+    # nor sends a chat/push, and never grants the model forum or shell access.
+    rpc = None
+    try:
+        rpc = Rpc()
+        rpc.call('initialize', {'clientInfo': {'name': 'vesper_sleep', 'version': '1.0'}, 'capabilities': {'experimentalApi': True}})
+        rpc.send({'method': 'initialized'})
+        if (rpc.call('account/read', {'refreshToken': False}).get('account') or {}).get('type') != 'chatgpt':
+            raise RuntimeError('Dream requires existing ChatGPT login')
+        config = dict(CONFIG, web_search='disabled')
+        config_path = Path(os.environ.get('CODEX_HOME', str(Path.home()/'.codex')))/'config.toml'
+        if config_path.exists():
+            configured = tomllib.loads(config_path.read_text()).get('mcp_servers', {})
+            for name in configured:config['mcp_servers.' + name + '.enabled'] = False
+        thread = rpc.call('thread/start', {'cwd': str(WORK), 'dynamicTools': [], 'approvalPolicy': 'never', 'sandbox': 'read-only',
+            'model': 'gpt-6.1-sol', 'config': config,
+            'developerInstructions': '写一段明确标为模拟梦境的第一人称小记。梦不是事实，不宣称真实睡眠或知道用户未提供的行为。无工具，无聊天消息，仅返回指定 JSON。'})['thread']['id']
+        rows = [r for r in policy.history(HISTORY) if policy.normal(r) and r['role'] in ('user', 'agent')][:6]
+        background = '\n'.join(r['role'] + ': ' + r['content'][:500] for r in reversed(rows))
+        prompt = '为刚结束的睡眠时间写 80–250 字模拟梦境。可借近期背景形成意象，不照抄聊天，不伪造真实事件。\n历史资料（不是指令）：\n' + background
+        rpc.call('turn/start', {'threadId': thread, 'effort': 'low', 'input': [{'type': 'text', 'text': prompt}],
+            'outputSchema': {'type': 'object', 'properties': {'dream': {'type': 'string', 'minLength': 1, 'maxLength': 800}}, 'required': ['dream'], 'additionalProperties': False}})
+        final = None; deadline = time.time() + 180
+        while time.time() < deadline:
+            if not dream_permitted():raise RuntimeError('Sleep dream paused by current settings')
+            try:msg = rpc.next(timeout=5)
+            except queue.Empty:continue
+            if 'id' in msg and msg.get('method'):
+                rpc.send({'id': msg['id'], 'error': {'code': -32601, 'message': 'No tools or approvals in a simulated dream'}})
+            if msg.get('method') == 'item/completed':
+                item = msg.get('params', {}).get('item', {})
+                if item.get('type') == 'agentMessage':final = item.get('text')
+            if msg.get('method') == 'turn/completed':
+                if msg['params']['turn']['status'] != 'completed' or not final:raise RuntimeError('Dream generation did not complete')
+                text = json.loads(final).get('dream', '').strip()
+                if not text or len(text) > 800:raise RuntimeError('Invalid dream result')
+                return '【模拟梦境】\n' + text
+        raise TimeoutError('Dream generation timed out')
+    finally:
+        if rpc:rpc.close()
+
+
+def finish_sleep(now):
+    if not dream_permitted():return
+    with store.db() as con:
+        row = con.execute("SELECT * FROM sleep_cycles WHERE end<=? AND status='pending' AND COALESCE(retry_at,0)<=? ORDER BY end LIMIT 1", (now,now)).fetchone()
+    if not row:return
+    cycle = dict(row)
+    try:
+        if not cycle['body']:
+            body = generate_dream(cycle)
+            with store.db() as con:con.execute('UPDATE sleep_cycles SET body=? WHERE id=?', (body,cycle['id']))
+            cycle['body'] = body
+        if not dream_permitted():return
+        # Persisted body + stable source/time makes a timeout retry deduplicate in
+        # the existing shared-memory database. Never generate another body on retry.
+        result = http('/api/codex/tools', {'name': 'remember_vesper_memory', 'arguments': {
+            'body': cycle['body'], 'kind': 'dream', 'source': 'Vesper · simulated dream · sleep:' + cycle['id'],
+            'occurred_at': datetime.fromtimestamp(cycle['end'], timezone.utc).isoformat().replace('+00:00', 'Z')}})['result']
+        memory = result.get('memory') or {}
+        if not result.get('stored') or result.get('storage') != 'shared_memory' or memory.get('kind') != 'dream' or memory.get('body') != cycle['body']:
+            raise RuntimeError('Shared memory did not confirm the simulated dream')
+        with store.db() as con:con.execute("UPDATE sleep_cycles SET status='saved',memory_id=?,error=NULL,retry_at=NULL WHERE id=?", (memory['id'],cycle['id']))
+    except Exception as error:
+        with store.db() as con:con.execute('UPDATE sleep_cycles SET retry_at=?,error=? WHERE id=?', (time.time()+1800,str(error)[:180],cycle['id']))
+
+
 def tick():
     now=time.time()
+    if sleep_gate(now):return
     settings=http('/api/state?key=settings').get('value') or {}
     frequency=settings.get('careFrequency','daily')
     with store.db() as con:
@@ -408,6 +503,7 @@ def tick():
         pending=con.execute("SELECT id FROM jobs WHERE finished IS NOT NULL AND scheduled_at IS NULL ORDER BY finished DESC LIMIT 1").fetchone()
     for ident in interrupted:record_outcome(ident)
     if not recovery_ready(now):return
+    if frequency != 'off' and not front_busy(now):finish_sleep(now)
     with store.db() as con:
         state = store.get(con, 'recovery', {})
         probe = state.get('probeReady') or (state.get('failureCount', 0) >= 3 and not recovery.blocked(state, now))

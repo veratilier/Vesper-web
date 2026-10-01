@@ -62,7 +62,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "music_search",
-    description: "Search the Vesper music library by title, artist, album, or keyword. Read-only.",
+    description: "Search Apple Music by song/artist/album, returning real song IDs, titles, artists, covers and Apple Music links. Returns catalog metadata for music_send_card without changing the user’s playlists. Prefer this provider unless Vera requests another service.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -112,7 +112,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "music_send_card",
-    description: "Return a structured Vesper song card for the chat timeline without starting playback.",
+    description: "Send a playable music card in this chat using a trackId returned by music_search. Default to Apple Music; preserve real title, artist and album cover. Playback needs the user’s Music authorization and subscription.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
