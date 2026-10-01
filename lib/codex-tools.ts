@@ -1,3 +1,4 @@
+import { searchAppleMusic, lookupAppleMusic } from './apple-music-search';
 import { createBookmark, listBookmarks } from './bookmarks';
 import { legacyDesireRead } from './desire/routing.js';
 import { env } from 'cloudflare:workers';
@@ -15,7 +16,7 @@ import { recallSharedMemory, sharedMemoryTool } from "@/lib/shared-memory-tools"
 import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
 
 type ToolInput = Record<string, unknown>;
-type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string; url?: string; playable?: boolean };
+type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string | number; url?: string; playable?: boolean };
 type MusicPlayback = { trackId?: string; playing?: boolean; positionSeconds?: number; durationSeconds?: number; queueLength?: number; updatedAt?: string };
 type NeteaseSourceSong = { id?: string | number; name?: string; dt?: number; ar?: Array<{ name?: string }>; al?: { name?: string; picUrl?: string } };
 export type CodexToolContext = { conversationId?: string; turnId?: string; origin?: string };
@@ -56,7 +57,7 @@ async function readMusicTracks(key: "music" | "musicQueue") {
   return Array.isArray(value) ? value.filter((item): item is MusicTrack => Boolean(item && typeof item === "object" && typeof (item as MusicTrack).id === "string")) : [];
 }
 function findMusicTrack(tracks: MusicTrack[], trackId: string) {
-  return tracks.find((track) => track.id === trackId || track.neteaseId === trackId);
+  return tracks.find((track) => track.id === trackId || track.neteaseId === trackId || track.appleMusicId === trackId);
 }
 async function readMusicLibrary() {
   const [library, queue] = await Promise.all([readMusicTracks("music"), readMusicTracks("musicQueue")]);
@@ -109,7 +110,7 @@ async function mergeMusicLibrary(incoming: MusicTrack[]) {
 }
 function publicTrack(track?: MusicTrack) {
   if (!track) return null;
-  return { trackId: track.id, title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || "", duration: track.duration || "", playable: Boolean(track.url && track.playable !== false), source: track.neteaseId ? "netease" : "vesper" };
+  return { trackId: track.id, title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: Boolean(track.appleMusicId || (track.url && track.playable !== false)), source: track.appleMusicId ? "appleMusic" : track.neteaseId ? "netease" : "vesper", appleMusicId: track.appleMusicId || "", appleMusicURL: track.appleMusicURL || "" };
 }
 async function readMusicStatus() {
   const [library, queue, playbackValue] = await Promise.all([readMusicLibrary(), readMusicTracks("musicQueue"), readDocument("musicPlayback")]);
@@ -277,8 +278,16 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const query = String(input.query || "").trim().toLowerCase();
     const limit = Math.min(20, Math.max(1, Number(input.limit || 8)));
     if (!query) return { matches: [] };
-    const matches = (await readMusicLibrary()).filter((track) => JSON.stringify(track).toLowerCase().includes(query)).slice(0, limit).map((track) => publicTrack(track));
-    return { matches };
+    const local = (await readMusicLibrary()).filter(track => track.appleMusicId && JSON.stringify(track).toLowerCase().includes(query));
+    let catalog: MusicTrack[] = [];
+    try { catalog = await searchAppleMusic(query, limit); }
+    catch (error) { if (!local.length) throw error; }
+    const seen = new Set<string>();
+    const matches = [...local, ...catalog].filter(track => {
+      const id = track.appleMusicId || track.id;
+      if (seen.has(id)) return false; seen.add(id); return true;
+    }).slice(0, limit).map(publicTrack);
+    return { provider: "appleMusic", matches };
   }
   if (name === "music_netease_search") {
     const query = String(input.query || "").trim();
@@ -310,14 +319,14 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_play") {
     const trackId = String(input.trackId || "");
     const tracks = await readMusicLibrary();
-    const track = findMusicTrack(tracks, trackId);
+    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
-    if (!track.url || track.playable === false) throw new Error("这首歌没有可播放音源");
+    if ((!track.appleMusicId && !track.url) || track.playable === false) throw new Error("这首歌没有可播放音源");
     const queue = await readMusicTracks("musicQueue");
     const replaceQueue = input.replaceQueue === true;
-    const nextQueue = replaceQueue ? [track] : queue.some((item) => item.id === track.id || item.neteaseId === track.neteaseId) ? queue : [...queue, track];
+    const nextQueue = replaceQueue ? [track] : queue.some((item) => item.id === track.id || (item.neteaseId && item.neteaseId === track.neteaseId)) ? queue : [...queue, track];
     await writeDocument("musicQueue", nextQueue);
-    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, replaceQueue, createdAt: new Date().toISOString() };
+    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, track, replaceQueue, createdAt: new Date().toISOString() };
     await writeDocument("musicControl", command);
     return { ok: true, action: "playing", track: { trackId: track.id, title: track.title, artist: track.artist }, queueLength: nextQueue.length };
   }
@@ -333,10 +342,10 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_queue_add") {
     const trackId = String(input.trackId || "");
     const position = input.position === "next" ? "next" : "end";
-    const track = findMusicTrack(await readMusicLibrary(), trackId);
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     const queue = await readMusicTracks("musicQueue");
-    if (queue.some((item) => item.id === track.id || item.neteaseId === track.neteaseId)) return { ok: true, alreadyQueued: true, trackId: track.id, queueLength: queue.length };
+    if (queue.some((item) => item.id === track.id || (item.neteaseId && item.neteaseId === track.neteaseId))) return { ok: true, alreadyQueued: true, trackId: track.id, queueLength: queue.length };
     if (position === "next") queue.splice(Math.min(1, queue.length), 0, track);
     else queue.push(track);
     await writeDocument("musicQueue", queue);
@@ -344,16 +353,18 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   }
   if (name === "music_send_card") {
     const trackId = String(input.trackId || "");
-    const track = findMusicTrack(await readMusicLibrary(), trackId);
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
-    return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId || '', appleMusicURL: track.appleMusicURL || '', shareURL: track.neteaseId ? `https://music.163.com/song?id=${encodeURIComponent(track.neteaseId)}` : '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || "", duration: track.duration || "", url: track.url || "", playable: Boolean(track.url && track.playable !== false), source: track.source || (track.neteaseId ? "netease" : "vesper"), message: typeof input.message === "string" ? input.message : "" } };
+    return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId || '', appleMusicURL: track.appleMusicURL || '', shareURL: track.neteaseId ? `https://music.163.com/song?id=${encodeURIComponent(track.neteaseId)}` : '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", url: track.url || "", playable: Boolean(track.appleMusicId || (track.url && track.playable !== false)), source: track.appleMusicId ? "appleMusic" : track.source || (track.neteaseId ? "netease" : "vesper"), message: typeof input.message === "string" ? input.message : "" } };
   }
   if (name === "music_playlist_add") {
     const trackId = String(input.trackId || "");
     const tracks = await readMusicLibrary();
-    const track = findMusicTrack(tracks, trackId);
+    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
-    return { ok: true, alreadyInPlaylist: true, trackId: track.id, playlist: "Vesper music" };
+    const already = Boolean(findMusicTrack(tracks, track.id));
+    if (!already) await mergeMusicLibrary([track]);
+    return { ok: true, alreadyInPlaylist: already, trackId: track.id, playlist: "Vesper music" };
   }
   if (name === "sticker_search") {
     if (!memoryScope) throw new Error("Sticker scope is unavailable");
