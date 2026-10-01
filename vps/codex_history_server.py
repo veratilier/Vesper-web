@@ -16,6 +16,7 @@ import vesper_wake_store as wake_store
 import vesper_conversation_delete as conversation_delete
 import vesper_watch as watch
 import vesper_terminal as terminal
+import vesper_codex_records as codex_records
 
 
 DB_PATH = Path(os.environ.get("VESPER_HISTORY_DB", "/home/ubuntu/.vesper/chat-history.sqlite3"))
@@ -314,6 +315,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not action:
                 result = terminal.screen(thread_id)
+                with db() as connection:
+                    if conversation_delete.is_deleted(connection, path[1], thread_id):
+                        self.send_json(404, {"error": "Conversation not found"}); return
+                    before = parse_qs(urlparse(self.path).query).get('before', [''])[0]
+                    try:
+                        result['history'] = codex_records.terminal_page(connection, path[1], thread_id, before)
+                    except (OSError, ValueError, sqlite3.Error):
+                        result['historyError'] = 'Recorded Codex activity could not be read; the live terminal remains available'
             elif action == ["start"]:
                 result = terminal.start(thread_id)
             elif action == ["resize"]:
@@ -354,6 +363,7 @@ class Handler(BaseHTTPRequestHandler):
         with db() as connection:
             if conversation_delete.is_deleted(connection, conversation_id):
                 self.send_json(404, {"error": "Conversation not found"}); return
+            recovery = codex_records.sync(connection, conversation_id)
             row = connection.execute("SELECT * FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone()
             query = parse_qs(urlparse(self.path).query)
             paginated = query.get("latest", [""])[0] == "1"
@@ -390,6 +400,7 @@ class Handler(BaseHTTPRequestHandler):
             "messages": [message(item) for item in messages],
             "hasMore": has_more,
             "before": messages[0]["id"] if messages else None,
+            "recovery": recovery,
             "tombstones": [{"threadId": item["codex_thread_id"], "stableId": item["stable_id"],
                             "messageId": item["stable_id"], "deletedAt": item["deleted_at"]}
                            for item in tombstones],
@@ -526,6 +537,7 @@ class Handler(BaseHTTPRequestHandler):
         try:source=conversation_delete.delete_codex_thread(thread_id)
         except Exception:
             self.send_json(502, {"error": "Codex source deletion failed; conversation is blocked pending retry"}); return
+        codex_records.forget(thread_id)
         wake_jobs=conversation_delete.purge_wake(conversation_id)
         with db() as connection:
             connection.execute("BEGIN IMMEDIATE")

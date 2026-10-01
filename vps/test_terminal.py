@@ -32,7 +32,7 @@ class TerminalTests(unittest.TestCase):
             self.assertEqual(value['cursorY'], 27)
             self.assertTrue(value['capabilities']['resize'])
             self.assertEqual(value['screen'], 'Codex 正在执行…\n> ')
-            run.assert_any_call('capture-pane', '-p', '-J', '-S', '-1000', '-t', '%7')
+            run.assert_any_call('capture-pane', '-p', '-J', '-S', '-', '-t', '%7')
 
     def test_idle_screen_advertises_resize_without_starting_terminal(self):
         with patch.object(terminal, 'exists', return_value=False), patch.object(terminal, 'run') as run:
