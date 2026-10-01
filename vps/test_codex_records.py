@@ -107,5 +107,26 @@ class CodexRecordsTests(unittest.TestCase):
         with self.assertRaises(ValueError):records.records(self.thread)
         with history.db() as con:self.assertIn('error',records.sync(con,'test'))
 
+    def test_native_wake_context_is_not_presented_as_previous_chat_turns(self):
+        event=self.event('user',kind='UserMessage',text='SYNTHETIC_CURRENT_REQUEST')
+        event['payload']['item']['content'].insert(0,{'type':'text','text':records.NATIVE_WAKE_HEADER+' Quoted context.\n[{"content":"SYNTHETIC_WAKE_CONTEXT"}]'})
+        self.append(event)
+        with history.db() as con:
+            page=records.terminal_page(con,'test',self.thread)
+            self.assertEqual(page['records'][0]['text'],'SYNTHETIC_CURRENT_REQUEST')
+        single=self.event('literal',kind='UserMessage',text=records.NATIVE_WAKE_HEADER)
+        self.append(single)
+        self.assertEqual(records.records(self.thread)[0][-1]['text'],records.NATIVE_WAKE_HEADER)
+
+    def test_pane_collapses_only_complete_native_json_context_and_keeps_commands(self):
+        context=records.NATIVE_WAKE_HEADER.replace('messages from','messages\n  from')+' Quoted context.\n[\n {"content":"SYNTHETIC_WAKE [literal] \\"quote\\""}\n]\n'
+        pane='$ SYNTHETIC_EARLIER_COMMAND\nSYNTHETIC_OUTPUT\n› '+context+'> SYNTHETIC_CURRENT_REQUEST\nSYNTHETIC_REPLY'
+        clean=records.collapse_wake_context(pane)
+        self.assertNotIn('SYNTHETIC_WAKE',clean)
+        for expected in ['SYNTHETIC_EARLIER_COMMAND','SYNTHETIC_OUTPUT','SYNTHETIC_CURRENT_REQUEST','SYNTHETIC_REPLY']:self.assertIn(expected,clean)
+        self.assertIn('wake context collapsed',clean)
+        incomplete=records.NATIVE_WAKE_HEADER+'\n[{"content":"incomplete'
+        self.assertEqual(records.collapse_wake_context(incomplete),incomplete)
+
 
 if __name__=='__main__':unittest.main()

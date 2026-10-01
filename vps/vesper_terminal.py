@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from vesper_codex_records import collapse_wake_context
 
 LOCK = threading.Lock()
 KEYS = {'Enter', 'Escape', 'Tab', 'BSpace', 'Up', 'Down', 'Left', 'Right', 'C-c'}
@@ -72,6 +73,7 @@ def screen(thread_id=None):
         # Real pane scrollback, joined at soft wraps. Earlier completed Codex
         # commands are read separately from this thread's original rollout.
         output = run('capture-pane', '-p', '-J', '-S', '-', '-t', target).stdout
+        output = collapse_wake_context(output)
         truncated = len(output) > 200000
         output = output[-200000:]
         return {'running': info[0] == '0', 'screen': output, 'session': session(thread_id),
