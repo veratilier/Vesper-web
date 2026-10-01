@@ -319,14 +319,14 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_play") {
     const trackId = String(input.trackId || "");
     const tracks = await readMusicLibrary();
-    const track = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if ((!track.appleMusicId && !track.url) || track.playable === false) throw new Error("这首歌没有可播放音源");
     const queue = await readMusicTracks("musicQueue");
     const replaceQueue = input.replaceQueue === true;
     const nextQueue = replaceQueue ? [track] : queue.some((item) => item.id === track.id || (item.neteaseId && item.neteaseId === track.neteaseId)) ? queue : [...queue, track];
     await writeDocument("musicQueue", nextQueue);
-    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, replaceQueue, createdAt: new Date().toISOString() };
+    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, track, replaceQueue, createdAt: new Date().toISOString() };
     await writeDocument("musicControl", command);
     return { ok: true, action: "playing", track: { trackId: track.id, title: track.title, artist: track.artist }, queueLength: nextQueue.length };
   }
@@ -342,7 +342,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_queue_add") {
     const trackId = String(input.trackId || "");
     const position = input.position === "next" ? "next" : "end";
-    const track = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     const queue = await readMusicTracks("musicQueue");
     if (queue.some((item) => item.id === track.id || (item.neteaseId && item.neteaseId === track.neteaseId))) return { ok: true, alreadyQueued: true, trackId: track.id, queueLength: queue.length };
@@ -353,14 +353,14 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   }
   if (name === "music_send_card") {
     const trackId = String(input.trackId || "");
-    const track = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId || '', appleMusicURL: track.appleMusicURL || '', shareURL: track.neteaseId ? `https://music.163.com/song?id=${encodeURIComponent(track.neteaseId)}` : '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", url: track.url || "", playable: Boolean(track.appleMusicId || (track.url && track.playable !== false)), source: track.appleMusicId ? "appleMusic" : track.source || (track.neteaseId ? "netease" : "vesper"), message: typeof input.message === "string" ? input.message : "" } };
   }
   if (name === "music_playlist_add") {
     const trackId = String(input.trackId || "");
     const tracks = await readMusicLibrary();
-    const track = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     const already = Boolean(findMusicTrack(tracks, track.id));
     if (!already) await mergeMusicLibrary([track]);
