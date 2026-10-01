@@ -27,7 +27,19 @@ test_wake_tools test_wake_permissions test_history_paging` from `vps`, then the
 production build. Production acceptance separately checks authenticated
 tool → API readback → scoped test-card deletion and the actual VPS module hashes.
 
-The terminal screen now returns up to 1,000 lines of real tmux scrollback, bounded
-at 200,000 characters. It cannot recover lines already discarded by tmux. The
-native Chat history tab pages the existing saved conversation for earlier messages;
-it does not replay them into the CLI or create a different Codex thread.
+The terminal screen returns real tmux scrollback bounded at 200,000 characters.
+Earlier recorded instructions, command outputs, file changes and tool statuses
+are separately paged from this same Codex thread's original rollout inside the
+Live terminal view. This does not execute old commands or create another runtime.
+Lines that tmux discarded and that Codex never recorded cannot be reconstructed.
+
+The history API now restores missing completed assistant items from that rollout
+before returning a conversation. It uses stable item IDs, respects message and
+conversation deletion markers, and preserves already-delivered saved content and
+its timestamps. Only completed public items are read; hidden reasoning, developer
+context and raw tool arguments are excluded. Source records are cached in bounded
+memory and never copied into another permanent transcript file. Returning to the
+foreground uses the existing same-thread reconnect and history read, so suspended
+phones do not need to receive every completion event. No background keepalive or
+new wake timer is required. Run `python3 -m unittest test_codex_records
+test_terminal test_history_reconcile test_history_paging` from `vps`.

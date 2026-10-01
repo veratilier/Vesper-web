@@ -69,9 +69,9 @@ def screen(thread_id=None):
         target = pane(thread_id)
         info = run('display-message', '-p', '-t', target,
                    '#{pane_dead}|#{pane_width}|#{pane_height}|#{cursor_x}|#{cursor_y}').stdout.strip().split('|')
-        # Bounded real pane scrollback, joined at soft wraps. Saved chat history
-        # is separately paged through the existing conversation endpoint.
-        output = run('capture-pane', '-p', '-J', '-S', '-1000', '-t', target).stdout
+        # Real pane scrollback, joined at soft wraps. Earlier completed Codex
+        # commands are read separately from this thread's original rollout.
+        output = run('capture-pane', '-p', '-J', '-S', '-', '-t', target).stdout
         truncated = len(output) > 200000
         output = output[-200000:]
         return {'running': info[0] == '0', 'screen': output, 'session': session(thread_id),
