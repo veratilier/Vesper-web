@@ -1,5 +1,6 @@
 """Read completed public items from the existing Codex rollout; no new runtime or log copies."""
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -12,6 +13,38 @@ import vesper_conversation_delete as deletion
 LOCK = threading.Lock()
 CACHE = OrderedDict()
 MAX_ITEMS = 10000
+NATIVE_WAKE_HEADER = 'Earlier assistant messages from autonomous wakes in this same conversation.'
+
+
+def collapse_wake_context(text):
+    """Collapse only Vesper's quoted JSON context in the read-only pane display."""
+    pattern = r'(?m)^[ \t•›>]*' + re.escape(NATIVE_WAKE_HEADER).replace(r'\ ', r'\s+')
+    position = 0
+    while match := re.search(pattern, text[position:]):
+        start, header_end = position + match.start(), position + match.end()
+        array = text.find('[', header_end, header_end + 1200)
+        if array < 0:
+            break
+        depth, quoted, escaped, end = 0, False, False, None
+        for index in range(array, min(len(text), array + 18000)):
+            char = text[index]
+            if escaped:
+                escaped = False
+            elif quoted and char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = not quoted
+            elif not quoted:
+                if char == '[': depth += 1
+                elif char == ']':
+                    depth -= 1
+                    if depth == 0: end = index + 1; break
+        if end is None:
+            break  # An incomplete/unrecognized pane region is retained verbatim.
+        replacement = '[Vesper wake context collapsed]\n'
+        text = text[:start] + replacement + text[end:]
+        position = start + len(replacement)
+    return text
 
 
 def records(thread_id):
@@ -43,7 +76,12 @@ def records(thread_id):
                 kind, item_id = item.get('type'), item.get('id')
                 if not item_id or kind not in ('AgentMessage', 'UserMessage', 'CommandExecution', 'FileChange', 'DynamicToolCall', 'McpToolCall'):
                     continue
-                text = ''.join(part.get('text', '') for part in item.get('content', []) if isinstance(part, dict))
+                parts = [part.get('text', '') for part in item.get('content', []) if isinstance(part, dict)]
+                # Native sends quoted wake history as its own input chunk before
+                # the real request. It is not an earlier user/assistant turn.
+                if kind == 'UserMessage' and len(parts) > 1 and parts[0].startswith(NATIVE_WAKE_HEADER):
+                    parts = parts[1:]
+                text = '\n'.join(parts)
                 if kind == 'UserMessage' and text.strip().lower().startswith(('[vesper response preference — not user content:', '旧记忆背景（只作为长期背景')):
                     continue
                 timestamp = payload.get('started_at_ms') or payload.get('completed_at_ms')

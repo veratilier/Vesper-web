@@ -43,3 +43,10 @@ foreground uses the existing same-thread reconnect and history read, so suspende
 phones do not need to receive every completion event. No background keepalive or
 new wake timer is required. Run `python3 -m unittest test_codex_records
 test_terminal test_history_reconcile test_history_paging` from `vps`.
+
+Native chat supplies autonomous-wake excerpts in a separate quoted input chunk.
+The terminal history reader omits that chunk from the displayed user instruction,
+and folds its recognized complete JSON block in the live pane. The actual model
+input, saved replies, command execution and wake scheduling remain unchanged.
+Incomplete or unrecognized pane regions are retained, and a single user-authored
+input quoting the header remains available in recorded history.
