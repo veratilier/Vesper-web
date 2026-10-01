@@ -485,7 +485,13 @@ def finish_sleep(now):
             raise RuntimeError('Shared memory did not confirm the simulated dream')
         with store.db() as con:con.execute("UPDATE sleep_cycles SET status='saved',memory_id=?,error=NULL,retry_at=NULL WHERE id=?", (memory['id'],cycle['id']))
     except Exception as error:
-        with store.db() as con:con.execute('UPDATE sleep_cycles SET retry_at=?,error=? WHERE id=?', (time.time()+1800,str(error)[:180],cycle['id']))
+        with store.db() as con:
+            con.execute('UPDATE sleep_cycles SET retry_at=?,error=? WHERE id=?', (time.time()+1800,str(error)[:180],cycle['id']))
+            reason = recovery.kind(error)
+            if reason in {'quota', 'authentication'}:
+                state = store.get(con, 'recovery', {})
+                state.update(reason=reason, retryAt=time.time()+1800, lastEvent='sleep:' + cycle['id'])
+                store.put(con, 'recovery', state)
 
 
 def tick():
@@ -504,6 +510,8 @@ def tick():
     for ident in interrupted:record_outcome(ident)
     if not recovery_ready(now):return
     if frequency != 'off' and not front_busy(now):finish_sleep(now)
+    with store.db() as con:
+        if recovery.blocked(store.get(con, 'recovery', {}), time.time()):return
     with store.db() as con:
         state = store.get(con, 'recovery', {})
         probe = state.get('probeReady') or (state.get('failureCount', 0) >= 3 and not recovery.blocked(state, now))

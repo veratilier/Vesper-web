@@ -101,6 +101,13 @@ class SleepTests(unittest.TestCase):
         self.assertEqual([c['name'] for c in calls], ['desire_status'])
         self.assertEqual(store.status()['lastJob']['decision'],'sleep_time')
 
+    def test_dream_quota_failure_uses_existing_health_gate(self):
+        self.observed_night()
+        with patch.object(runner,'generate_dream',side_effect=RuntimeError('usage limit reached')):
+            runner.finish_sleep(self.clock.return_value)
+        self.assertEqual(store.status()['recovery']['reason'], 'quota')
+        self.assertTrue(store.status()['recovery']['paused'])
+
     def test_no_retroactive_dream_when_deployed_after_sleep(self):
         with patch.object(runner,'generate_dream',side_effect=AssertionError('Unobserved night')):runner.finish_sleep(self.noon)
 
