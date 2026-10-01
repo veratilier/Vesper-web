@@ -65,7 +65,7 @@ def screen(thread_id=None):
     enabled()
     with LOCK:
         if not exists(thread_id):
-            return {'running': False, 'screen': '', 'session': session(thread_id)}
+            return {'running': False, 'screen': '', 'session': session(thread_id), 'capabilities': {'resize': True}}
         target = pane(thread_id)
         info = run('display-message', '-p', '-t', target,
                    '#{pane_dead}|#{pane_width}|#{pane_height}|#{cursor_x}|#{cursor_y}').stdout.strip().split('|')
@@ -76,7 +76,8 @@ def screen(thread_id=None):
         output = output[-200000:]
         return {'running': info[0] == '0', 'screen': output, 'session': session(thread_id),
                 'columns': int(info[1]), 'rows': int(info[2]),
-                'cursorX': int(info[3]), 'cursorY': int(info[4]), 'historyTruncated': truncated}
+                'cursorX': int(info[3]), 'cursorY': int(info[4]), 'historyTruncated': truncated,
+                'capabilities': {'resize': True}}
 
 
 def start(thread_id=None):
