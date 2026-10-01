@@ -37,6 +37,14 @@ try {
   assert.equal((await recalled.json()).memories[0].id, saved.memory.id);
   const toolRecall = await routes.tools.POST(request('/api/codex/tools', { name: 'recall_vesper_memory', arguments: { query: 'nebula' } }));
   assert.equal((await toolRecall.json()).result.memories[0].id, saved.memory.id);
+  const dream = { body: '【模拟梦境】Fictitious sleeping nebula', source: 'Vesper · simulated dream · sleep:fixture', kind: 'dream', occurred_at: '2026-10-02T07:00:00+08:00' };
+  const saveDream = () => routes.tools.POST(request('/api/codex/tools', { name: 'remember_vesper_memory', arguments: dream }));
+  const dreamSaved = (await (await saveDream()).json()).result;
+  assert.equal(dreamSaved.stored, true); assert.equal(dreamSaved.memory.kind, 'dream');
+  assert.equal((await (await saveDream()).json()).result.memory.id, dreamSaved.memory.id);
+  const dreamRead = await routes.memory.GET(request('/api/shared-memory?path=' + encodeURIComponent('/api/memories/' + dreamSaved.memory.id)));
+  assert.equal((await dreamRead.json()).body, dream.body);
+  assert.equal((await (await routes.context.POST(request('/api/memory/context', { query: 'sleeping' }))).json()).memories.length, 0);
   delete globalThis.__sharedFixture.SHARED_MEMORY_DB;
   assert.equal((await routes.tools.POST(request('/api/codex/tools', { name: 'remember_vesper_memory', arguments: { body: 'must not fall back' } }))).status, 400);
   console.log('PASS actual authenticated tool → shared DB → Memory page API → context/recall, no legacy DB fallback');
