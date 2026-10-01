@@ -30,8 +30,16 @@ class TerminalTests(unittest.TestCase):
             value = terminal.screen()
             self.assertTrue(value['running'])
             self.assertEqual(value['cursorY'], 27)
+            self.assertTrue(value['capabilities']['resize'])
             self.assertEqual(value['screen'], 'Codex 正在执行…\n> ')
             run.assert_any_call('capture-pane', '-p', '-J', '-S', '-1000', '-t', '%7')
+
+    def test_idle_screen_advertises_resize_without_starting_terminal(self):
+        with patch.object(terminal, 'exists', return_value=False), patch.object(terminal, 'run') as run:
+            value = terminal.screen()
+            self.assertFalse(value['running'])
+            self.assertTrue(value['capabilities']['resize'])
+            run.assert_not_called()
 
     def test_resize_only_current_thread_and_bounds(self):
         thread='00000000-0000-0000-0000-000000000007'
@@ -172,7 +180,7 @@ class CurrentChatTerminalTests(unittest.TestCase):
                     for conversation, thread in [('a', self.thread), ('new', None)]:
                         con.execute("INSERT INTO conversations(vesper_conversation_id,codex_thread_id,title,created_at,updated_at) VALUES(?,?,?, ?,?)", (conversation,thread,'Test','now','now'))
                 handler = object.__new__(history.Handler); handler.send_json = Mock(); handler.headers = {'Authorization':'Bearer test-token'}
-                for method, tail, call in [('GET','', 'screen'),('POST','/start','start'),('POST','/input','input_event')]:
+                for method, tail, call in [('GET','', 'screen'),('POST','/start','start'),('POST','/input','input_event'),('POST','/resize','resize')]:
                     handler.path='/conversations/a/terminal'+tail; handler.command=method; handler.body=Mock(return_value={'key':'Tab','threadId':'other'})
                     with patch.object(terminal, call, return_value={'ok':True}) as route:
                         handler.dispatch_request()
