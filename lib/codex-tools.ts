@@ -1,4 +1,5 @@
-import { searchAppleMusic, lookupAppleMusic } from './apple-music-search';
+import { cleanMusicDocument } from '@/lib/music-data';
+import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
 import { legacyDesireRead } from './desire/routing.js';
@@ -19,7 +20,6 @@ import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
 type ToolInput = Record<string, unknown>;
 type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string | number; url?: string; playable?: boolean };
 type MusicPlayback = { trackId?: string; playing?: boolean; positionSeconds?: number; durationSeconds?: number; queueLength?: number; updatedAt?: string };
-type NeteaseSourceSong = { id?: string | number; name?: string; dt?: number; ar?: Array<{ name?: string }>; al?: { name?: string; picUrl?: string } };
 export type CodexToolContext = { conversationId?: string; turnId?: string; origin?: string };
 
 const sectionToKey: Record<string, string> = {
@@ -46,6 +46,7 @@ async function readDocument(key: string): Promise<unknown> {
 }
 
 async function writeDocument(key: string, value: unknown) {
+  value = cleanMusicDocument(key, value);
   if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
   await getDb().prepare(`INSERT INTO vesper_documents(key,value,updated_at) VALUES(?,?,?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
@@ -69,34 +70,6 @@ async function readMusicLibrary() {
     seen.add(stableId);
     return true;
   });
-}
-function musicDuration(milliseconds?: number) {
-  if (!milliseconds) return "";
-  return `${Math.floor(milliseconds / 60_000)}:${String(Math.floor(milliseconds / 1_000) % 60).padStart(2, "0")}`;
-}
-function neteaseTrack(song: NeteaseSourceSong, url = ""): MusicTrack {
-  const neteaseId = String(song.id || "");
-  return {
-    id: `netease-${neteaseId}`,
-    neteaseId,
-    title: song.name || "未命名歌曲",
-    artist: song.ar?.map((artist) => artist.name).filter(Boolean).join(" / ") || "未知歌手",
-    album: song.al?.name || "",
-    duration: musicDuration(song.dt),
-    cover: song.al?.picUrl?.replace(/^http:\/\//i, "https://") || "",
-    url,
-    playable: Boolean(url),
-  };
-}
-async function neteaseRequest(path: string, params: Record<string, string>) {
-  const response = await fetch(`https://music-api.r-vera.com${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: new URLSearchParams(params),
-  });
-  const result = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || Number(result.code || 200) >= 400) throw new Error("网易云搜索暂时不可用");
-  return result;
 }
 async function mergeMusicLibrary(incoming: MusicTrack[]) {
   const library = await readMusicTracks("music");
@@ -290,33 +263,6 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     }).slice(0, limit).map(publicTrack);
     return { provider: "appleMusic", matches };
   }
-  if (name === "music_netease_search") {
-    const query = String(input.query || "").trim();
-    const limit = Math.min(10, Math.max(1, Number(input.limit || 6)));
-    if (!query) throw new Error("请输入要搜索的歌名、歌手或专辑");
-    const search = await neteaseRequest("/cloudsearch", { keywords: query, limit: String(limit), type: "1" });
-    const songs = ((search.result as { songs?: NeteaseSourceSong[] } | undefined)?.songs || []).slice(0, limit);
-    const ids = songs.map((song) => String(song.id || "")).filter(Boolean);
-    const urls = new Map<string, string>();
-    if (ids.length) {
-      try {
-        const source = await neteaseRequest("/song/url/v1", { id: ids.join(","), level: "standard" });
-        for (const item of ((source.data as Array<{ id?: string | number; url?: string }> | undefined) || [])) {
-          if (item.id && item.url) urls.set(String(item.id), item.url.replace(/^http:\/\//i, "https://"));
-        }
-      } catch {
-        // Search remains useful when a temporary signed URL cannot be returned.
-      }
-    }
-    const imported = await mergeMusicLibrary(songs.map((song) => neteaseTrack(song, urls.get(String(song.id)) || "")));
-    return {
-      query,
-      imported: imported.length,
-      matches: imported.map((track) => publicTrack(track)),
-      musicLibraryRefresh: true,
-      note: "歌曲已加入 Vesper 音乐库；若该设备已连接网易云账号，聊天中的歌曲卡片会使用本机 MUSIC_U 刷新可播放链接。",
-    };
-  }
   if (name === "music_play") {
     const trackId = String(input.trackId || "");
     const tracks = await readMusicLibrary();
@@ -354,9 +300,11 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   }
   if (name === "music_send_card") {
     const trackId = String(input.trackId || "");
+    if (trackId.startsWith("netease-")) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
     const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
-    return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId || '', appleMusicURL: track.appleMusicURL || '', shareURL: track.neteaseId ? `https://music.163.com/song?id=${encodeURIComponent(track.neteaseId)}` : '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", url: track.url || "", playable: Boolean(track.appleMusicId || (track.url && track.playable !== false)), source: track.appleMusicId ? "appleMusic" : track.source || (track.neteaseId ? "netease" : "vesper"), message: typeof input.message === "string" ? input.message : "" } };
+    if (!isAppleMusicTrack(track)) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
+    return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId, appleMusicURL: track.appleMusicURL || '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: true, source: "appleMusic", message: typeof input.message === "string" ? input.message : "" } };
   }
   if (name === "music_playlist_add") {
     const trackId = String(input.trackId || "");

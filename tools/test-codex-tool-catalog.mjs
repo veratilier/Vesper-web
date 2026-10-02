@@ -17,3 +17,6 @@ assert.ok(input.includes('album_save_photo'));
 console.log('Shared album/file/sticker tool schema, stale catalog rejection and exact attachment keys passed');
 
 assert.throws(() => validateCodexToolCatalog([...codexToolDefinitions, codexToolDefinitions[0]]), /重复名称/);
+
+assert.ok(!names.includes('music_netease_search'));
+assert.ok(names.includes('music_search') && names.includes('music_send_card'));
