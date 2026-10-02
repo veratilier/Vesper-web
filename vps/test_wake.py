@@ -1,3 +1,4 @@
+from itertools import count
 import tempfile, unittest, sqlite3, json, time
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,9 @@ import vesper_wake_policy as policy
 
 class WakeTests(unittest.TestCase):
     def setUp(self):
+        # Keep unrelated runner tests outside sleep hours; test_wake_sleep covers that gate.
+        clock = patch('time.time', side_effect=count(1790827200, 0.001))  # 2026-10-01 12:00 Asia/Shanghai
+        clock.start(); self.addCleanup(clock.stop)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.addCleanup(patch.stopall)
         patch.object(runner,'HISTORY',Path(self.temp.name)/'history.db').start()
