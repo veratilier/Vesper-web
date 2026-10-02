@@ -1,3 +1,4 @@
+import type {VectorEnv} from './memory-vector-index';
 import * as z from 'zod/v4';
 import type { D1Database } from '@cloudflare/workers-types';
 import { getMemory, kinds, listMemories, MemoryError, saveMemory, searchMemory, withdrawMemory } from './shared-memory-engine';
@@ -6,6 +7,7 @@ type Dependencies = {
   authorize: (request: Request) => Promise<boolean>;
   database: () => D1Database | undefined;
   headers: (request: Request) => Headers;
+  vector?:Partial<VectorEnv>;
 };
 
 // Only paired Vesper devices can reach this owner's shared library. No arbitrary proxy URL.
@@ -40,7 +42,7 @@ export async function sharedMemoryRequest(request: Request, dependencies: Depend
     const bytes = new Uint8Array(size); let position = 0;
     for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.length; }
     const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (target.pathname === '/api/search') return json(await searchMemory({ DB: db }, body));
+    if (target.pathname === '/api/search') return json(await searchMemory({ ...dependencies.vector, DB: db }, body));
     if (target.pathname === '/api/memories') return json(await saveMemory(db, body), 201);
     const withdrawal = target.pathname.match(/^\/api\/memories\/([a-f0-9-]+)\/withdraw$/i);
     if (withdrawal) return json(await withdrawMemory(db,z.uuid().parse(withdrawal[1]),z.object({reason:z.string()}).parse(body).reason));

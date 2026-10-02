@@ -11,7 +11,7 @@ assert.equal(VESPER_DESIRE_SESSION_CONFIG['apps.asdk_app_6a92be9d9e1c819197f5801
 // connection/credential, let alone initialize an external MCP session.
 await build({entryPoints:['lib/mcp-connections.ts'],bundle:true,platform:'node',format:'esm',outfile:'/tmp/vesper-routing-gateway.mjs',plugins:[{name:'isolated-storage',setup(b){
  b.onResolve({filter:/^(cloudflare:workers|@\/lib\/db)$/},a=>({path:a.path,namespace:'fixture'}));
- b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:a.path==='cloudflare:workers'?'export const env = {};':'export const ensureSchema=()=>{throw Error("unexpected database access")}; export const getDb=()=>{throw Error("unexpected database access")};',loader:'js'}));
+ b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:a.path==='cloudflare:workers'?'export function waitUntil(p){return p;} export const env = {};':'export const ensureSchema=()=>{throw Error("unexpected database access")}; export const getDb=()=>{throw Error("unexpected database access")};',loader:'js'}));
 }}]});
 const {callConfiguredMcpTool}=await import('/tmp/vesper-routing-gateway.mjs');
 for (const toolName of ['desire_status','desire_history','desire_encounter','desire_express','desire_set_style']) {

@@ -16,7 +16,7 @@ try {
   const modules={};
   for(const [name,entry] of Object.entries({state:'app/api/state/route.ts',tools:'app/api/codex/tools/route.ts',playback:'lib/web-music-playback.ts'})) {
     const outfile=join(directory,name+'.mjs');
-    await build({entryPoints:[entry],outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'fixture',setup(b){b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const env=globalThis.__webMusicFixture;',loader:'js'}));}}]});
+    await build({entryPoints:[entry],outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'fixture',setup(b){b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export function waitUntil(p){return p;} export const env=globalThis.__webMusicFixture;',loader:'js'}));}}]});
     modules[name]=await import(pathToFileURL(outfile));
   }
   const request=(method,path,body,auth=true)=>new Request('https://vesper.test'+path,{method,headers:{'content-type':'application/json',...(auth?{'x-vesper-device-token':'fixture-token'}:{})},...(body?{body:JSON.stringify(body)}:{})});

@@ -19,7 +19,7 @@ try {
       } else {
         await build({ entryPoints: ['tools/' + file], outfile: output, bundle: true, platform: 'node', format: 'esm', define: { 'import.meta.url': JSON.stringify(new URL(file, new URL('./', import.meta.url)).href) }, plugins: [{ name: 'isolated-env', setup(b) {
           b.onResolve({ filter: /^cloudflare:workers$/ }, () => ({ path: 'env', namespace: 'fixture' }));
-          b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const env = {}; export class WorkerEntrypoint {}', loader: 'js' }));
+          b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export function waitUntil(p){return p;} export const env = {}; export class WorkerEntrypoint {}', loader: 'js' }));
         } }] });
         const result = spawnSync(process.execPath, [output], { stdio: 'inherit' });
         if (result.status !== 0) failed = true;

@@ -16,6 +16,9 @@ class WakeTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.object(runner,'HISTORY',Path(self.temp.name)/'history.db').start()
         patch.object(runner,'current_preferences',lambda:{}).start()
+        # These execution tests are independent of the wall clock; sleep windows
+        # and boundary behavior have their own test_wake_sleep.py coverage.
+        patch.object(runner,'sleep_gate',lambda now:False).start()
         self.old=store.PATH;store.PATH=Path(self.temp.name)/'wake.db';self.addCleanup(lambda:setattr(store,'PATH',self.old))
     def test_real_curl_preserves_utf8_and_json_escapes(self):
         from http.server import BaseHTTPRequestHandler, HTTPServer

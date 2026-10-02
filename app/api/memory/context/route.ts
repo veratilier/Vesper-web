@@ -1,4 +1,5 @@
-import { env } from 'cloudflare:workers';
+import { processVectorJobs, type VectorEnv } from '@/lib/memory-vector-index';
+import { env, waitUntil } from 'cloudflare:workers';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as z from 'zod/v4';
 import { authorizeApp } from '@/lib/bridge-auth';
@@ -12,7 +13,7 @@ function databases(){const bindings=env as unknown as {DB:D1Database;SHARED_MEMO
 export const OPTIONS=optionsResponse;
 export async function GET(request:Request){
  if(!await authorizeApp(request))return json(request,{error:'Device not paired'},401);
- try{return json(request,await recentRecall(databases().ledger,new URL(request.url).searchParams.get('conversationId')||undefined));}
+ try{return json(request,await recentRecall(databases().ledger,new URL(request.url).searchParams.get('conversationId')||undefined,new URL(request.url).searchParams.get('debug')==='1'));}
  catch{return json(request,{items:[],unavailable:true});}
 }
 export async function POST(request:Request){
@@ -28,7 +29,9 @@ export async function POST(request:Request){
   // Existing clients continue to work until their non-visual transport update is installed.
   if(!body.messageId||!body.conversationId)return json(request,await recallSharedMemory(String(body.query||'').slice(0,1000)));
   if((env as unknown as {VESPER_MEMORY_CONTEXT_TRANSPORT?:string}).VESPER_MEMORY_CONTEXT_TRANSPORT!=='request-scoped-v2')return json(request,{context:'',memories:[],deliveryId:null,status:'host_not_verified'});
-  const prepared=await prepareRecall(memory,ledger,body as Parameters<typeof prepareRecall>[2]);
+  const config={...(env as unknown as VectorEnv),DB:memory};
+  waitUntil(processVectorJobs(config).catch(()=>{}));
+  const prepared=await prepareRecall(memory,ledger,body as Parameters<typeof prepareRecall>[2],new Date(),config);
   return json(request,{...prepared,additionalContext:memoryAdditionalContext(prepared.context),transport:'additional-context-v1',retention:'request_only'});
  }catch(error){
   if(error instanceof z.ZodError||error instanceof SyntaxError)return json(request,{error:'invalid_arguments'},400);

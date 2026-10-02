@@ -31,7 +31,7 @@ test('actual Codex catalog and dispatcher route authenticated Desire reads and w
   await build({entryPoints:['app/api/codex/tools/route.ts'],outfile:file,bundle:true,platform:'node',format:'esm',plugins:[{
     name:'worker-env', setup(b) {
       b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'fixture'}));
-      b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const env = globalThis.__codexDesireEnv;',loader:'js'}));
+      b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export function waitUntil(p){return p;} export const env = globalThis.__codexDesireEnv;',loader:'js'}));
     }
   }]});
   const {GET,POST}=await import(pathToFileURL(file));

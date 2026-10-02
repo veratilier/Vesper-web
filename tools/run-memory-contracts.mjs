@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const directory=await mkdtemp(join(tmpdir(),'memory-contracts-'));
 try {
- for(const name of ['test-shared-memory','test-memory-recall']){
+ for(const name of ['test-shared-memory','test-memory-recall','test-hybrid-memory']){
   const outfile=join(directory,name+'.mjs');
   await build({entryPoints:['tools/'+name+'.ts'],outfile,bundle:true,platform:'node',format:'esm'});
   await import(pathToFileURL(outfile));
