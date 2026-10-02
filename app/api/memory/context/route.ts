@@ -27,9 +27,9 @@ export async function POST(request:Request){
   if(action!=='prepare')return json(request,{error:'invalid_action'},400);
   // Existing clients continue to work until their non-visual transport update is installed.
   if(!body.messageId||!body.conversationId)return json(request,await recallSharedMemory(String(body.query||'').slice(0,1000)));
-  if((env as unknown as {VESPER_MEMORY_CONTEXT_TRANSPORT?:string}).VESPER_MEMORY_CONTEXT_TRANSPORT!=='additional-context-v1')return json(request,{context:'',memories:[],deliveryId:null,status:'host_not_verified'});
+  if((env as unknown as {VESPER_MEMORY_CONTEXT_TRANSPORT?:string}).VESPER_MEMORY_CONTEXT_TRANSPORT!=='request-scoped-v2')return json(request,{context:'',memories:[],deliveryId:null,status:'host_not_verified'});
   const prepared=await prepareRecall(memory,ledger,body as Parameters<typeof prepareRecall>[2]);
-  return json(request,{...prepared,additionalContext:memoryAdditionalContext(prepared.context),transport:'additional-context-v1',retention:'host_history_possible'});
+  return json(request,{...prepared,additionalContext:memoryAdditionalContext(prepared.context),transport:'additional-context-v1',retention:'request_only'});
  }catch(error){
   if(error instanceof z.ZodError||error instanceof SyntaxError)return json(request,{error:'invalid_arguments'},400);
   if(error instanceof MemoryError)return json(request,{error:error.code},error.status);

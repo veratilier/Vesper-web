@@ -12,7 +12,7 @@ const db = {
   prepare(sql) { const statement = (args = []) => ({ bind: (...values) => statement(values), first: async () => sqlite.prepare(sql).get(...args) ?? null, all: async () => ({ results: sqlite.prepare(sql).all(...args) }), run: async () => sqlite.prepare(sql).run(...args) }); return statement(); },
   async batch(statements) { sqlite.exec('BEGIN'); try { const result = []; for (const s of statements) result.push(await s.run()); sqlite.exec('COMMIT'); return result; } catch (e) { sqlite.exec('ROLLBACK'); throw e; } },
 };
-globalThis.__sharedFixture = { SHARED_MEMORY_DB: db, VESPER_MEMORY_CONTEXT_TRANSPORT:'additional-context-v1', VESPER_APP_TOKEN: 'fixture-token', DB: { prepare() { throw new Error('Legacy DB must not be accessed by shared tools'); } } };
+globalThis.__sharedFixture = { SHARED_MEMORY_DB: db, VESPER_MEMORY_CONTEXT_TRANSPORT:'request-scoped-v2', VESPER_APP_TOKEN: 'fixture-token', DB: { prepare() { throw new Error('Legacy DB must not be accessed by shared tools'); } } };
 const directory = await mkdtemp(join(tmpdir(), 'vesper-shared-integration-'));
 try {
   const routes = {};
@@ -59,10 +59,10 @@ try {
   assert.equal((await routes.context.POST(request('/api/memory/context',{action:'feedback',deliveryId:batch.deliveryId,memoryId:saved.memory.id,kind:'changed'}))).status,200);
   const afterReview=await (await routes.tools.POST(request('/api/codex/tools',{name:'recall_vesper_memory',arguments:{query:'nebula'}}))).json();
   assert.equal(afterReview.result.memories.length,0,'pending corrections also disappear from active tool retrieval');
-  delete globalThis.__sharedFixture.VESPER_MEMORY_CONTEXT_TRANSPORT;
+  globalThis.__sharedFixture.VESPER_MEMORY_CONTEXT_TRANSPORT='additional-context-v1';
   const beforeGate=ledgerSqlite.prepare('SELECT COUNT(*) AS n FROM memory_recall_deliveries').get().n;
   const gated=await (await routes.context.POST(request('/api/memory/context',{query:'tea',conversationId:'fixture',messageId:'unverified'}))).json();
-  assert.equal(gated.status,'host_not_verified');assert.equal(gated.deliveryId,null);
+  assert.equal(gated.status,'host_not_verified','old host flag must not enable request-only transport');assert.equal(gated.deliveryId,null);
   assert.equal(gated.context,'');assert.deepEqual(gated.memories,[]);assert.equal(gated.additionalContext,undefined);
   assert.equal(ledgerSqlite.prepare('SELECT COUNT(*) AS n FROM memory_recall_deliveries').get().n,beforeGate,'disabled transport must not prepare an injection');
   ledgerSqlite.close();
