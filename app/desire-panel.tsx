@@ -23,9 +23,9 @@ function historyNotes(value: unknown): Note[] {
   });
 }
 function dateLabel(date: string) { const stamp = new Date(date); return Number.isFinite(stamp.getTime()) ? stamp.toLocaleString("en-US", { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''; }
-export function DesirePanel({ apiUrl, headers, active, agentName }: {
+export function DesirePanel({ apiUrl, headers, active, agentName, onWake }: {
   apiUrl: (path: string) => string; headers: (json?: boolean) => Record<string, string>;
-  active: boolean; agentName: string;
+  active: boolean; agentName: string; onWake?: () => void;
 }) {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -72,6 +72,10 @@ export function DesirePanel({ apiUrl, headers, active, agentName }: {
     <section className="desire-note-surface"><h2>{agentName}</h2><p>{note || (loading ? "Reading the latest note…" : "No notes yet.")}</p>{notes[0]?.date && <time>{dateLabel(notes[0].date)}</time>}</section>
     <section className="desire-flower-surface"><DesireFlower data={data} /><div className="desire-flower-footer"><small>{loading ? "Loading…" : updatedAt ? `Updated ${updatedAt}` : "Values not loaded yet"}</small><button type="button" disabled={loading} onClick={() => void load()} aria-label="Refresh mood"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.5 7a7.5 7.5 0 0 1 12-1L20 9M4 15l2.5 3a7.5 7.5 0 0 0 12-1" /></svg></button></div></section>
     <section className="desire-timeline"><div className="desire-timeline-heading"><h2>Recent notes</h2>{notes.length > 3 && <button type="button" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse" : "Recent entries"} ›</button>}</div>{historyError && <p role="alert">{historyError}</p>}{!notes.length && !historyError && <p className="desire-timeline-empty">{loading ? "Loading…" : "New notes will appear here."}</p>}<ol>{notes.slice(0, expanded ? notes.length : 3).map(item => <li key={item.id}><time>{dateLabel(item.date)}</time><p>{item.note}</p></li>)}</ol></section>
+    {onWake && <>
+      <section className="room-wake"><div><h2>Wake AI</h2><p>Leave room for a new thought.</p></div><button type="button" onClick={onWake}>Wake</button></section>
+      <p className="room-caption">Keep Vesper open and connected for a manual wake-up.</p>
+    </>}
   </div>;
 }
 

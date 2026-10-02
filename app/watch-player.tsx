@@ -152,7 +152,7 @@ export function WatchPlayer({ active, busy, captureRef, onShare }: {
     const timer = setInterval(() => { if (!document.hidden && video.current && !video.current.paused) void shareRef.current(true); }, 30_000);
     return () => clearInterval(timer);
   }, [automatic, active]);
-  return <section className="watch-player" aria-label="Together Watch player">
+  return <section className="watch-player" aria-label="Cinema player">
     <video crossOrigin="anonymous" ref={video} src={screen ? undefined : source || undefined} controls={!screen} muted={screen} playsInline preload="metadata" onError={() => setError("Cannot play this video. Try a browser-compatible MP4.")} />
     <form className="watch-import" onSubmit={event => { event.preventDefault(); void importLink(); }}>
       <input aria-label="Bilibili video URL" type="url" placeholder="Paste a full Bilibili video or episode URL" value={link} onChange={event => setLink(event.target.value)} required disabled={importing} />

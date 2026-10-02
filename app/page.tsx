@@ -16,7 +16,7 @@ import type { WatchFrame } from "./watch-context";
 import { ReadingRoom, type ReadingBook } from "./reading-room";
 import { SubscriptionUsage } from "./subscription-usage";
 import { SharedMemoryLibrary } from "./shared-memory-library";
-import { AppCenter } from "./app-center";
+import "./app-center.css";
 import { DesirePanel, HomeDesire } from "./desire-panel";
 import { WakeCard } from "./wake-card";
 import type { WakeRecord } from "./wake-summary";
@@ -534,7 +534,8 @@ const nav = [
   { label: "音乐", english: "Music", icon: "music" },
   { label: "相册", english: "Album", icon: "image" },
   { label: "记忆库", english: "Memory", icon: "library" },
-  { label: "Pandora", english: "Pandora", icon: "box" },
+  { label: "Library", english: "Library", icon: "diary" },
+  { label: "Cinema", english: "Cinema", icon: "play" },
   { label: "设置", english: "Settings", icon: "settings" },
 ];
 type NoteItem = {
@@ -1519,7 +1520,7 @@ function HomeContent() {
               onOpenSection={(section) => setActive(section)}
             />
           ) : section === "聊天" ? (
-              active === "Pandora" && conversationId === watchConversationId ? null : <ConnectedChat
+              active === "Cinema" && conversationId === watchConversationId ? null : <ConnectedChat
                 wakeRequest={wakeRequest}
                 onWakeHandled={() => setWakeRequest(null)}
                 key={conversationId}
@@ -1580,10 +1581,33 @@ function HomeContent() {
             <PhotoAlbum apiUrl={apiUrl} headers={appHeaders} active={active === "相册"} />
           ) : section === "记忆库" ? (
             <SharedMemoryLibrary apiUrl={apiUrl} headers={appHeaders} legacy={<MemoryLibrary />} />
-          ) : section === "Pandora" ? (
-            <AppCenter renderReading={() => <InternalReadingRoom />} renderWatch={() => conversationId === watchConversationId && active !== "Pandora" ? null : <ConnectedChat key={watchConversationId} watchMode watchActive={active === "Pandora"} conversationId={watchConversationId} onSelectConversation={setWatchConversationId} agentName={agentName} userName={userName} favorites={favorites} setFavorites={setFavorites} playing={playing} onToggleMusic={() => setPlaying(value => !value)} onNextMusic={() => { if (activeTracks.length) setTrackIndex(index => (index + 1) % activeTracks.length); }} onOpenMusic={() => navigateTo("音乐")} onAddMusicToPlaylist={card => { setMusicPlaylistIntent(card); navigateTo("音乐"); }} />} onDesire={() => navigateTo("欲望")} onWake={() => { setWakeRequest(crypto.randomUUID()); navigateTo("聊天"); }} />
+          ) : section === "Library" ? (
+            <div className="page-body app-center internal-reading-room">
+              <div className="page-intro"><h1>Library</h1></div>
+              <InternalReadingRoom />
+            </div>
+          ) : section === "Cinema" ? (
+            <div className="page-body app-center watch-room">
+              <div className="page-intro"><h1>Cinema</h1></div>
+              {conversationId === watchConversationId && active !== "Cinema" ? null : <ConnectedChat
+                key={watchConversationId}
+                watchMode
+                watchActive={active === "Cinema"}
+                conversationId={watchConversationId}
+                onSelectConversation={setWatchConversationId}
+                agentName={agentName}
+                userName={userName}
+                favorites={favorites}
+                setFavorites={setFavorites}
+                playing={playing}
+                onToggleMusic={() => setPlaying(value => !value)}
+                onNextMusic={() => { if (activeTracks.length) setTrackIndex(index => (index + 1) % activeTracks.length); }}
+                onOpenMusic={() => navigateTo("音乐")}
+                onAddMusicToPlaylist={card => { setMusicPlaylistIntent(card); navigateTo("音乐"); }}
+              />}
+            </div>
           ) : section === "欲望" ? (
-            <DesirePanel agentName={agentName} apiUrl={apiUrl} headers={appHeaders} active={active === "欲望"} />
+            <DesirePanel agentName={agentName} apiUrl={apiUrl} headers={appHeaders} active={active === "欲望"} onWake={() => { setWakeRequest(crypto.randomUUID()); navigateTo("聊天"); }} />
           ) : section === "设置" ? (
             <SettingsPage
               onOpenSection={navigateTo}
