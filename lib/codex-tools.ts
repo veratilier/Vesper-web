@@ -1,3 +1,4 @@
+import { cleanMusicDocument } from '@/lib/music-data';
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
@@ -45,6 +46,7 @@ async function readDocument(key: string): Promise<unknown> {
 }
 
 async function writeDocument(key: string, value: unknown) {
+  value = cleanMusicDocument(key, value);
   if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
   await getDb().prepare(`INSERT INTO vesper_documents(key,value,updated_at) VALUES(?,?,?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)

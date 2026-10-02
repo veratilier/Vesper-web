@@ -1,3 +1,4 @@
+import { cleanMusicDocument } from '@/lib/music-data';
 import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
 import { corsHeaders, optionsResponse } from "@/lib/cors";
@@ -59,7 +60,7 @@ export async function PUT(request: Request) {
     VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
-    .bind(body.key, JSON.stringify(body.value), updatedAt)
+    .bind(body.key, JSON.stringify(cleanMusicDocument(body.key, body.value)), updatedAt)
     .run();
   return json(request, { ok: true, updatedAt });
 }
