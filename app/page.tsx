@@ -5333,10 +5333,12 @@ function SettingsPage({
   );
 }
 
+type WakeSleepSettings = { enabled: boolean; start: string; end: string; timeZone: string; dreamEnabled: boolean };
 type WakeRuntime = {
   configVersion?: number;
   prompt?: string; defaultPrompt?: string; promptMaxLength?: number;
-  config?: { enabled: boolean; intervalMinutes: number | null };
+  config?: { enabled: boolean; intervalMinutes: number | null; sleep?: WakeSleepSettings };
+  sleepVersion?: number; sleep?: { sleeping: boolean; until?: number };
   heartbeat?: number; nextAt?: number; schedulerError?: string;
   jobs?: { id: string; source: string; status: string; created: number; started?: number;
     finished?: number; tools: number; decision?: string; tokens?: number;
@@ -5348,6 +5350,8 @@ function WakeVisualizer({ onClose }: { onClose: () => void }) {
   const [enabled, setEnabled] = useState(false);
   const [interval, setIntervalValue] = useState("auto");
   const [prompt, setPrompt] = useState("");
+  const [sleepSettings, setSleepSettings] = useState<WakeSleepSettings | null>(null);
+  const [sleepChanged, setSleepChanged] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -5367,6 +5371,7 @@ function WakeVisualizer({ onClose }: { onClose: () => void }) {
           setEnabled(value.config.enabled);
           setIntervalValue(value.config.intervalMinutes === null ? "auto" : String(value.config.intervalMinutes));
           setPrompt(value.prompt || "");
+          setSleepSettings(value.config.sleep || null);
           initialized.current = true;
         }
       } catch (reason) { if (!stopped) setError(reason instanceof Error ? reason.message : "Connection unavailable."); }
@@ -5379,11 +5384,16 @@ function WakeVisualizer({ onClose }: { onClose: () => void }) {
     savingRef.current = true; setSaving(true); setError(""); setSaved(false);
     try {
       const response = await fetch(codexHistoryUrl('/wake'), { method: 'POST', headers: codexHistoryHeaders(true),
-        body: JSON.stringify({ action: 'configure', enabled, intervalMinutes: interval === 'auto' ? null : Number(interval), ...(runtime?.configVersion && runtime.configVersion >= 2 ? { prompt } : {}) }) });
+        body: JSON.stringify({ action: 'configure', enabled, intervalMinutes: interval === 'auto' ? null : Number(interval), ...(runtime?.configVersion && runtime.configVersion >= 2 ? { prompt } : {}), ...(sleepChanged && sleepSettings ? { sleep: sleepSettings } : {}) }) });
       if (!response.ok) throw new Error("Settings were not saved. Please try again.");
       const value = await response.json() as WakeRuntime;
       if (!value.configVersion || !value.config) throw new Error("The background service needs an update before settings can be saved.");
       if ((runtime?.configVersion || 0) >= 2 && ((value.configVersion || 0) < 2 || value.prompt !== prompt)) throw new Error("The prompt was not saved. Update the background service and try again.");
+      if (sleepChanged && sleepSettings && (!value.sleepVersion || !value.config.sleep ||
+          (Object.keys(sleepSettings) as (keyof WakeSleepSettings)[]).some(key => value.config!.sleep![key] !== sleepSettings[key]))) {
+        throw new Error("Sleep Time was not saved. Check the background service and try again.");
+      }
+      setSleepSettings(value.config.sleep || null); setSleepChanged(false);
       setRuntime(value); setSaved(true);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Settings were not saved."); }
     finally { savingRef.current = false; setSaving(false); }
@@ -5392,6 +5402,14 @@ function WakeVisualizer({ onClose }: { onClose: () => void }) {
   const alive = !!runtime?.heartbeat && Date.now() / 1000 - runtime.heartbeat < 1000;
   const supported = (runtime?.configVersion || 0) >= 1;
   const promptSupported = (runtime?.configVersion || 0) >= 2;
+  const sleepSupported = (runtime?.sleepVersion || 0) >= 1 && !!sleepSettings;
+  const sleepInvalid = sleepChanged && !!sleepSettings && (
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(sleepSettings.start) ||
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(sleepSettings.end) || sleepSettings.start === sleepSettings.end);
+  const changeSleep = (patch: Partial<WakeSleepSettings>) => {
+    setSleepSettings(current => current ? { ...current, ...patch } : current);
+    setSleepChanged(true); setSaved(false);
+  };
   const promptInvalid = promptSupported && (!prompt.trim() || [...prompt].length > (runtime?.promptMaxLength || 8000));
   return <div className="modal-layer"><button className="modal-scrim" aria-label="Close wake settings" onClick={onClose}/>
     <section className="connection-modal wake-visualizer" role="dialog" aria-modal="true" aria-labelledby="wake-title">
@@ -5404,6 +5422,18 @@ function WakeVisualizer({ onClose }: { onClose: () => void }) {
           {interval !== 'auto' && ![30,60,120,240,360,720,1440].includes(Number(interval)) && <option value={interval}>{interval} minutes</option>}
         </select></label>
         <p className="settings-hint">Active chats and quiet requests can postpone a wake-up. Turning this off prevents new automatic runs; a running task may finish.</p>
+        <details className="wake-sleep-settings">
+          <summary><span>Sleep Time</span><small>{sleepSettings ? sleepSettings.enabled ? `${sleepSettings.start}–${sleepSettings.end}` : 'Off' : 'Unavailable'}</small></summary>
+          {sleepSupported && sleepSettings ? <>
+            <label className="wake-toggle"><span>Pause during sleep</span><input type="checkbox" role="switch" checked={sleepSettings.enabled} disabled={saving} onChange={event => changeSleep({ enabled: event.target.checked })} /></label>
+            <label>Sleep starts<input type="time" value={sleepSettings.start} disabled={saving} onInput={event => changeSleep({ start: event.currentTarget.value })} /></label>
+            <label>Wake at<input type="time" value={sleepSettings.end} disabled={saving} onInput={event => changeSleep({ end: event.currentTarget.value })} /></label>
+            <p className="settings-hint">Time zone: {sleepSettings.timeZone}. Overnight ranges are supported. Automatic wake-ups pause during this period.</p>
+            <label className="wake-toggle"><span>Morning dream</span><input type="checkbox" role="switch" checked={sleepSettings.dreamEnabled} disabled={saving} onChange={event => changeSleep({ dreamEnabled: event.target.checked })} /></label>
+            <p className="settings-hint">Keep the existing morning dream routine after sleep. Use Save settings below to apply changes.</p>
+            {sleepInvalid && <p role="alert">Choose valid, different start and wake times.</p>}
+          </> : <p className="settings-hint">{runtime ? 'Sleep settings are not available from the background service yet.' : 'Connect to the background service to load your saved sleep settings.'}</p>}
+        </details>
         <div className="wake-prompt-editor">
           <label htmlFor="wake-prompt">Wake prompt</label>
           <textarea id="wake-prompt" value={prompt} disabled={!promptSupported || saving} rows={8} aria-describedby="wake-prompt-help" onChange={event => {setPrompt(event.target.value);setSaved(false);}} />
@@ -5412,13 +5442,13 @@ function WakeVisualizer({ onClose }: { onClose: () => void }) {
           {runtime && !promptSupported && <p className="settings-hint">Update the background service to edit the wake prompt.</p>}
           {promptInvalid && <p role="alert">Enter a prompt of 1–8000 characters.</p>}
         </div>
-        <button className="reset-background" disabled={!supported || saving || promptInvalid} onClick={() => void save()}>{saving ? 'Saving…' : 'Save settings'}</button>
+        <button className="reset-background" disabled={!supported || saving || promptInvalid || sleepInvalid} onClick={() => void save()}>{saving ? 'Saving…' : 'Save settings'}</button>
         <p role="status">{saved ? 'Saved. Changes apply from the next run.' : ''}</p>
       </div>
       {error && <p role="alert" className="settings-hint">{error}</p>}
       {runtime && !supported && <p className="settings-hint">Update the background service to enable controls and history.</p>}
       <div className="wake-status-grid">
-        <div><small>Status</small><b>{!runtime ? 'Loading…' : !alive ? 'Connection unknown' : runtime.config?.enabled === false ? 'Paused' : 'Online'}</b></div>
+        <div><small>Status</small><b>{!runtime ? 'Loading…' : !alive ? 'Connection unknown' : runtime.config?.enabled === false ? 'Paused' : runtime.sleep?.sleeping ? 'Sleeping' : 'Online'}</b></div>
         <div><small>Next wake · Beijing time</small><b>{runtime?.config?.enabled === false ? 'Paused' : format(runtime?.nextAt)}</b></div>
       </div>
       {runtime?.schedulerError && <p className="settings-hint">The scheduler reported an error. The next wake is not confirmed.</p>}

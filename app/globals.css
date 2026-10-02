@@ -5079,3 +5079,10 @@ html[data-native="true"] .app-shell::after { content: none !important; display: 
 .wake-prompt-editor textarea { display: block; width: 100%; box-sizing: border-box; min-height: 190px; padding: 12px; resize: vertical; border: 1px solid #bacbd3; border-radius: 12px; background: rgba(255,255,255,.65); color: inherit; font: inherit; line-height: 1.6; }
 .wake-prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .wake-prompt-footer button { padding: 8px; color: inherit; font: inherit; text-decoration: underline; }
+
+/* Sleep Time shares the wake editor's theme and scroll container. */
+.wake-sleep-settings { margin: 18px 0; border-block: 1px solid var(--ui-line); padding: 12px 0; }
+.wake-sleep-settings summary { cursor: pointer; padding: 4px 0; }
+.wake-sleep-settings summary span { margin-right: 12px; }
+.wake-sleep-settings summary small { color: var(--ui-muted); }
+.wake-sleep-settings input[type="time"] { min-width: 0; max-width: 60%; padding: 8px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); color: var(--ui-ink); font: inherit; }
