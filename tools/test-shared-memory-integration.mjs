@@ -12,6 +12,7 @@ const db = {
   prepare(sql) { const statement = (args = []) => ({ bind: (...values) => statement(values), first: async () => sqlite.prepare(sql).get(...args) ?? null, all: async () => ({ results: sqlite.prepare(sql).all(...args) }), run: async () => sqlite.prepare(sql).run(...args) }); return statement(); },
   async batch(statements) { sqlite.exec('BEGIN'); try { const result = []; for (const s of statements) result.push(await s.run()); sqlite.exec('COMMIT'); return result; } catch (e) { sqlite.exec('ROLLBACK'); throw e; } },
 };
+globalThis.__background=[];
 globalThis.__sharedFixture = { SHARED_MEMORY_DB: db, VESPER_MEMORY_CONTEXT_TRANSPORT:'request-scoped-v2', VESPER_APP_TOKEN: 'fixture-token', DB: { prepare() { throw new Error('Legacy DB must not be accessed by shared tools'); } } };
 const directory = await mkdtemp(join(tmpdir(), 'vesper-shared-integration-'));
 try {
@@ -20,7 +21,7 @@ try {
     const outfile = join(directory, name + '.mjs');
     await build({ entryPoints: [entry], outfile, bundle: true, platform: 'node', format: 'esm', plugins: [{ name: 'fixture', setup(b) {
       b.onResolve({ filter: /^cloudflare:workers$/ }, () => ({ path: 'env', namespace: 'fixture' }));
-      b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const env = globalThis.__sharedFixture;', loader: 'js' }));
+      b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const env = globalThis.__sharedFixture; export function waitUntil(p){globalThis.__background.push(p)};', loader: 'js' }));
     } }] });
     routes[name] = await import(pathToFileURL(outfile));
   }

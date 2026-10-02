@@ -132,7 +132,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "remember_vesper_memory",
-    description: "Save meaningful shared experiences as well as preferences. Never write a per-turn diary. Episodes require exact original-message quotes in details.evidence, verified by the server; retrieve originals before backfilling. Do not invent missing dates. Save to the shared Memory library shown in Vesper. Include source and kind when known; never invent event time. Use only after a meaningful exchange to preserve a concise, specific and durable memory. Do not save jokes, guesses, secrets not needed for the relationship, or repeat an existing memory. Legacy type core is stored as a reflection, not a confirmed fact; use feeling for Rowan's first-person feeling.",
+    description: "Propose meaningful shared experiences for user review, and save preferences. Episode results with needsReview=true are pending candidates, NOT saved memories. Separate literal events from interpretation; never infer a person felt lonely from a request to call. Never write a per-turn diary. Episodes require exact original-message quotes in details.evidence, verified by the server; retrieve originals before backfilling. Do not invent missing dates. Save to the shared Memory library shown in Vesper. Include source and kind when known; never invent event time. Use only after a meaningful exchange to preserve a concise, specific and durable memory. Do not save jokes, guesses, secrets not needed for the relationship, or repeat an existing memory. Legacy type core is stored as a reflection, not a confirmed fact; use feeling for Rowan's first-person feeling.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -140,7 +140,7 @@ export const codexToolDefinitions = [
         type: { type: "string", enum: ["core", "long_term", "feeling", "dream"] },
         kind: { type: "string", enum: ["episode", "preference", "agreement", "reflection", "dream"] },
         details: { type: "object", additionalProperties: false, properties: {
-          title: { type: "string", maxLength: 100 }, summary: { type: "string", maxLength: 500 },
+          participants: { type: "array", maxItems: 12, items: {type:"string"} }, interpretation: {type:"string", maxLength:500}, title: { type: "string", maxLength: 100 }, summary: { type: "string", maxLength: 500 },
           evidence: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, properties: {
             conversation_id: { type: "string" }, message_id: { type: "string" }, quote: { type: "string", description: "Exact substring of original chat; never a paraphrase." }
           }, required: ["conversation_id", "message_id", "quote"] } }
@@ -166,7 +166,7 @@ export const codexToolDefinitions = [
         type: { type: "string", enum: ["core", "long_term", "feeling", "dream"] },
         kind: { type: "string", enum: ["episode", "preference", "agreement", "reflection", "dream"] },
         details: { type: "object", additionalProperties: false, properties: {
-          title: { type: "string", maxLength: 100 }, summary: { type: "string", maxLength: 500 },
+          participants: { type: "array", maxItems: 12, items: {type:"string"} }, interpretation: {type:"string", maxLength:500}, title: { type: "string", maxLength: 100 }, summary: { type: "string", maxLength: 500 },
           evidence: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, properties: {
             conversation_id: { type: "string" }, message_id: { type: "string" }, quote: { type: "string", description: "Exact substring of original chat; never a paraphrase." }
           }, required: ["conversation_id", "message_id", "quote"] } }
