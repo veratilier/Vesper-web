@@ -1,5 +1,7 @@
 "use client";
 import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/desire/routing.js";
+import { browserStorage } from "@/lib/browser-storage";
+import "./storage-notice.css";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { nativeMcpOAuth } from "./native-mcp-oauth";
@@ -678,7 +680,7 @@ const defaultPreferences: VesperPreferences = {
 function readLocalValue<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
-    return JSON.parse(window.localStorage.getItem(key) || "") as T;
+    return JSON.parse(browserStorage.getItem(key) || "") as T;
   } catch {
     return fallback;
   }
@@ -695,6 +697,28 @@ function mergeMusicTracks(current: Track[], incoming: Track[]) {
 }
 
 export default function Home() {
+  const [storageLoaded, setStorageLoaded] = useState(false);
+  const status = useSyncExternalStore(browserStorage.subscribe, browserStorage.status, () => "ready");
+  useEffect(() => {
+    let live = true;
+    void browserStorage.initialize().then(() => { if (live) setStorageLoaded(true); });
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (status === "ready") return;
+    const protectPendingWrites = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", protectPendingWrites);
+    return () => window.removeEventListener("beforeunload", protectPendingWrites);
+  }, [status]);
+  return <>
+    {storageLoaded ? <HomeContent /> : <main className="stage"><section className="app-shell" aria-busy="true" /></main>}
+    {status === "unavailable" && <aside className="storage-notice" role="alert">
+      本机存储暂不可用，部分新改动尚未保存在本机。请保持页面打开，确认云端同步或在设置中导出备份；已有数据未被清除。
+    </aside>}
+  </>;
+}
+
+function HomeContent() {
   const mounted = useSyncExternalStore(
     () => () => undefined,
     () => true,
@@ -831,8 +855,8 @@ export default function Home() {
     // Stamp the local revision before React's deferred persistence effect runs.
     // The queue poller uses this timestamp to reject an older server snapshot
     // while the selected playlist is being written to D1.
-    window.localStorage.setItem("vesper-music-queue-seeded", "true");
-    window.localStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: now, source: "local" }));
+    browserStorage.setItem("vesper-music-queue-seeded", "true");
+    browserStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: now, source: "local" }));
     setQueue(nextQueue);
     setTrackIndex(nextIndex);
     if (options.autoplay) {
@@ -858,7 +882,7 @@ export default function Home() {
     }).then(async (response) => {
       if (!response.ok) return;
       const result = await response.json() as { updatedAt?: string };
-      window.localStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: result.updatedAt || now, source: "local" }));
+      browserStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: result.updatedAt || now, source: "local" }));
     }).catch(() => {});
   }, [currentTrack, setQueue]);
   useEffect(() => {
@@ -1066,7 +1090,7 @@ export default function Home() {
         const detail = oauthErrorDescription?.trim() || oauthError;
         const key = "vesper-local-external-mcp-servers";
         const servers = readLocalValue<ExternalMcpEntry[]>(key, []);
-        window.localStorage.setItem(
+        browserStorage.setItem(
           key,
           JSON.stringify(servers.map((server) => server.id === pending.serverId ? { ...server, oauthStatus: undefined } : server)),
         );
@@ -1088,7 +1112,7 @@ export default function Home() {
             throw new Error(result.error || "OAuth authorization failed");
           const key = "vesper-local-external-mcp-servers";
           const servers = readLocalValue<ExternalMcpEntry[]>(key, []);
-          window.localStorage.setItem(
+          browserStorage.setItem(
             key,
             JSON.stringify(
               servers.map((server) =>
@@ -1129,7 +1153,7 @@ export default function Home() {
   useEffect(() => {
     if (queueSeeded || !tracks.length) return;
     setQueue(tracks);
-    window.localStorage.setItem("vesper-music-queue-seeded", "true");
+    browserStorage.setItem("vesper-music-queue-seeded", "true");
   }, [queueSeeded, tracks, setQueue]);
   useEffect(() => {
     if (trackIndex < activeTracks.length) return;
@@ -1181,8 +1205,8 @@ export default function Home() {
             // A playlist selection is written optimistically. Never let a stale
             // poll put the previous playlist (and its cover) back on screen.
             if (localUpdatedAt && remoteUpdatedAt && remoteUpdatedAt < localUpdatedAt) return;
-            window.localStorage.setItem("vesper-music-queue-seeded", "true");
-            if (queueResult.updatedAt) window.localStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: queueResult.updatedAt, source: "remote" }));
+            browserStorage.setItem("vesper-music-queue-seeded", "true");
+            if (queueResult.updatedAt) browserStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: queueResult.updatedAt, source: "remote" }));
             setQueue(queueResult.value);
           }
         }
@@ -1248,7 +1272,7 @@ export default function Home() {
     const modes: MusicPlayMode[] = ["order", "repeat", "single", "random"];
     const next = modes[(modes.indexOf(playMode) + 1) % modes.length];
     setPlayMode(next);
-    window.localStorage.setItem("vesper-music-play-mode", next);
+    browserStorage.setItem("vesper-music-play-mode", next);
     const labels: Record<MusicPlayMode, string> = { order: "Play in order", repeat: "Repeat queue", single: "Repeat one", random: "Shuffle" };
     setMusicToast(labels[next]);
     window.setTimeout(() => setMusicToast(""), 1600);
@@ -1297,7 +1321,7 @@ export default function Home() {
     let live = true;
     let hasLocalAppearance = false;
     try {
-      const localAppearance = window.localStorage.getItem("vesper-local-appearance");
+      const localAppearance = browserStorage.getItem("vesper-local-appearance");
       if (localAppearance) hasLocalAppearance = true;
     } catch {}
     fetch(apiUrl("/api/state"), { headers: appHeaders() })
@@ -1337,14 +1361,14 @@ export default function Home() {
   }, []);
   useEffect(() => {
     if (!storageReady) return;
-    window.localStorage.setItem(
+    browserStorage.setItem(
       "vesper-local-profile",
       JSON.stringify({ userName, agentName, userAvatar, agentAvatar }),
     );
   }, [storageReady, userName, agentName, userAvatar, agentAvatar]);
   useEffect(() => {
     if (!storageReady) return;
-    window.localStorage.setItem(
+    browserStorage.setItem(
       "vesper-local-appearance",
       JSON.stringify({ accent, background: customBackground }),
     );
@@ -1724,7 +1748,7 @@ function usePersistentDocument<T>(key: string, initial: T) {
     const reconcile = async (initialLoad = false) => {
       if (syncing) return;
       syncing = true;
-      const localRaw = window.localStorage.getItem(storageKey);
+      const localRaw = browserStorage.getItem(storageKey);
       const localMeta = readLocalValue<{ updatedAt?: string }>(metaKey, {});
       try {
         const response = await fetch(apiUrl(`/api/state?key=${encodeURIComponent(key)}`), {
@@ -1733,35 +1757,35 @@ function usePersistentDocument<T>(key: string, initial: T) {
         });
         if (!response.ok) throw new Error("sync unavailable");
         const remote = (await response.json()) as { value: T | null; updatedAt?: string };
-        if (!live || window.localStorage.getItem(storageKey) !== localRaw) return;
+        if (!live || browserStorage.getItem(storageKey) !== localRaw) return;
         // One-time recovery of favorites kept in the old PWA before empty-state sync was fixed.
         const migrationKey = "vesper-favorites-sync-v2";
-        if (key === "favorites" && !window.localStorage.getItem(migrationKey)) {
+        if (key === "favorites" && !browserStorage.getItem(migrationKey)) {
           const localItems = localRaw ? JSON.parse(localRaw) as FavoriteItem[] : [];
           const remoteItems = Array.isArray(remote.value) ? remote.value as FavoriteItem[] : [];
           if (Array.isArray(localItems) && localItems.length) {
-            window.localStorage.setItem("vesper-favorites-before-sync-v2", localRaw!);
+            browserStorage.setItem("vesper-favorites-before-sync-v2", localRaw!);
             const merged = [...new Map([...remoteItems, ...localItems].map(item => [`${item.conversationId}:${item.messageId}`, item])).values()];
             const upload = await fetch(apiUrl("/api/state"), { method: "PUT", headers: appHeaders(true), body: JSON.stringify({ key, value: merged }) });
             if (!upload.ok) throw new Error("favorites recovery pending");
             const result = await upload.json() as { updatedAt: string };
-            if (!live || window.localStorage.getItem(storageKey) !== localRaw) return;
+            if (!live || browserStorage.getItem(storageKey) !== localRaw) return;
             const serialized = JSON.stringify(merged);
-            window.localStorage.setItem(storageKey, serialized);
-            window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt, source: "remote" }));
+            browserStorage.setItem(storageKey, serialized);
+            browserStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt, source: "remote" }));
             lastSerialized.current = serialized;
             setValue(merged as T);
-            window.localStorage.setItem(migrationKey, "done");
+            browserStorage.setItem(migrationKey, "done");
             return;
           }
-          window.localStorage.setItem(migrationKey, "done");
+          browserStorage.setItem(migrationKey, "done");
         }
         const action = documentSyncAction(localRaw, localMeta.updatedAt, remote.value, remote.updatedAt);
         if (action === "download") {
           const serialized = JSON.stringify(remote.value);
           lastSerialized.current = serialized;
-          window.localStorage.setItem(storageKey, serialized);
-          window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: remote.updatedAt, source: "remote" }));
+          browserStorage.setItem(storageKey, serialized);
+          browserStorage.setItem(metaKey, JSON.stringify({ updatedAt: remote.updatedAt, source: "remote" }));
           if (live) setValue(remote.value as T);
         } else if (action === "upload" && localRaw !== null) {
           const upload = await fetch(apiUrl("/api/state"), {
@@ -1771,7 +1795,7 @@ function usePersistentDocument<T>(key: string, initial: T) {
           });
           if (upload.ok) {
             const result = (await upload.json()) as { updatedAt?: string };
-            if (window.localStorage.getItem(storageKey) === localRaw) window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
+            if (browserStorage.getItem(storageKey) === localRaw) browserStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
           }
         }
       } catch {
@@ -1813,8 +1837,8 @@ function usePersistentDocument<T>(key: string, initial: T) {
     const serialized = JSON.stringify(value);
     if (lastSerialized.current === serialized) return;
     lastSerialized.current = serialized;
-    window.localStorage.setItem(storageKey, serialized);
-    window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: new Date().toISOString(), source: "local" }));
+    browserStorage.setItem(storageKey, serialized);
+    browserStorage.setItem(metaKey, JSON.stringify({ updatedAt: new Date().toISOString(), source: "local" }));
     window.dispatchEvent(
       new CustomEvent("vesper-document-change", { detail: { key, value } }),
     );
@@ -1827,7 +1851,7 @@ function usePersistentDocument<T>(key: string, initial: T) {
         .then(async (response) => {
           if (!response.ok) return;
           const result = (await response.json()) as { updatedAt?: string };
-          if (window.localStorage.getItem(storageKey) === serialized) window.localStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
+          if (browserStorage.getItem(storageKey) === serialized) browserStorage.setItem(metaKey, JSON.stringify({ updatedAt: result.updatedAt || new Date().toISOString(), source: "local" }));
         })
         .catch(() => {});
     }, 260);
@@ -1840,13 +1864,13 @@ function useLocalDocument<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
     if (typeof window === "undefined") return initial;
     try {
-      return JSON.parse(window.localStorage.getItem(storageKey) || "") as T;
+      return JSON.parse(browserStorage.getItem(storageKey) || "") as T;
     } catch {
       return initial;
     }
   });
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(value));
+    browserStorage.setItem(storageKey, JSON.stringify(value));
   }, [storageKey, value]);
   return [value, setValue] as const;
 }
@@ -2039,7 +2063,7 @@ async function resolveLatestConversationId() {
     if (!response.ok) throw new Error("History is unavailable");
     const payload = await response.json() as { conversations?: ConversationSummary[] };
     const conversations = mergeConversationSummaries(payload.conversations || [], local);
-    window.localStorage.setItem("vesper-local-conversation-index", JSON.stringify(conversations.slice(0, 100)));
+    browserStorage.setItem("vesper-local-conversation-index", JSON.stringify(conversations.slice(0, 100)));
     return conversations[0]?.id || "main";
   } catch {
     return mergeConversationSummaries([], local)[0]?.id || "main";
@@ -2060,7 +2084,7 @@ function rememberConversation(id: string, title = "New conversation", messageCou
     },
     ...current.filter((item) => item.id !== id),
   ];
-  window.localStorage.setItem(key, JSON.stringify(next.slice(0, 100)));
+  browserStorage.setItem(key, JSON.stringify(next.slice(0, 100)));
 }
 
 function HistoryModal({
@@ -2134,13 +2158,13 @@ function HistoryModal({
       setHistoryError(reason instanceof Error ? reason.message : "Delete failed");
       return;
     }
-    for (const key of Object.keys(window.localStorage)) {
+    for (const key of browserStorage.keys()) {
       if ((key.startsWith("vesper-local-chat-") || key.startsWith("vesper-codex-chat-")) && key.endsWith(`-${item.id}`))
-        window.localStorage.removeItem(key);
+        browserStorage.removeItem(key);
     }
     const next = conversations.filter((conversation) => conversation.id !== item.id);
     setConversations(next);
-    window.localStorage.setItem("vesper-local-conversation-index", JSON.stringify(next));
+    browserStorage.setItem("vesper-local-conversation-index", JSON.stringify(next));
     onDelete(item.id);
     setMenuId("");
   };
@@ -2155,7 +2179,7 @@ function HistoryModal({
     }
     const next = conversations.map((entry) => entry.id === item.id ? { ...entry, title, updatedAt: new Date().toISOString() } : entry);
     setConversations(next);
-    window.localStorage.setItem("vesper-local-conversation-index", JSON.stringify(next));
+    browserStorage.setItem("vesper-local-conversation-index", JSON.stringify(next));
     setMenuId("");
   };
   const nowMs = new Date().getTime();
@@ -2547,7 +2571,7 @@ type BridgeSnapshot = {
 const deviceToken = () =>
   typeof window === "undefined"
     ? ""
-    : window.localStorage.getItem("vesper-device-token") || "";
+    : browserStorage.getItem("vesper-device-token") || "";
 const deviceHeaders = () => ({
   "content-type": "application/json",
   "x-vesper-device-token": deviceToken(),
@@ -2589,7 +2613,7 @@ function LegacyConnectedChat({
   const localMessageKey = () =>
     `vesper-local-chat-${connections.active}-${conversationId}`;
   const saveLocalMessages = (messages: BridgeChatMessage[]) => {
-    window.localStorage.setItem(localMessageKey(), JSON.stringify(messages));
+    browserStorage.setItem(localMessageKey(), JSON.stringify(messages));
     setData({
       messages,
       bridge: { runtime: connections.active, online: true },
@@ -2709,7 +2733,7 @@ function LegacyConnectedChat({
         };
         if (!response.ok) throw new Error(result.error || "AI connection request failed");
         for (const [key, value] of Object.entries(result.changedDocuments || {})) {
-          window.localStorage.setItem(`vesper-document-${key}`, JSON.stringify(value));
+          browserStorage.setItem(`vesper-document-${key}`, JSON.stringify(value));
           window.dispatchEvent(new CustomEvent("vesper-document-change", { detail: { key, value } }));
         }
         const agentMessage: BridgeChatMessage = {
@@ -3030,7 +3054,7 @@ function LegacyConnectedChat({
                 setConnections({ ...connections, active });
                 const token = connections.cyberboss.deviceToken?.trim();
                 if (active === "cyberboss" && token)
-                  window.localStorage.setItem("vesper-device-token", token);
+                  browserStorage.setItem("vesper-device-token", token);
               }}
             >
               <option value="api">API Key</option>
@@ -3345,7 +3369,7 @@ let legacyHistoryMigration: Promise<void> | null = null;
 function migrateLegacyHistory() {
   if (legacyHistoryMigration) return legacyHistoryMigration;
   legacyHistoryMigration = (async () => {
-    if (!deviceToken() || window.localStorage.getItem("vesper-history-migration-v1") === "complete") return;
+    if (!deviceToken() || browserStorage.getItem("vesper-history-migration-v1") === "complete") return;
     const summaries = readLocalValue<ConversationSummary[]>("vesper-local-conversation-index", []);
     const conversations = new Map<string, { id: string; title: string; createdAt: string; updatedAt: string; messages: BridgeChatMessage[] }>();
     const ensureConversation = (id: string, title = "未命名对话", updatedAt = "") => {
@@ -3374,7 +3398,7 @@ function migrateLegacyHistory() {
       throw new Error("Could not load old D1 history");
     }
 
-    for (const key of Object.keys(window.localStorage)) {
+    for (const key of browserStorage.keys()) {
       if (!key.startsWith("vesper-local-chat-") && !key.startsWith("vesper-codex-chat-")) continue;
       const summary = summaries.find((item) => key.endsWith(`-${item.id}`));
       const id = summary?.id || (key.startsWith("vesper-codex-chat-")
@@ -3401,7 +3425,7 @@ function migrateLegacyHistory() {
       await persistCodexConversation(entry.id, { title: entry.title, createdAt: entry.createdAt, updatedAt: entry.updatedAt, source });
       for (const message of messages) await persistCodexMessage(message, entry.title);
     }
-    window.localStorage.setItem("vesper-history-migration-v1", "complete");
+    browserStorage.setItem("vesper-history-migration-v1", "complete");
   })().catch((reason) => {
     legacyHistoryMigration = null;
     throw reason;
@@ -3785,8 +3809,8 @@ function ConnectedChat({
       .filter((item) => !messageWasDeleted(item, tombstonesRef.current));
     messagesRef.current = sanitized;
     setMessages(sanitized);
-    window.localStorage.setItem(`vesper-codex-chat-${conversationId}`, JSON.stringify(sanitized));
-    window.localStorage.setItem(backupKey, JSON.stringify(recoveryCopy));
+    browserStorage.setItem(`vesper-codex-chat-${conversationId}`, JSON.stringify(sanitized));
+    browserStorage.setItem(backupKey, JSON.stringify(recoveryCopy));
   };
   const updateMessage = (id: string, update: (item: BridgeChatMessage) => BridgeChatMessage) => {
     const updated = messagesRef.current.map((item) => item.id === id ? update(item) : item);
@@ -3842,7 +3866,7 @@ function ConnectedChat({
       : "";
     const entry = { method, itemType, at: new Date().toISOString() };
     const current = readLocalValue<typeof entry[]>("vesper-codex-diagnostics", []);
-    window.localStorage.setItem("vesper-codex-diagnostics", JSON.stringify([...current.slice(-49), entry]));
+    browserStorage.setItem("vesper-codex-diagnostics", JSON.stringify([...current.slice(-49), entry]));
     console.debug("[Vesper Codex diagnostic]", entry);
   };
 
@@ -4290,7 +4314,7 @@ function ConnectedChat({
     const thread = (result.result?.thread || {}) as { id?: string };
     if (!thread.id) throw new Error("Codex did not return a thread id");
     threadId.current = thread.id;
-    try { window.localStorage.setItem(`vesper-thread-tools-${thread.id}`, CODEX_TOOL_CATALOG_VERSION); } catch {}
+    try { browserStorage.setItem(`vesper-thread-tools-${thread.id}`, CODEX_TOOL_CATALOG_VERSION); } catch {}
     setToolUpgradeNeeded(false);
     syncThreadModel(result);
     appliedDeveloperInstructions.current = developerInstructions;
@@ -4302,7 +4326,7 @@ function ConnectedChat({
     // Dynamic tools belong to thread/start and persisted rollout metadata.
     // thread/resume cannot replace them, even when it accepts unknown fields.
     let registeredVersion = "";
-    try { registeredVersion = window.localStorage.getItem(`vesper-thread-tools-${threadId.current}`) || ""; } catch {}
+    try { registeredVersion = browserStorage.getItem(`vesper-thread-tools-${threadId.current}`) || ""; } catch {}
     setToolUpgradeNeeded(registeredVersion !== CODEX_TOOL_CATALOG_VERSION);
     try {
       const resumed = await resumeCodexThread(sendRpc, threadId.current!, developerInstructions);
@@ -4446,7 +4470,7 @@ function ConnectedChat({
     }
     const tombstone = { messageId: item.id, itemId: item.metadata?.itemId || null, threadId: item.metadata?.threadId || threadId.current || null, deletedAt: new Date().toISOString() };
     tombstonesRef.current = [...tombstonesRef.current.filter((entry) => entry.messageId !== tombstone.messageId && (!tombstone.itemId || entry.itemId !== tombstone.itemId)), tombstone];
-    window.localStorage.setItem(`vesper-codex-tombstones-${conversationId}`, JSON.stringify(tombstonesRef.current));
+    browserStorage.setItem(`vesper-codex-tombstones-${conversationId}`, JSON.stringify(tombstonesRef.current));
     save(messagesRef.current.filter((message) => !messageWasDeleted(message, tombstonesRef.current)));
     setFavorites((current) => current.filter((favorite) => favorite.messageId !== item.id));
   };
@@ -4627,7 +4651,7 @@ function ConnectedChat({
         if (cancelled) return;
         tombstonesRef.current = [...(payload.tombstones || []), ...readLocalValue<CodexMessageTombstone[]>(`vesper-codex-tombstones-${conversationId}`, [])]
           .filter((item, index, all) => all.findIndex((candidate) => candidate.messageId === item.messageId && candidate.itemId === item.itemId) === index);
-        window.localStorage.setItem(`vesper-codex-tombstones-${conversationId}`, JSON.stringify(tombstonesRef.current));
+        browserStorage.setItem(`vesper-codex-tombstones-${conversationId}`, JSON.stringify(tombstonesRef.current));
         const rawRemote = payload.messages || [];
         // Versions that used a faux input item may already have copied that
         // item into the VPS history through a legacy migration. Remove only
@@ -5778,10 +5802,10 @@ function CodexConnectionModal({ onClose }: { onClose: () => void }) {
   const save = async () => {
     setBusy(true);
     const cleanEndpoint = endpoint.trim().replace(/\/$/, "");
-    window.localStorage.setItem("vesper-codex-endpoint", cleanEndpoint);
+    browserStorage.setItem("vesper-codex-endpoint", cleanEndpoint);
     try { workspaceOptions(workspace); } catch (e) { setMessage(e instanceof Error ? e.message : 'Invalid workspace'); setBusy(false); return; }
-    window.localStorage.setItem('vesper-codex-workspace', JSON.stringify(workspace.trim()));
-    if (token.trim()) window.localStorage.setItem("vesper-device-token", token.trim());
+    browserStorage.setItem('vesper-codex-workspace', JSON.stringify(workspace.trim()));
+    if (token.trim()) browserStorage.setItem("vesper-device-token", token.trim());
     try {
       if (/^wss?:\/\//i.test(cleanEndpoint)) {
         await new Promise<void>((resolve, reject) => {
@@ -5897,7 +5921,7 @@ function AiConnectionModal({ onClose }: { onClose: () => void }) {
     const next = { ...stored, [active]: form, active };
     setStored(next);
     if (active === "cyberboss" && form.deviceToken)
-      window.localStorage.setItem("vesper-device-token", form.deviceToken.trim());
+      browserStorage.setItem("vesper-device-token", form.deviceToken.trim());
     try {
       if (active === "api") {
         if (!form.baseUrl || !form.apiKey || !form.model)
@@ -6028,7 +6052,7 @@ function CyberbossConnectionModal({
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
-      window.localStorage.setItem("vesper-device-token", value);
+      browserStorage.setItem("vesper-device-token", value);
       onPaired(true);
       setMessage("Device paired. It will connect when CyberBoss starts.");
     } catch {
@@ -6038,7 +6062,7 @@ function CyberbossConnectionModal({
     }
   };
   const remove = () => {
-    window.localStorage.removeItem("vesper-device-token");
+    browserStorage.removeItem("vesper-device-token");
     setToken("");
     onPaired(false);
     setMessage("Pairing information removed from this device");
@@ -6266,10 +6290,10 @@ function SettingRow({
 
 async function exportVesperData() {
   const local = Object.fromEntries(
-    Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
+    browserStorage.keys()
       .filter((key): key is string => Boolean(key?.startsWith("vesper-")))
       .map((key) => {
-        const raw = window.localStorage.getItem(key) || "";
+        const raw = browserStorage.getItem(key) || "";
         try { return [key, JSON.parse(raw)]; } catch { return [key, raw]; }
       }),
   );

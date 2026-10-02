@@ -22,7 +22,7 @@ jobs:
       - run: npm run test:desire
       - run: npm run test:codex
       - run: node tools/test-reconcile.mjs
-      - run: node --test tests/service-worker.test.mjs
+      - run: node --test tests/service-worker.test.mjs tests/browser-storage.test.mjs
       - name: VPS isolated regression tests
         run: |
           for test in vps/test_*.py; do

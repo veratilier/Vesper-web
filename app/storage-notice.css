@@ -1,0 +1,15 @@
+.storage-notice {
+  position: fixed;
+  z-index: 10000;
+  inset: auto 1rem calc(env(safe-area-inset-bottom, 0px) + 6rem);
+  max-width: 40rem;
+  margin-inline: auto;
+  padding: .85rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  color: #482f13;
+  background: #fff4db;
+  box-shadow: 0 4px 20px #0002;
+  font: inherit;
+  font-size: .875rem;
+}
