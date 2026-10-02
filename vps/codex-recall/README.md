@@ -8,7 +8,7 @@ The patch changes two Rust files, not the provider/authentication implementation
 - New input replaces the whole map, including empty maps. Other namespaces keep upstream behavior.
 - Generated assistant text is still ordinary chat history. This does not erase facts mentioned in actual replies.
 
-The GitHub workflow builds a standalone `codex-app-server` on Ubuntu 22.04. Its artifact contains the upstream commit, Vesper build commit, patch, lock diff and hashes. `check-lock.py` permits only workspace version updates from the upstream release tag; it refuses registry/git dependency changes.
+The GitHub workflow builds `codex-app-server` and its required sibling `codex-code-mode-host` from the same pinned source on Ubuntu 22.04. Deploy both executables together in the same directory; the app-server resolves the helper relative to its own executable. Its artifact contains the upstream commit, Vesper build commit, patch, lock diff and hashes for both binaries. `check-lock.py` permits only workspace version updates from the upstream release tag; it refuses registry/git dependency changes.
 
 Before changing the existing service, run the acceptance script on the exact artifact:
 
@@ -16,7 +16,7 @@ Before changing the existing service, run the acceptance script on the exact art
 python3 acceptance.py --command /absolute/path/codex-app-server
 ```
 
-It must exit zero. It uses a temporary CODEX_HOME and localhost fake provider, with no production credentials. It captures outgoing fixture payloads, tests replacement/clear/Unicode/repeat/tool continuation/compaction/fork/restart, and checks rollout files. It emits only fixture counts, not payload bodies. `--observe --command /usr/bin/codex app-server` records the stock binary baseline without failing on its known retention behavior.
+It must exit zero. It uses a temporary CODEX_HOME and localhost fake provider, with no production credentials. It captures outgoing fixture payloads, tests replacement/clear/Unicode/repeat/tool continuation/compaction/fork/restart, and checks rollout files. A separate Code Mode call must execute JavaScript through the real helper, invoke the no-op dynamic tool, and return its result; receiving a final text reply or checking `--help` is insufficient. The workflow runs this acceptance against the packaged binaries before uploading an artifact. It emits only fixture counts, not payload bodies. `--observe --command /usr/bin/codex app-server` records the stock binary baseline without failing on its known retention behavior.
 
 Deploy only the existing `codex-app-server` service launcher to the versioned artifact. Preserve its arguments and token file. Keep the original launcher for rollback. Do not alter `/usr/bin/codex`, terminal/wake executables, chat databases, or schedules. Verify the process executable hash and authenticated live service before setting the existing Worker variable `VESPER_MEMORY_CONTEXT_TRANSPORT=request-scoped-v2`.
 
