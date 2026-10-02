@@ -1,6 +1,6 @@
 import * as z from 'zod/v4';
 import type { D1Database } from '@cloudflare/workers-types';
-import { getMemory, kinds, listMemories, MemoryError, saveMemory, searchMemory } from './shared-memory-engine';
+import { getMemory, kinds, listMemories, MemoryError, saveMemory, searchMemory, withdrawMemory } from './shared-memory-engine';
 
 type Dependencies = {
   authorize: (request: Request) => Promise<boolean>;
@@ -42,6 +42,8 @@ export async function sharedMemoryRequest(request: Request, dependencies: Depend
     const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (target.pathname === '/api/search') return json(await searchMemory({ DB: db }, body));
     if (target.pathname === '/api/memories') return json(await saveMemory(db, body), 201);
+    const withdrawal = target.pathname.match(/^\/api\/memories\/([a-f0-9-]+)\/withdraw$/i);
+    if (withdrawal) return json(await withdrawMemory(db,z.uuid().parse(withdrawal[1]),z.object({reason:z.string()}).parse(body).reason));
     const correction = target.pathname.match(/^\/api\/memories\/([a-f0-9-]+)\/correct$/i);
     if (correction) {
       const fields = z.record(z.string(), z.unknown()).parse(body);

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { sharedMemoryRequest } from '../lib/shared-memory-handler';
 
 const sqlite = new DatabaseSync(':memory:');
-sqlite.exec(readFileSync(new URL('./fixtures/shared-memory-schema.sql', import.meta.url), 'utf8'));
+sqlite.exec(readFileSync('tools/fixtures/shared-memory-schema.sql', 'utf8'));
 const db = {
  prepare(sql: string) {
   const statement = sqlite.prepare(sql); let args: any[] = [];

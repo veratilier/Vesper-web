@@ -126,7 +126,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   }
   if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
     if (!memoryScope) throw new Error("Memory scope is unavailable");
-    return sharedMemoryTool(name, input, context);
+    return sharedMemoryTool(name, input, context, memoryScope);
   }
   if (name === 'bookmark_create' || name === 'bookmark_list') {
     if (!memoryScope) throw new Error('Account context required');

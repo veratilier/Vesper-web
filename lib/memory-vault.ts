@@ -54,3 +54,16 @@ export async function evidenceIdsForMessages(scope: MemoryScope, conversationId:
     .bind(scope.userId, scope.characterId, conversationId, ...unique).all<{ id: string }>();
   return rows.results.map(row => row.id);
 }
+
+// Exact quotation checks for shared-memory writes and historical backfill.
+export async function verifySharedEvidence(scope: MemoryScope, references: {conversation_id:string;message_id:string;quote:string}[]) {
+  await ready();
+  return Promise.all(references.map(async ref => {
+    const rows = await getDb().prepare(`SELECT content,created_at FROM vesper_memory_evidence
+      WHERE user_id=? AND character_id=? AND conversation_id=? AND message_id=? ORDER BY recorded_at`)
+      .bind(scope.userId,scope.characterId,ref.conversation_id,ref.message_id).all<{content:string;created_at:string}>();
+    const original=rows.results.find(row=>row.content.includes(ref.quote));
+    if(!original)throw new Error('引用未在原始聊天中找到；请先查找原始消息，不能编造或把摘要当原话。');
+    return {...ref,created_at:original.created_at};
+  }));
+}

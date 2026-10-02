@@ -23,3 +23,8 @@ await vault.linkEvidence(owner,'memory',[id]);assert.equal((await vault.evidence
 assert.equal((await vault.evidenceIdsForMessages(owner,'chat',['m1'])).length,2);
 assert.deepEqual(await vault.evidenceIdsForMessages(owner,'wrong',['m1']),[]);
 console.log('Evidence immutability, idempotency, source links and owner isolation passed');
+
+assert.equal((await vault.verifySharedEvidence(owner,[{conversation_id:'chat',message_id:'m1',quote:'exact\n original'}]))[0].created_at,original.createdAt);
+await assert.rejects(vault.verifySharedEvidence(owner,[{conversation_id:'chat',message_id:'m1',quote:'invented quote'}]),/引用未在原始聊天/);
+await assert.rejects(vault.verifySharedEvidence(other,[{conversation_id:'chat',message_id:'m1',quote:'exact'}]),/引用未在原始聊天/);
+console.log('Shared memory quote validation and cross-owner rejection passed');
