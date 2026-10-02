@@ -1,4 +1,5 @@
 import { initializeWebMusicQueue, WEB_MUSIC } from "@/lib/web-music";
+import { cleanMusicDocument } from '@/lib/music-data';
 import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
 import { corsHeaders, optionsResponse } from "@/lib/cors";
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
   if (key) {
     if (!allowedDocumentKeys.has(key))
       return json(request, { error: "Unknown document" }, 400);
-    if (key === WEB_MUSIC.queue) await initializeWebMusicQueue(getDb());
+    if (key === WEB_MUSIC.queue || key === WEB_MUSIC.library) await initializeWebMusicQueue(getDb(), key);
     const row = await getDb()
       .prepare("SELECT value, updated_at FROM vesper_documents WHERE key = ?")
       .bind(key)
@@ -61,7 +62,7 @@ export async function PUT(request: Request) {
     VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
-    .bind(body.key, JSON.stringify(body.value), updatedAt)
+    .bind(body.key, JSON.stringify(cleanMusicDocument(body.key, body.value)), updatedAt)
     .run();
   return json(request, { ok: true, updatedAt });
 }

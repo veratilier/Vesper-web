@@ -1,4 +1,5 @@
 import { WEB_MUSIC, neteaseTrackId, initializeWebMusicQueue } from "./web-music";
+import { cleanMusicDocument } from '@/lib/music-data';
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
@@ -46,6 +47,7 @@ async function readDocument(key: string): Promise<unknown> {
 }
 
 async function writeDocument(key: string, value: unknown) {
+  value = cleanMusicDocument(key, value);
   if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
   await getDb().prepare(`INSERT INTO vesper_documents(key,value,updated_at) VALUES(?,?,?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
@@ -60,8 +62,8 @@ async function readMusicTracks(key: string) {
 function findMusicTrack(tracks: MusicTrack[], trackId: string) {
   return tracks.find((track) => track.id === trackId || track.neteaseId === trackId || track.appleMusicId === trackId);
 }
-async function readMusicLibrary(queueKey = "musicQueue") {
-  const [library, queue] = await Promise.all([readMusicTracks("music"), readMusicTracks(queueKey)]);
+async function readMusicLibrary(queueKey = "musicQueue", libraryKey = "music") {
+  const [library, queue] = await Promise.all([readMusicTracks(libraryKey), readMusicTracks(queueKey)]);
   const seen = new Set<string>();
   return [...library, ...queue].filter((track) => {
     const stableId = track.neteaseId ? `netease:${track.neteaseId}` : `id:${track.id}`;
@@ -70,23 +72,23 @@ async function readMusicLibrary(queueKey = "musicQueue") {
     return true;
   });
 }
-async function mergeMusicLibrary(incoming: MusicTrack[]) {
-  const library = await readMusicTracks("music");
+async function mergeMusicLibrary(incoming: MusicTrack[], libraryKey = "music") {
+  const library = await readMusicTracks(libraryKey);
   const merged = [...library];
   for (const track of incoming) {
     const index = merged.findIndex((item) => item.id === track.id || (item.neteaseId && item.neteaseId === track.neteaseId));
     if (index >= 0) merged[index] = { ...merged[index], ...track };
     else merged.push(track);
   }
-  await writeDocument("music", merged);
+  await writeDocument(libraryKey, merged);
   return incoming;
 }
 function publicTrack(track?: MusicTrack) {
   if (!track) return null;
   return { trackId: track.id, title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: Boolean(track.appleMusicId || (track.url && track.playable !== false)), source: track.appleMusicId ? "appleMusic" : track.neteaseId ? "netease" : "vesper", appleMusicId: track.appleMusicId || "", appleMusicURL: track.appleMusicURL || "" };
 }
-async function readMusicStatus(keys = { queue: "musicQueue", playback: "musicPlayback" }) {
-  const [library, queue, playbackValue] = await Promise.all([readMusicLibrary(keys.queue), readMusicTracks(keys.queue), readDocument(keys.playback)]);
+async function readMusicStatus(keys = { library: "music", queue: "musicQueue", playback: "musicPlayback" }) {
+  const [library, queue, playbackValue] = await Promise.all([readMusicLibrary(keys.queue, keys.library), readMusicTracks(keys.queue), readDocument(keys.playback)]);
   const playback = playbackValue && typeof playbackValue === "object" && !Array.isArray(playbackValue) ? playbackValue as MusicPlayback : {};
   const current = playback.trackId ? findMusicTrack(queue, playback.trackId) || findMusicTrack(library, playback.trackId) : undefined;
   return {
@@ -246,14 +248,14 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     }
     throw new Error(`Unsupported write kind: ${kind}`);
   }
-  const musicKeys = context.musicSurface === "web" ? WEB_MUSIC : { queue: "musicQueue", control: "musicControl", playback: "musicPlayback" };
+  const musicKeys = context.musicSurface === "web" ? WEB_MUSIC : { library: "music", queue: "musicQueue", control: "musicControl", playback: "musicPlayback" };
   if (context.musicSurface === "web" && ["music_get_status", "music_play", "music_control", "music_queue_add"].includes(name)) await initializeWebMusicQueue(getDb());
   if (name === "music_get_status") return await readMusicStatus(musicKeys);
   if (name === "music_search") {
     const query = String(input.query || "").trim().toLowerCase();
     const limit = Math.min(20, Math.max(1, Number(input.limit || 8)));
     if (!query) return { matches: [] };
-    const local = (await readMusicLibrary(musicKeys.queue)).filter(track => track.appleMusicId && JSON.stringify(track).toLowerCase().includes(query));
+    const local = (await readMusicLibrary(musicKeys.queue, musicKeys.library)).filter(track => track.appleMusicId && JSON.stringify(track).toLowerCase().includes(query));
     let catalog: MusicTrack[] = [];
     try { catalog = await searchAppleMusic(query, limit, appleSearchTransport((env as { VESPER_APP_TOKEN?: string }).VESPER_APP_TOKEN || '')); }
     catch (error) { if (!local.length) throw error; }
@@ -266,7 +268,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   }
   if (name === "music_play") {
     const trackId = String(input.trackId || "");
-    const tracks = await readMusicLibrary(musicKeys.queue);
+    const tracks = await readMusicLibrary(musicKeys.queue, musicKeys.library);
     const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 使用独立的网易云队列，请在 My Music 选择网易云歌曲；原生 App 队列未改变。");
@@ -291,7 +293,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_queue_add") {
     const trackId = String(input.trackId || "");
     const position = input.position === "next" ? "next" : "end";
-    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 队列只接受网易云歌曲，原生 App 队列未改变。");
     const queue = await readMusicTracks(musicKeys.queue);
@@ -304,18 +306,19 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_send_card") {
     const trackId = String(input.trackId || "");
     if (trackId.startsWith("netease-")) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
-    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (!isAppleMusicTrack(track)) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
     return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId, appleMusicURL: track.appleMusicURL || '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: true, source: "appleMusic", message: typeof input.message === "string" ? input.message : "" } };
   }
   if (name === "music_playlist_add") {
     const trackId = String(input.trackId || "");
-    const tracks = await readMusicLibrary(musicKeys.queue);
+    const tracks = await readMusicLibrary(musicKeys.queue, musicKeys.library);
     const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     const already = Boolean(findMusicTrack(tracks, track.id));
-    if (!already) await mergeMusicLibrary([track]);
+    if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 曲库只接受网易云歌曲。");
+    if (!already) await mergeMusicLibrary([track], musicKeys.library);
     return { ok: true, alreadyInPlaylist: already, trackId: track.id, playlist: "Vesper music" };
   }
   if (name === "sticker_search") {

@@ -28,8 +28,9 @@ try {
   const apple={id:'apple-99',appleMusicId:'99',title:'Native song',artist:'Artist',playable:true};
   const net={id:'netease-123',neteaseId:'123',title:'Web song',artist:'Artist',url:'',playable:false};
   const net2={...net,id:'netease-456',neteaseId:'456',title:'Second song'};
-  await put('musicQueue',[apple,net]);
-  await put('music',[apple,net,net2]);
+  sqlite.prepare('INSERT INTO vesper_documents VALUES(?,?,?)').run('musicQueue',JSON.stringify([apple,net]),'legacy-fixture');
+  await put('music',[apple]);
+  await put('webMusic',[net,net2]);
   const original=sqlite.prepare('SELECT * FROM vesper_documents WHERE key=?').get('musicQueue');
   assert.deepEqual((await get('webMusicQueue')).value,[net]);
   assert.deepEqual(sqlite.prepare('SELECT * FROM vesper_documents WHERE key=?').get('musicQueue'),original);

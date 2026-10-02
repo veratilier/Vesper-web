@@ -782,7 +782,7 @@ function HomeContent() {
   const [audioRunning, setAudioRunning] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
-  const [tracks, setTracks] = usePersistentDocument<Track[]>("music", []);
+  const [tracks, setTracks] = usePersistentDocument<Track[]>(WEB_MUSIC.library, []);
   const [queue, setQueue] = usePersistentDocument<Track[]>(WEB_MUSIC.queue, []);
   const avatarInput = useRef<HTMLInputElement>(null);
   const agentAvatarInput = useRef<HTMLInputElement>(null);
@@ -919,11 +919,11 @@ function HomeContent() {
   }, [savedMusicCookie, setTracks, tracks]);
   useEffect(() => {
     const refreshLibrary = () => {
-      void fetch(apiUrl("/api/state?key=music"), { cache: "no-store", headers: appHeaders() })
+      void fetch(apiUrl(`/api/state?key=${WEB_MUSIC.library}`), { cache: "no-store", headers: appHeaders() })
         .then((response) => response.ok ? response.json() as Promise<{ value?: Track[] | null }> : Promise.reject())
         .then((result: { value?: Track[] | null }) => {
           if (!Array.isArray(result.value)) return;
-          window.dispatchEvent(new CustomEvent("vesper-document-change", { detail: { key: "music", value: result.value } }));
+          window.dispatchEvent(new CustomEvent("vesper-document-change", { detail: { key: WEB_MUSIC.library, value: result.value } }));
         })
         .catch(() => {});
     };
