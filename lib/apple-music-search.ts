@@ -38,3 +38,7 @@ export async function lookupAppleMusic(id: string, request: typeof fetch = fetch
   }
   return null;
 }
+
+export function isAppleMusicTrack(track: { id: string; appleMusicId?: string; neteaseId?: string; source?: string }) {
+  return Boolean(track.appleMusicId?.trim()) && !track.neteaseId && track.source !== 'netease' && !track.id.startsWith('netease-');
+}
