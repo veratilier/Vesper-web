@@ -39,7 +39,13 @@ jobs:
           CARGO_PROFILE_RELEASE_STRIP: symbols
           CARGO_BUILD_JOBS: '3'
           RUSTFLAGS: '-C link-arg=-fuse-ld=lld'
-        run: cargo build --locked --release --bin codex-app-server
+        run: |
+          # The upstream release tag bumps workspace package versions without
+          # refreshing their lock entries. Keep all registry/git resolutions.
+          cargo update --workspace
+          git diff -- Cargo.lock > ../release-lock.diff
+          python3 ../vesper/vps/codex-recall/check-lock.py Cargo.lock
+          cargo build --locked --release --bin codex-app-server
       - name: Package verifiable runtime
         run: |
           mkdir -p release
@@ -47,6 +53,7 @@ jobs:
           git rev-parse HEAD > release/upstream-commit.txt
           git -C vesper rev-parse HEAD > release/vesper-commit.txt
           cp vesper/vps/codex-recall/request-scoped.patch release/
+          cp release-lock.diff release/
           cd release
           sha256sum codex-app-server request-scoped.patch > SHA256SUMS
       - uses: actions/upload-artifact@v4
