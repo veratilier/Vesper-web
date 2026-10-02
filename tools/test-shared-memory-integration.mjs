@@ -50,6 +50,8 @@ try {
   const batch=await (await routes.context.POST(request('/api/memory/context',{query:'unrelated',conversationId:'fixture',messageId:'user-1'}))).json();
   assert.equal(Object.keys(batch.additionalContext).sort().map(key=>batch.additionalContext[key].value).join(''),batch.context);
   assert.equal(batch.memories[0].id,saved.memory.id,'standing preference appears without a lexical hit');
+  assert.deepEqual(JSON.parse(batch.context.slice(batch.context.indexOf('\n')+1)),batch.memories);
+  assert.ok(batch.context.length<=4000 && Buffer.byteLength(batch.context,'utf8')<=6000);
   assert.equal((await (await routes.context.GET(request('/api/memory/context'))).json()).items.length,0);
   assert.equal((await routes.context.POST(request('/api/memory/context',{action:'acknowledge',deliveryId:batch.deliveryId,conversationId:'fixture',messageId:'user-1',turnId:'turn-1'}))).status,200);
   const delivered=await (await routes.context.GET(request('/api/memory/context?conversationId=fixture'))).json();
@@ -58,8 +60,11 @@ try {
   const afterReview=await (await routes.tools.POST(request('/api/codex/tools',{name:'recall_vesper_memory',arguments:{query:'nebula'}}))).json();
   assert.equal(afterReview.result.memories.length,0,'pending corrections also disappear from active tool retrieval');
   delete globalThis.__sharedFixture.VESPER_MEMORY_CONTEXT_TRANSPORT;
+  const beforeGate=ledgerSqlite.prepare('SELECT COUNT(*) AS n FROM memory_recall_deliveries').get().n;
   const gated=await (await routes.context.POST(request('/api/memory/context',{query:'tea',conversationId:'fixture',messageId:'unverified'}))).json();
   assert.equal(gated.status,'host_not_verified');assert.equal(gated.deliveryId,null);
+  assert.equal(gated.context,'');assert.deepEqual(gated.memories,[]);assert.equal(gated.additionalContext,undefined);
+  assert.equal(ledgerSqlite.prepare('SELECT COUNT(*) AS n FROM memory_recall_deliveries').get().n,beforeGate,'disabled transport must not prepare an injection');
   ledgerSqlite.close();
   delete globalThis.__sharedFixture.SHARED_MEMORY_DB;
   assert.equal((await routes.tools.POST(request('/api/codex/tools', { name: 'remember_vesper_memory', arguments: { body: 'must not fall back' } }))).status, 400);

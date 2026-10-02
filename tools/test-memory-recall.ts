@@ -43,3 +43,66 @@ const longContext='茶与星河 🌙'.repeat(3000);const fragments=memoryAdditio
 assert.equal(Object.keys(fragments).sort().map(k=>fragments[k].value).join(''),longContext);
 assert.ok(Object.values(fragments).every(part=>Buffer.byteLength(part.value,'utf8')<=768));
 console.log('PASS lossless bounded host fragments; disabled until deployed schema is verified');
+
+// Compact payload acceptance: only fictitious records in isolated databases.
+const compactDb=database(),compactLedger=database();
+compactDb.sqlite.exec(readFileSync('tools/fixtures/shared-memory-schema.sql','utf8'));
+const addCompact=(body:string,kind='episode',extra={})=>saveMemory(compactDb.db,{body,kind,source:'fictional compact fixture',...extra});
+const shortPreference=await addCompact('  不使用 emoji；\n除非我主动要求。  ','preference');
+const longPreference=await addCompact('完整偏好及条件。'.repeat(80)+'例外：我主动要求时可以。','agreement',{details:{summary:'默认不使用表情；用户主动要求时可以。'}});
+const unsafePreference=await addCompact('一段复杂约定。'.repeat(100)+'但只在用户同意时适用。','agreement');
+for(let index=0;index<4;index++)await addCompact(`星港共同经历 ${index}。`+'原文不应自动注入。'.repeat(300),'episode',{
+ occurred_at:index===0?null:'2026-10-01T20:00:00+08:00',source_url:`https://example.test/events/${index}`,
+ details:{summary:`星港：虚构旧事 ${index} 的简短摘要。`,evidence:Array.from({length:3},(_,n)=>({
+  conversation_id:'fictional-room',message_id:`fixture-${index}-${n}`,quote:'原话引用不应自动注入。'.repeat(100),created_at:null
+ }))}
+});
+const compact=await prepareRecall(compactDb.db,compactLedger.db,{query:'星港',conversationId:'compact',messageId:'compact-1'});
+const {RECALL_BYTE_BUDGET,RECALL_EPISODE_LIMIT}=await import('../lib/shared-memory-recall');
+function exactCompact(batch:typeof compact){
+ assert.ok(batch.context.length<=RECALL_CHAR_BUDGET);
+ assert.ok(Buffer.byteLength(batch.context,'utf8')<=RECALL_BYTE_BUDGET);
+ assert.deepEqual(JSON.parse(batch.context.slice(batch.context.indexOf('\n')+1)),batch.memories,'ledger has exactly injected objects, not full originals');
+ const parts=memoryAdditionalContext(batch.context);
+ assert.equal(Object.keys(parts).sort().map(key=>parts[key].value).join(''),batch.context);
+}
+exactCompact(compact);
+assert.equal(compact.memories.filter(m=>m.reason==='related_history').length,RECALL_EPISODE_LIMIT);
+assert.equal(compact.memories.find(m=>m.id===shortPreference.id)?.body,'不使用 emoji； 除非我主动要求。');
+assert.equal(compact.memories.find(m=>m.id===longPreference.id)?.body_format,'summary');
+assert.ok(!compact.memories.some(m=>m.id===unsafePreference.id),'do not cut off preference conditions');
+assert.ok('warnings' in compact && compact.warnings.includes('standing_preferences_omitted_for_compact_budget'));
+assert.ok(!compact.context.includes('原文不应自动注入'));
+assert.ok(!compact.context.includes('原话引用不应自动注入'));
+for(const item of compact.memories.filter(m=>m.reason==='related_history')){
+ assert.ok(item.body.length<=240);assert.equal(item.body_format,'summary');
+ assert.equal(item.details?.evidence.length,2);assert.ok(item.source_url);
+ assert.ok(item.id&&item.root_id&&item.kind&&item.recorded_at);
+ assert.equal(Object.hasOwn(item.details!.evidence[0],'quote'),false);
+ const original=await getMemory(compactDb.db,item.id);
+ assert.equal(item.occurred_at,original.occurred_at);
+ assert.ok(original.body.includes('原文不应自动注入'));
+ assert.equal(original.details.evidence.length,3,'full references remain retrievable by ID');
+}
+await acknowledgeRecall(compactLedger.db,{deliveryId:compact.deliveryId,conversationId:'compact',messageId:'compact-1',turnId:'compact-turn'});
+const stored=(await recentRecall(compactLedger.db)).items[0];
+assert.equal(stored.context,compact.context);assert.deepEqual(stored.memories,compact.memories);
+const retry=await prepareRecall(compactDb.db,compactLedger.db,{query:'别的话题',conversationId:'compact',messageId:'compact-1'});
+assert.equal(retry.deliveryId,compact.deliveryId);assert.equal(retry.context,compact.context);
+// Metadata also consumes the budget; never truncate a source URL to squeeze it in.
+const oversize=await addCompact('星港巨长来源','episode',{source_url:'https://example.test/'+ 'x'.repeat(7000)});
+for(let i=0;i<15;i++)await addCompact(`有效偏好 ${i}：`+'请保留条件。'.repeat(15),'preference');
+const crowded=await prepareRecall(compactDb.db,compactLedger.db,{query:'星港',conversationId:'crowded',messageId:'crowded-1'});
+exactCompact(crowded);assert.ok('warnings' in crowded && crowded.warnings.length);
+assert.ok(!crowded.memories.some(m=>m.id===oversize.id));
+assert.equal(crowded.memories.filter(m=>m.reason==='related_history').length,2,'standing budget reserves room for related episodes');
+// Missing summaries fall back to explicitly labelled bounded excerpts, not invented summaries.
+const excerptDb=database(),excerptLedger=database();excerptDb.sqlite.exec(readFileSync('tools/fixtures/shared-memory-schema.sql','utf8'));
+const excerptOriginal='星港'+ '🌙'.repeat(200)+'末尾';
+await saveMemory(excerptDb.db,{body:excerptOriginal,kind:'episode',source:'fictional excerpt'});
+const clipped=await prepareRecall(excerptDb.db,excerptLedger.db,{query:'星港',conversationId:'excerpt',messageId:'excerpt-1'});
+exactCompact(clipped);assert.equal(clipped.memories[0].body_format,'excerpt');
+assert.equal(clipped.memories[0].occurred_at,null);assert.ok(clipped.memories[0].body.length<=240);
+assert.ok(excerptOriginal.startsWith(clipped.memories[0].body.slice(0,-1)));assert.ok(clipped.memories[0].body.endsWith('…'));
+assert.ok(!clipped.context.includes('\ufffd'));
+console.log(`PASS compact recall: <=${RECALL_CHAR_BUDGET} chars / ${RECALL_BYTE_BUDGET} UTF-8 bytes, 2 episodes, exact ledger/transport, safe preferences, original retrieval, Unicode excerpts, crowded budgets`);
