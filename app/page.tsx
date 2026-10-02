@@ -1,5 +1,7 @@
 "use client";
 import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/desire/routing.js";
+import { WEB_MUSIC, neteaseTrackId, webQueue } from "@/lib/web-music";
+import { resolveWebMusic } from "@/lib/web-music-playback";
 import { browserStorage } from "@/lib/browser-storage";
 import "./storage-notice.css";
 import { Capacitor } from "@capacitor/core";
@@ -583,6 +585,7 @@ type MusicTogetherState = {
 };
 type PlayerSnapshot = {
   playing: boolean;
+  loading: boolean;
   currentTime: number;
   duration: number;
   trackId?: string;
@@ -776,10 +779,11 @@ function HomeContent() {
   const [customBackground, setCustomBackground] = useState(initialAppearance.background || DEFAULT_APP_BACKGROUND);
   const [trackIndex, setTrackIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [audioRunning, setAudioRunning] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [tracks, setTracks] = usePersistentDocument<Track[]>("music", []);
-  const [queue, setQueue] = usePersistentDocument<Track[]>("musicQueue", []);
+  const [queue, setQueue] = usePersistentDocument<Track[]>(WEB_MUSIC.queue, []);
   const avatarInput = useRef<HTMLInputElement>(null);
   const agentAvatarInput = useRef<HTMLInputElement>(null);
   const profileWriteQueue = useRef(Promise.resolve());
@@ -815,9 +819,9 @@ function HomeContent() {
     catch { window.alert("The avatar could not be saved. Check the connection and try again."); }
   };
   const [favorites, setFavorites] = usePersistentDocument<FavoriteItem[]>("favorites", []);
-  const [musicControl, setMusicControl] = usePersistentDocument<MusicControl | null>("musicControl", null);
-  const [, setMusicPlayback] = usePersistentDocument<MusicPlaybackState>("musicPlayback", {});
-  const [musicResume, setMusicResume] = useLocalDocument<MusicResumeState>("music-resume", {});
+  const [musicControl, setMusicControl] = usePersistentDocument<MusicControl | null>(WEB_MUSIC.control, null);
+  const [, setMusicPlayback] = usePersistentDocument<MusicPlaybackState>(WEB_MUSIC.playback, {});
+  const [musicResume, setMusicResume] = useLocalDocument<MusicResumeState>("web-music-resume", {});
   const [savedMusicCookie] = useLocalDocument("netease-music-u", "");
   const [musicTogether, setMusicTogether] = usePersistentDocument<MusicTogetherState>("musicTogether", {});
   const [playMode, setPlayMode] = useState<MusicPlayMode>(() => readLocalValue<MusicPlayMode>("vesper-music-play-mode", "order"));
@@ -831,18 +835,16 @@ function HomeContent() {
     usePersistentDocument<EnvironmentSnapshot>("environment", {
       permission: "unknown",
     });
-  const queueSeeded = readLocalValue<boolean>("vesper-music-queue-seeded", false);
-  // `music` is the full library. `musicQueue` is the selected playlist that is
-  // currently being listened to. A fresh PWA install has no local queue marker,
-  // but it can still receive a non-empty queue from D1; never fall back to the
-  // full library in that case.
-  const activeTracks = queue.length > 0 || queueSeeded ? queue : tracks;
+  const queueSeeded = readLocalValue<boolean>("vesper-web-music-queue-seeded", false);
+  // Never fall back to the shared/native queue or library, even when empty.
+  const activeTracks = webQueue(queue);
   const currentTrack = activeTracks[trackIndex];
   const showMusicToast = (message: string) => {
     setMusicToast(message);
     window.setTimeout(() => setMusicToast((current) => current === message ? "" : current), 1800);
   };
   const replaceMusicQueue = useCallback((nextQueue: Track[], options: MusicQueueUpdate = {}) => {
+    nextQueue = webQueue(nextQueue);
     const now = new Date().toISOString();
     const preferredTrackId = options.trackId;
     const retainedIndex = preferredTrackId
@@ -855,13 +857,13 @@ function HomeContent() {
     // Stamp the local revision before React's deferred persistence effect runs.
     // The queue poller uses this timestamp to reject an older server snapshot
     // while the selected playlist is being written to D1.
-    browserStorage.setItem("vesper-music-queue-seeded", "true");
-    browserStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: now, source: "local" }));
+    browserStorage.setItem("vesper-web-music-queue-seeded", "true");
+    browserStorage.setItem("vesper-document-meta-webMusicQueue", JSON.stringify({ updatedAt: now, source: "local" }));
     setQueue(nextQueue);
     setTrackIndex(nextIndex);
     if (options.autoplay) {
       const target = nextQueue[nextIndex];
-      if (target?.url && target.playable !== false) setPlaying(true);
+      if (target && neteaseTrackId(target)) setPlaying(true);
       else {
         setPlaying(false);
         const message = "No playable source is available for this song.";
@@ -878,11 +880,11 @@ function HomeContent() {
     void fetch(apiUrl("/api/state"), {
       method: "PUT",
       headers: appHeaders(true),
-      body: JSON.stringify({ key: "musicQueue", value: nextQueue }),
+      body: JSON.stringify({ key: WEB_MUSIC.queue, value: nextQueue }),
     }).then(async (response) => {
       if (!response.ok) return;
       const result = await response.json() as { updatedAt?: string };
-      browserStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: result.updatedAt || now, source: "local" }));
+      browserStorage.setItem("vesper-document-meta-webMusicQueue", JSON.stringify({ updatedAt: result.updatedAt || now, source: "local" }));
     }).catch(() => {});
   }, [currentTrack, setQueue]);
   useEffect(() => {
@@ -930,14 +932,14 @@ function HomeContent() {
   }, []);
   const playerAdapter: PlayerAdapter = {
     play: () => {
-      if (!currentTrack?.url || currentTrack.playable === false) return showMusicToast("No playable audio is available for this song.");
+      if (!currentTrack) return showMusicToast("请在 My Music 选择网易云歌曲。");
       setPlaying(true);
     },
     pause: () => setPlaying(false),
     toggle: () => {
       if (playing) setPlaying(false);
       else {
-        if (!currentTrack?.url || currentTrack.playable === false) return showMusicToast("No playable audio is available for this song.");
+        if (!currentTrack) return showMusicToast("请在 My Music 选择网易云歌曲。");
         setPlaying(true);
       }
     },
@@ -958,16 +960,17 @@ function HomeContent() {
     select: (index) => {
       const track = activeTracks[index];
       if (!track) return;
-      if (!track.url || track.playable === false) return showMusicToast("No playable audio is available for this song.");
+      if (!neteaseTrackId(track)) return showMusicToast("Web 使用网易云播放，请在 My Music 选择歌曲。");
       setTrackIndex(index);
       setPlaying(true);
     },
     getState: () => ({
-      playing,
+      playing: audioRunning,
+      loading: playing && !audioRunning,
       currentTime: playbackTime,
       duration: playbackDuration,
       trackId: currentTrack?.id,
-      canSeek: Boolean(currentTrack?.url && playbackDuration > 0),
+      canSeek: Boolean(playbackDuration > 0),
     }),
   };
   useEffect(() => {
@@ -1002,7 +1005,7 @@ function HomeContent() {
     const publish = () => {
       setMusicPlayback({
         trackId: currentTrack?.id,
-        playing,
+        playing: audioRunning,
         positionSeconds: Math.floor(playbackTimeRef.current),
         durationSeconds: Math.floor(playbackDuration),
         queueLength: activeTracks.length,
@@ -1013,7 +1016,7 @@ function HomeContent() {
     if (!playing) return;
     const timer = window.setInterval(publish, 10_000);
     return () => window.clearInterval(timer);
-  }, [activeTracks.length, currentTrack?.id, playbackDuration, playing, setMusicPlayback]);
+  }, [activeTracks.length, currentTrack?.id, playbackDuration, playing, audioRunning, setMusicPlayback]);
   const [wakeRequest, setWakeRequest] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1143,18 +1146,39 @@ function HomeContent() {
       returnToDesire();
     }
   }, []);
+  const preparedAudio = useRef<{ id: string; url: string; at: number } | null>(null);
   useEffect(() => {
     const audio = globalPlayer.current;
     if (!audio) return;
-    if (playing && currentTrack)
-      void audio.play().catch(() => setPlaying(false));
-    else audio.pause();
-  }, [playing, currentTrack]);
-  useEffect(() => {
-    if (queueSeeded || !tracks.length) return;
-    setQueue(tracks);
-    browserStorage.setItem("vesper-music-queue-seeded", "true");
-  }, [queueSeeded, tracks, setQueue]);
+    if (!playing || !currentTrack) { audio.pause(); return; }
+    let cancelled = false;
+    const start = async () => {
+      try {
+        let prepared = preparedAudio.current;
+        if (!prepared || prepared.id !== currentTrack.id || Date.now() - prepared.at > 240_000) {
+          setMusicToast("正在获取网易云音源…");
+          const url = await resolveWebMusic(currentTrack, payload => requestNeteaseLibrary(apiUrl("/api/music/library"), appHeaders(true), { ...payload, cookie: savedMusicCookie }));
+          if (cancelled) return;
+          prepared = { id: currentTrack.id, url, at: Date.now() };
+          preparedAudio.current = prepared;
+        }
+        if (cancelled) return;
+        if (audio.src !== prepared.url) { audio.src = prepared.url; audio.load(); }
+        await audio.play();
+        if (!cancelled) setMusicToast("");
+      } catch (error) {
+        if (cancelled) return;
+        setPlaying(false);
+        setMusicToast(error instanceof DOMException && error.name === "NotAllowedError"
+          ? "音源已准备好，请再点一次播放。"
+          : error instanceof Error ? error.message : "网易云音源加载失败，请重试。");
+      }
+    };
+    void start();
+    return () => { cancelled = true; audio.pause(); };
+    // Polling refreshes track objects; only a new song or play request restarts audio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, currentTrack?.id, savedMusicCookie]);
   useEffect(() => {
     if (trackIndex < activeTracks.length) return;
     const timer = window.setTimeout(() => {
@@ -1168,6 +1192,7 @@ function HomeContent() {
     if (!audio) return;
     audio.currentTime = 0;
     setPlaybackTime(0);
+    setPlaybackDuration(0);
   }, [currentTrack?.id]);
   useEffect(() => {
     if (!musicControl || musicControl.processedAt) return;
@@ -1182,7 +1207,7 @@ function HomeContent() {
         // newly-written queue has arrived, otherwise a fast poll could mark a
         // valid server command as processed before its track is visible.
         if (index < 0) return;
-        if (activeTracks[index].url) { setTrackIndex(index); setPlaying(true); }
+        if (neteaseTrackId(activeTracks[index])) { setTrackIndex(index); setPlaying(true); }
       }
       setMusicControl({ ...musicControl, processedAt: new Date().toISOString() });
     }, 0);
@@ -1191,22 +1216,22 @@ function HomeContent() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const response = await fetch(apiUrl("/api/state?key=musicControl"), { cache: "no-store", headers: appHeaders() });
+        const response = await fetch(apiUrl(`/api/state?key=${WEB_MUSIC.control}`), { cache: "no-store", headers: appHeaders() });
         if (!response.ok) return;
         const result = await response.json() as { value?: MusicControl | null };
         if (result.value?.id && result.value.id !== musicControl?.id) setMusicControl(result.value);
-        const queueResponse = await fetch(apiUrl("/api/state?key=musicQueue"), { cache: "no-store", headers: appHeaders() });
+        const queueResponse = await fetch(apiUrl(`/api/state?key=${WEB_MUSIC.queue}`), { cache: "no-store", headers: appHeaders() });
         if (queueResponse.ok) {
           const queueResult = await queueResponse.json() as { value?: Track[] | null; updatedAt?: string };
           if (Array.isArray(queueResult.value)) {
-            const localMeta = readLocalValue<{ updatedAt?: string }>("vesper-document-meta-musicQueue", {});
+            const localMeta = readLocalValue<{ updatedAt?: string }>("vesper-document-meta-webMusicQueue", {});
             const localUpdatedAt = localMeta.updatedAt ? Date.parse(localMeta.updatedAt) : 0;
             const remoteUpdatedAt = queueResult.updatedAt ? Date.parse(queueResult.updatedAt) : 0;
             // A playlist selection is written optimistically. Never let a stale
             // poll put the previous playlist (and its cover) back on screen.
             if (localUpdatedAt && remoteUpdatedAt && remoteUpdatedAt < localUpdatedAt) return;
-            browserStorage.setItem("vesper-music-queue-seeded", "true");
-            if (queueResult.updatedAt) browserStorage.setItem("vesper-document-meta-musicQueue", JSON.stringify({ updatedAt: queueResult.updatedAt, source: "remote" }));
+            browserStorage.setItem("vesper-web-music-queue-seeded", "true");
+            if (queueResult.updatedAt) browserStorage.setItem("vesper-document-meta-webMusicQueue", JSON.stringify({ updatedAt: queueResult.updatedAt, source: "remote" }));
             setQueue(queueResult.value);
           }
         }
@@ -1247,7 +1272,7 @@ function HomeContent() {
       const trackId = (event as CustomEvent<{ trackId?: string }>).detail?.trackId;
       const index = activeTracks.findIndex((track) => track.id === trackId || track.neteaseId === trackId);
       if (index < 0) return showToast("This song is not in the current queue.");
-      if (!activeTracks[index].url) return showToast("No playable source is available for this song.");
+      if (!neteaseTrackId(activeTracks[index])) return showToast("Web 使用网易云播放，请在 My Music 选择歌曲。");
       setTrackIndex(index); setPlaying(true);
     };
     const add = (event: Event) => {
@@ -1399,13 +1424,16 @@ function HomeContent() {
       <input ref={agentAvatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "agentAvatar"); e.target.value = ""; }} />
       <audio
         ref={globalPlayer}
-        src={currentTrack?.url}
+        onPlaying={() => setAudioRunning(true)}
+        onPause={() => setAudioRunning(false)}
+        onWaiting={() => setAudioRunning(false)}
         onTimeUpdate={(event) => setPlaybackTime(event.currentTarget.currentTime)}
         onLoadedMetadata={(event) => setPlaybackDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
         onError={() => {
           setPlaying(false);
           setPlaybackDuration(0);
-          showMusicToast("This audio cannot be played in the browser.");
+          preparedAudio.current = null;
+          setMusicToast("网易云音源加载失败或已过期，请再点播放以刷新音源。");
         }}
       />
       <section className="app-shell" style={{ "--theme-accent": accent } as CSSProperties}>
@@ -3881,7 +3909,7 @@ function ConnectedChat({
       method: "POST",
       headers: appHeaders(true),
       cache: "no-store",
-      body: JSON.stringify({ name, arguments: args, threadId: threadId.current, itemId, conversationId, turnId: activeTurnId.current }),
+      body: JSON.stringify({ name, arguments: args, threadId: threadId.current, itemId, conversationId, turnId: activeTurnId.current, musicSurface: "web" }),
     });
     const payload = await response.json().catch(() => ({})) as { result?: unknown; error?: string };
     if (!response.ok) throw new Error(payload.error || `Tool ${name} failed`);
@@ -6882,7 +6910,7 @@ function MusicPlayerUI({
   };
   return <div className="page-body listening-player" style={roomStyle}>
     <section className="listening-player-main">
-      <div className="listening-library-bar"><button onClick={() => setLibraryOpen(true)}><Icon name="library" /><span>My Music</span></button></div>
+      <div className="listening-library-bar"><button onClick={() => setLibraryOpen(true)}><Icon name="library" /><span>My Music · 网易云</span></button></div>
       <button className="listening-together" onClick={together.status === "connected" ? undefined : onInvite} aria-label={together.status === "connected" ? `${agentName} and ${userName} are listening together` : "Invite to listen together"}>
         <span className="listening-avatars"><AvatarMark src={userAvatar} label={userName} kind="user" /><i /><AvatarMark src={agentAvatar} label={agentName} kind="agent" /></span>
         <span>{togetherTimeLabel(together, totalTogetherSeconds)}</span>
@@ -6895,8 +6923,8 @@ function MusicPlayerUI({
         </section>
         <section className="listening-track-copy"><h2>{track.title}</h2><p>{track.artist || "Unknown artist"}{track.album ? ` · ${track.album}` : ""}</p></section>
         <section className="listening-progress" aria-label="Playback progress"><input aria-label="Playback progress" type="range" min="0" max={Math.max(state.duration, 1)} step="0.1" disabled={!canSeek} value={Math.min(displayedTime, Math.max(state.duration, 1))} onChange={(event) => setScrubValue(Number(event.target.value))} onPointerUp={commitSeek} onKeyUp={commitSeek} /><div><span>{canSeek ? formatPlaybackTime(displayedTime) : "--:--"}</span><span>{canSeek ? formatPlaybackTime(state.duration) : "--:--"}</span></div></section>
-        <section className="listening-controls"><button className="listening-mode" aria-label={modeLabels[playMode]} title={modeLabels[playMode]} onClick={onCycleMode}><Icon name={modeIcons[playMode]} /></button><button aria-label="Previous track" onClick={adapter.previous}><Icon name="back" /></button><button className="listening-play" aria-label={state.playing ? "Pause" : "Play"} onClick={adapter.toggle}><Icon name={state.playing ? "pause" : "play"} /></button><button aria-label="Next track" onClick={adapter.next}><Icon name="forward" /></button><button className="listening-queue-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}><Icon name="queue" /><em>{queue.length}</em></button></section>
-      </> : <section className="listening-empty"><Icon name="music" /><h2>No playback queue yet</h2><p>Connect NetEase in My Music, then select a playlist or search for songs.</p><button onClick={() => setLibraryOpen(true)}>Open My Music</button></section>}
+        <section className="listening-controls"><button className="listening-mode" aria-label={modeLabels[playMode]} title={modeLabels[playMode]} onClick={onCycleMode}><Icon name={modeIcons[playMode]} /></button><button aria-label="Previous track" onClick={adapter.previous}><Icon name="back" /></button><button className="listening-play" aria-label={state.loading ? "Cancel loading" : state.playing ? "Pause" : "Play"} onClick={adapter.toggle}><Icon name={state.playing || state.loading ? "pause" : "play"} /></button><button aria-label="Next track" onClick={adapter.next}><Icon name="forward" /></button><button className="listening-queue-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}><Icon name="queue" /><em>{queue.length}</em></button></section>
+      </> : <section className="listening-empty"><Icon name="music" /><h2>No playback queue yet</h2><p>Web 使用独立的网易云队列。请在 My Music 选择歌单或搜索歌曲；原生 App 的播放队列保持不变。</p><button onClick={() => setLibraryOpen(true)}>Open My Music</button></section>}
     </section>
     {toast && <div className="music-toast" role="status">{toast}</div>}
     {queueOpen && <div className="music-queue-layer"><button className="music-queue-scrim" aria-label="Close queue" onClick={() => setQueueOpen(false)} /><section className="music-queue-sheet" style={{ transform: `translateY(${queueDragY}px)` }}><div className="music-queue-drag-handle" onTouchStart={(event) => { queueDragStart.current = event.touches[0]?.clientY ?? null; }} onTouchMove={(event) => { const start = queueDragStart.current; const current = event.touches[0]?.clientY; if (start != null && current != null && current > start) setQueueDragY(Math.min(240, current - start)); }} onTouchEnd={() => { if (queueDragY > 88) setQueueOpen(false); setQueueDragY(0); queueDragStart.current = null; }} /><header><div><small>Now playing queue</small><h2>{queue.length}  songs</h2></div><div><button className="queue-sync-action" onClick={() => { setQueueOpen(false); setLibraryOpen(true); }}>My Music</button><button aria-label="Close queue" onClick={() => setQueueOpen(false)}><Icon name="close" /></button></div></header><div className="music-queue-list" ref={queueListRef}>{queue.length ? queue.map((item, index) => <article className={selected === index ? "active" : ""} key={item.id}><button className="music-queue-track" onClick={() => { adapter.select(index); setQueueOpen(false); }}>{item.cover ? <img src={item.cover} alt="" /> : <span>{index + 1}</span>}<div><b>{item.title}</b><small>{item.artist || "Unknown artist"}</small></div><time>{item.duration || "--:--"}</time>{selected === index && <i className="music-queue-eq" aria-label="Now playing" />}</button><button className="music-queue-remove" aria-label={`Remove ${item.title}`} onClick={() => onRemoveQueueItem(index)}><Icon name="close" /></button></article>) : <EmptyState text="The queue is empty." />}</div></section></div>}

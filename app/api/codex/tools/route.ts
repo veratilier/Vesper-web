@@ -20,11 +20,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!(await authorizeApp(request))) return json(request, { error: "Device not paired" }, 401);
   try {
-    const body = await request.json() as { name?: string; arguments?: Record<string, unknown>; threadId?: string; itemId?: string; conversationId?: string; turnId?: string };
+    const body = await request.json() as { name?: string; arguments?: Record<string, unknown>; threadId?: string; itemId?: string; conversationId?: string; turnId?: string; musicSurface?: string };
     const name = String(body.name || "");
     const definition = codexToolDefinitions.find((tool) => tool.name === name);
     if (!definition) return json(request, { error: "Unknown Codex tool" }, 404);
-    const result = await executeCodexTool(name, body.arguments || {}, await memoryScopeFromRequest(request), { conversationId: body.conversationId, turnId: body.turnId, origin: new URL(request.url).origin });
+    const result = await executeCodexTool(name, body.arguments || {}, await memoryScopeFromRequest(request), { conversationId: body.conversationId, turnId: body.turnId, origin: new URL(request.url).origin, musicSurface: body.musicSurface === "web" ? "web" : undefined });
     const responseResult = name === "read_codex_task_progress" && body.conversationId
       ? { ...result, wakeHistory: await readWakeHistory(body.conversationId, request.headers.get("x-vesper-device-token") || "") }
       : result;

@@ -1,3 +1,4 @@
+import { initializeWebMusicQueue, WEB_MUSIC } from "@/lib/web-music";
 import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
 import { corsHeaders, optionsResponse } from "@/lib/cors";
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
   if (key) {
     if (!allowedDocumentKeys.has(key))
       return json(request, { error: "Unknown document" }, 400);
+    if (key === WEB_MUSIC.queue) await initializeWebMusicQueue(getDb());
     const row = await getDb()
       .prepare("SELECT value, updated_at FROM vesper_documents WHERE key = ?")
       .bind(key)
