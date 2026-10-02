@@ -1,0 +1,61 @@
+diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
+index b88b343..d561777 100644
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -1635,6 +1635,11 @@ async fn run_sampling_request(
+                 .for_prompt(&step_context.settings.model_info.input_modalities)
+         };
+         let mut prompt_input = prompt_input;
++        // Request-only Vesper recall: never record these items into history.
++        // This sampling path is not used by history compaction. A new accepted
++        // input replaces the store, including clearing it for an empty batch.
++        let recall = sess.state.lock().await.additional_context.vesper_recall_for_request();
++        prompt_input.extend(recall);
+         sess.services
+             .executed_tool_calls
+             .attach_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output);
+diff --git a/codex-rs/core/src/state/additional_context.rs b/codex-rs/core/src/state/additional_context.rs
+index 83144f8..2b9854e 100644
+--- a/codex-rs/core/src/state/additional_context.rs
++++ b/codex-rs/core/src/state/additional_context.rs
+@@ -12,14 +12,39 @@ pub(crate) struct AdditionalContextStore {
+     values: BTreeMap<String, AdditionalContextEntry>,
+ }
+ 
++// Vesper owns this namespace. Recall belongs to the current accepted input, not
++// the append-only transcript or compaction history. Other context is unchanged.
++fn is_vesper_recall(key: &str) -> bool {
++    key.strip_prefix("vesper_memory_").is_some_and(|suffix| {
++        suffix.len() == 3 && suffix.bytes().all(|byte| byte.is_ascii_digit())
++    })
++}
++
+ impl AdditionalContextStore {
++    pub(crate) fn vesper_recall_for_request(&self) -> Vec<ResponseItem> {
++        self.values
++            .iter()
++            .filter(|(key, entry)| {
++                is_vesper_recall(key) && entry.kind == AdditionalContextKind::Untrusted
++            })
++            .map(|(key, entry)| {
++                ContextualUserFragment::into(AdditionalContextUserFragment::new(
++                    key.clone(),
++                    entry.value.clone(),
++                ))
++            })
++            .collect()
++    }
++
+     pub(crate) fn merge(
+         &mut self,
+         values: BTreeMap<String, AdditionalContextEntry>,
+     ) -> Vec<ResponseItem> {
+         let fragments = values
+             .iter()
+-            .filter(|(key, value)| self.values.get(*key) != Some(*value))
++            .filter(|(key, value)| {
++                !is_vesper_recall(key) && self.values.get(*key) != Some(*value)
++            })
+             .map(|(key, entry)| match entry.kind {
+                 AdditionalContextKind::Untrusted => ContextualUserFragment::into(
+                     AdditionalContextUserFragment::new(key.clone(), entry.value.clone()),
