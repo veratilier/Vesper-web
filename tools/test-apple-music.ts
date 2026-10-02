@@ -25,7 +25,7 @@ let calls = 0;
 const transport = appleSearchTransport('test-secret', async (url, options) => {
   calls++;
   assert.equal(String(url), 'https://codex.r-vera.com/history/music/search');
-  assert.equal(options?.redirect, 'error');
+  assert.equal(options?.redirect, 'manual');
   assert.equal(new Headers(options?.headers).get('authorization'), 'Bearer test-secret');
   assert.deepEqual(JSON.parse(String(options?.body)), {query:'Test song',country:'cn',limit:5});
   return new Response(JSON.stringify({results:[raw]}));
@@ -35,3 +35,5 @@ await assert.rejects(transport('https://example.com/search'),/unavailable/);
 assert.equal(calls,1);
 await assert.rejects(appleSearchTransport('')('https://itunes.apple.com/search'),/unavailable/);
 console.log('Authenticated Apple Music transport: passed');
+
+await assert.rejects(appleSearchTransport('test-secret', async () => new Response(null, {status:302,headers:{location:'https://example.com'}}))('https://itunes.apple.com/search'),/redirect rejected/);
