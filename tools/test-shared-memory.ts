@@ -49,3 +49,11 @@ assert.equal((await json('/api/search',{query:'星河'})).hits.length,0);
 assert.equal((await json('/api/search',{query:'星河',include_nonfacts:true})).hits[0].kind,'dream');
 assert.equal((await call('/api/memories',{...original,body:'x'.repeat(70000)})).status,413);
 console.log('PASS: paired access, blocked routes, save/deduplicate, search, version corrections, conflict, nonfacts, body bound');
+
+const preview=await json('/api/memories',{body:'虚构界面测试约定',source:'fiction-ui',kind:'agreement',details:{title:'虚构标题',summary:'虚构摘要',evidence:[{conversation_id:'fixture',message_id:'m1',quote:'原话'}]}});
+const grouped=await json('/api/memories?kind=preference_agreement&limit=1');
+assert.ok(grouped.total>=2);assert.equal(grouped.items.length,1);
+const previewHits=await json('/api/search',{query:'虚构界面测试约定',kind:'preference_agreement'});
+assert.deepEqual(previewHits.hits.find((r:any)=>r.id===preview.id).details,{title:'虚构标题',summary:'虚构摘要'});
+assert.equal((await json('/api/memories/'+preview.id)).details.evidence[0].quote,'原话');
+console.log('PASS library preview metadata and combined preference category through paired API');
