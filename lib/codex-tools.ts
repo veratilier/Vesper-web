@@ -1,4 +1,5 @@
 import { searchAppleMusic, lookupAppleMusic } from './apple-music-search';
+import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
 import { legacyDesireRead } from './desire/routing.js';
 import { env } from 'cloudflare:workers';
@@ -280,7 +281,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!query) return { matches: [] };
     const local = (await readMusicLibrary()).filter(track => track.appleMusicId && JSON.stringify(track).toLowerCase().includes(query));
     let catalog: MusicTrack[] = [];
-    try { catalog = await searchAppleMusic(query, limit); }
+    try { catalog = await searchAppleMusic(query, limit, appleSearchTransport((env as { VESPER_APP_TOKEN?: string }).VESPER_APP_TOKEN || '')); }
     catch (error) { if (!local.length) throw error; }
     const seen = new Set<string>();
     const matches = [...local, ...catalog].filter(track => {

@@ -17,6 +17,7 @@ import vesper_conversation_delete as conversation_delete
 import vesper_watch as watch
 import vesper_terminal as terminal
 import vesper_codex_records as codex_records
+import vesper_music_search as music_search
 
 
 DB_PATH = Path(os.environ.get("VESPER_HISTORY_DB", "/home/ubuntu/.vesper/chat-history.sqlite3"))
@@ -236,6 +237,14 @@ class Handler(BaseHTTPRequestHandler):
                 else: self.send_json(405, {"error": "Method not allowed"})
             except (ValueError, OSError):
                 self.send_json(400, {"error": "导入不可用：请确认完整 B 站链接，且没有其他视频正在准备或缓存已满。"})
+        elif path == ["music", "search"]:
+            if self.command != "POST":
+                self.send_json(405, {"error": "Method not allowed"})
+            else:
+                try:
+                    self.send_json(200, music_search.catalog.search(self.body()))
+                except music_search.SearchUnavailable as error:
+                    self.send_json(error.status, {"error": str(error)})
         elif path == ["wake"] and self.command == "GET":
             self.send_json(200, wake_store.status())
         elif path == ["wake"] and self.command == "POST":

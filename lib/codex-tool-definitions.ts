@@ -62,7 +62,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "music_search",
-    description: "Search Apple Music by song/artist/album, returning real song IDs, titles, artists, covers and Apple Music links. Returns catalog metadata for music_send_card without changing the user’s playlists. Prefer this provider unless Vera requests another service.",
+    description: "Search Apple Music by song/artist/album, returning real song IDs, titles, artists, covers and Apple Music links. Returns catalog metadata for music_send_card without changing the user’s playlists. Default to this provider. If unavailable, explain the error; do not silently substitute NetEase or another provider unless Vera asks.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -72,7 +72,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "music_netease_search",
-    description: "Search the public NetEase Music catalog, save the returned songs to Vesper music, then use music_send_card, music_queue_add, or music_play with an exact trackId. This does not edit a NetEase playlist.",
+    description: "Only when Vera explicitly requests NetEase: search the public NetEase Music catalog, save the returned songs to Vesper music, then use music_send_card, music_queue_add, or music_play with an exact trackId. This does not edit a NetEase playlist.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
