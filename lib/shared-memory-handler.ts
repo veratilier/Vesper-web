@@ -22,7 +22,7 @@ export async function sharedMemoryRequest(request: Request, dependencies: Depend
     const target = new URL(path, 'https://memory.r-vera.com');
     if (request.method === 'GET' && target.pathname === '/api/memories') {
       const q = Object.fromEntries(target.searchParams);
-      const options = z.object({ offset: z.coerce.number().int().min(0).max(1000000).default(0), limit: z.coerce.number().int().min(1).max(100).default(40), include_superseded: z.enum(['true','false']).default('false'), kind: z.enum(kinds).optional() }).parse(q);
+      const options = z.object({ offset: z.coerce.number().int().min(0).max(1000000).default(0), limit: z.coerce.number().int().min(1).max(100).default(40), include_superseded: z.enum(['true','false']).default('false'), kind: z.enum([...kinds,'preference_agreement']).optional() }).parse(q);
       return json(await listMemories(db, { ...options, include_superseded: options.include_superseded === 'true' }));
     }
     const record = target.pathname.match(/^\/api\/memories\/([a-f0-9-]+)$/i);
