@@ -37,3 +37,10 @@ await assert.rejects(appleSearchTransport('')('https://itunes.apple.com/search')
 console.log('Authenticated Apple Music transport: passed');
 
 await assert.rejects(appleSearchTransport('test-secret', async () => new Response(null, {status:302,headers:{location:'https://example.com'}}))('https://itunes.apple.com/search'),/redirect rejected/);
+
+const { isAppleMusicTrack } = await import('../lib/apple-music-search.ts');
+assert.equal(isAppleMusicTrack({id:'apple-123',appleMusicId:'123'}),true);
+assert.equal(isAppleMusicTrack({id:'netease-123',appleMusicId:'123'}),false);
+assert.equal(isAppleMusicTrack({id:'123',neteaseId:'123'}),false);
+assert.equal(isAppleMusicTrack({id:'123',source:'netease',appleMusicId:'123'}),false);
+assert.equal(isAppleMusicTrack({id:'123'}),false);
