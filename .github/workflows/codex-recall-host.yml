@@ -1,0 +1,63 @@
+name: Codex request-scoped recall host
+on:
+  push:
+    branches: ['codex/request-scoped-memory-recall']
+    paths: ['vps/codex-recall/**', '.github/workflows/codex-recall-host.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: 01fc69f4026735edfdf6789820549727a4867b11
+      - uses: actions/checkout@v4
+        with:
+          path: vesper
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libcap-dev clang lld
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+      - name: Apply scoped patch
+        run: git apply --check vesper/vps/codex-recall/request-scoped.patch && git apply vesper/vps/codex-recall/request-scoped.patch
+      - name: Build existing app-server with recall fix
+        working-directory: codex-rs
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: '0'
+          CARGO_PROFILE_RELEASE_LTO: 'false'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+          CARGO_BUILD_JOBS: '3'
+          RUSTFLAGS: '-C link-arg=-fuse-ld=lld'
+        run: |
+          # The upstream release tag bumps workspace package versions without
+          # refreshing their lock entries. Keep all registry/git resolutions.
+          cargo update --workspace
+          git diff -- Cargo.lock > ../release-lock.diff
+          python3 ../vesper/vps/codex-recall/check-lock.py Cargo.lock
+          cargo build --locked --release --bin codex-app-server
+      - name: Package verifiable runtime
+        run: |
+          mkdir -p release
+          cp codex-rs/target/release/codex-app-server release/
+          git rev-parse HEAD > release/upstream-commit.txt
+          git -C vesper rev-parse HEAD > release/vesper-commit.txt
+          cp vesper/vps/codex-recall/request-scoped.patch release/
+          cp release-lock.diff release/
+          cd release
+          sha256sum codex-app-server request-scoped.patch > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vesper-codex-recall-host
+          path: release/
+          retention-days: 14

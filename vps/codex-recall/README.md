@@ -1,0 +1,23 @@
+# Vesper request-scoped recall runtime
+
+Upstream: OpenAI Codex `rust-v0.159.3`, `01fc69f4026735edfdf6789820549727a4867b11`.
+The patch changes two Rust files, not the provider/authentication implementation.
+
+- `AdditionalContextStore`: reserve `vesper_memory_NNN` for volatile untrusted recall; never emit those entries to the conversation transcript.
+- Generation request assembly: add the current volatile entries to the outgoing prompt. History compaction uses the original clean history; unchanged batches still appear in each request of the current turn.
+- New input replaces the whole map, including empty maps. Other namespaces keep upstream behavior.
+- Generated assistant text is still ordinary chat history. This does not erase facts mentioned in actual replies.
+
+The GitHub workflow builds a standalone `codex-app-server` on Ubuntu 22.04. Its artifact contains the upstream commit, Vesper build commit, patch, lock diff and hashes. `check-lock.py` permits only workspace version updates from the upstream release tag; it refuses registry/git dependency changes.
+
+Before changing the existing service, run the acceptance script on the exact artifact:
+
+```sh
+python3 acceptance.py --command /absolute/path/codex-app-server
+```
+
+It must exit zero. It uses a temporary CODEX_HOME and localhost fake provider, with no production credentials. It captures outgoing fixture payloads, tests replacement/clear/Unicode/repeat/tool continuation/compaction/fork/restart, and checks rollout files. It emits only fixture counts, not payload bodies. `--observe --command /usr/bin/codex app-server` records the stock binary baseline without failing on its known retention behavior.
+
+Deploy only the existing `codex-app-server` service launcher to the versioned artifact. Preserve its arguments and token file. Keep the original launcher for rollback. Do not alter `/usr/bin/codex`, terminal/wake executables, chat databases, or schedules. Verify the process executable hash and authenticated live service before setting the existing Worker variable `VESPER_MEMORY_CONTEXT_TRANSPORT=request-scoped-v2`.
+
+Rollback order: disable/unset the Worker gate first, then restore the original app-server launcher. Future Codex upgrades require rebuilding this patch and rerunning acceptance; a new upstream version number alone is not compatibility evidence.
