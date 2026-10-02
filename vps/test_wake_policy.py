@@ -1,3 +1,4 @@
+from itertools import count
 import json,random,sqlite3,tempfile,unittest
 from pathlib import Path
 from datetime import datetime,timezone
@@ -12,6 +13,11 @@ def row(ident,role='user',turn='normal',conv='chat',at=1000,**meta):
       'metadata_json':json.dumps(meta),'message_type':'text'}
 
 class PolicyTests(unittest.TestCase):
+    def setUp(self):
+        # Keep unrelated runner tests outside sleep hours; test_wake_sleep covers that gate.
+        clock = patch('time.time', side_effect=count(1790827200, 0.001))  # 2026-10-01 12:00 Asia/Shanghai
+        clock.start(); self.addCleanup(clock.stop)
+
     def test_recent_user_activity_hour_boundary_and_synthetic_exclusion(self):
         now=10000
         self.assertTrue(policy.recent_user_activity([row('u',at=now-3599)],now))

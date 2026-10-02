@@ -1,3 +1,4 @@
+from itertools import count
 import json, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -6,6 +7,9 @@ import vesper_wake_runner as runner
 
 class RequiredDesireTests(unittest.TestCase):
     def setUp(self):
+        # Keep unrelated runner tests outside sleep hours; test_wake_sleep covers that gate.
+        clock = patch('time.time', side_effect=count(1790827200, 0.001))  # 2026-10-01 12:00 Asia/Shanghai
+        clock.start(); self.addCleanup(clock.stop)
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         p=patch.object(store,'PATH',Path(self.tmp.name)/'wake.db');p.start();self.addCleanup(p.stop)
         store.request('test',source='automation')
@@ -84,6 +88,11 @@ class RequiredDesireTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
 
 class ExternalRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        # Keep unrelated runner tests outside sleep hours; test_wake_sleep covers that gate.
+        clock = patch('time.time', side_effect=count(1790827200, 0.001))  # 2026-10-01 12:00 Asia/Shanghai
+        clock.start(); self.addCleanup(clock.stop)
+
     setUp = RequiredDesireTests.setUp
     def test_uncertain_external_write_is_not_repeated_across_rounds(self):
         owner=self; external_calls=[]

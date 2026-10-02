@@ -1,3 +1,4 @@
+from itertools import count
 import tempfile, time, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -7,6 +8,9 @@ import vesper_wake_store as store
 
 class RecoveryTests(unittest.TestCase):
     def setUp(self):
+        # Keep unrelated runner tests outside sleep hours; test_wake_sleep covers that gate.
+        clock = patch('time.time', side_effect=count(1790827200, 0.001))  # 2026-10-01 12:00 Asia/Shanghai
+        clock.start(); self.addCleanup(clock.stop)
         tmp = tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
         p = patch.object(store, 'PATH', Path(tmp.name) / 'wake.db');p.start();self.addCleanup(p.stop)
 
