@@ -16,7 +16,8 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:codex": "node --experimental-strip-types tools/test-codex-message-merge.mjs && node --experimental-strip-types tools/test-codex-approval.ts && node --experimental-strip-types tools/test-codex-models.ts && node --experimental-strip-types tools/test-stickers.ts && python3 vps/test_history_stickers.py",
-    "test:desire": "node tools/test-desire.mjs"
+    "test:desire": "node tools/test-desire.mjs",
+    "test:memory": "node tools/test-memory-vault.mjs && node tools/run-memory-contracts.mjs && node tools/test-shared-memory-integration.mjs"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "^1.0.2",

@@ -2,9 +2,9 @@
 
 The native Memory screen calls `/api/shared-memory` using the existing Vesper device token. The endpoint verifies `authorizeApp` before accessing `SHARED_MEMORY_DB`. There is no second login, client-side service secret, public memory endpoint, or bundled data snapshot.
 
-`SHARED_MEMORY_DB` binds the existing `memory-db` database (94e8bf24-53d1-4199-8483-e908c10c571b). Preserve the existing Vesper `DB` binding. Do not initialize, migrate, clear, or import data in the shared database. Independent Memory web/MCP and Vesper access the same records and correction chains. Legacy Vesper records remain in the old UI and database.
+`SHARED_MEMORY_DB` binds the existing `memory-db` database (94e8bf24-53d1-4199-8483-e908c10c571b). Preserve the existing Vesper `DB` binding. Do not initialize, clear, or import records in the shared database. The 2026-10-02 memory-surfacing change adds metadata/audit tables without rewriting original records; see memory-surfacing.md. Independent Memory web/MCP and Vesper access the same records and correction chains. Legacy Vesper records remain in the old UI and database.
 
-The vendored shared-memory-engine is copied from veratilier/memory src/memory.ts with only local SHA-256 and environment/type adapters. Track future Memory schema/engine changes together. This endpoint currently uses keyword search; optional external embedding configuration on the independent service is not automatically inherited.
+The vendored shared-memory-engine is copied from veratilier/memory src/memory.ts with local environment/type adapters. Track future Memory schema/engine changes together. This endpoint currently uses keyword search; optional external embedding configuration on the independent service is not automatically inherited.
 
 Supported authenticated routes: list, search, get, save, correct. It does not proxy connections/password/token administration. Chat remember/recall/manage tools and Memory context use this same binding. The Web/PWA Memory tab lists and searches these records; Legacy Vesper memories keeps the previous UI accessible without copying or deleting its records.
 

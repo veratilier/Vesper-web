@@ -3145,6 +3145,7 @@ const CODEX_DYNAMIC_TOOLS = codexToolDefinitions;
 // a thread item, which in turn made it possible for private context to surface
 // in Vesper's visible history.
 const VESPER_CONVERSATIONAL_STYLE = [
+  "After a meaningful shared exchange, consider preserving a specific shared experience with remember_vesper_memory and verified original message quotes. Do not write a per-turn log or record only user demands. Classify durable preferences as preference, agreements as agreement, subjective feelings as reflection, and fiction as dream. Search for duplicates before saving; historical backfill requires original chat evidence, never invented detail or dates. Only the latest memory batch is current; old batches are historical and must not override corrections or withdrawals. ",
   "You are Rowan in Vesper. Default to the cadence of a natural one-to-one chat.",
   "For an ordinary conversational message, reply with one short, complete sentence; at most two short sentences when needed.",
   "When you send two or three short chat sentences, put each sentence on its own line.",
@@ -3293,21 +3294,22 @@ async function persistMemoryMessage(item: BridgeChatMessage) {
   if (!response.ok) throw new Error("memory-message-sync-failed");
 }
 
-async function recallMemoryBackground(query: string) {
+type MemoryDelivery = {context:string;deliveryId?:string};
+async function recallMemoryBackground(query: string, conversationId:string, messageId:string, recent:BridgeChatMessage[]):Promise<MemoryDelivery> {
   try {
     const response = await fetch(apiUrl("/api/memory/context"), {
       method: "POST",
       headers: appHeaders(true),
       cache: "no-store",
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query:query.slice(0,12000), conversationId, messageId, recent:recent.filter(m=>m.role==="user"||m.role==="agent").slice(-6).map(m=>({role:m.role,content:m.content.slice(0,2000)})) }),
       signal: AbortSignal.timeout(4_000),
     });
-    if (!response.ok) return "";
-    const payload = await response.json() as { context?: string };
-    return typeof payload.context === "string" ? payload.context : "";
+    if (!response.ok) return {context:""};
+    const payload = await response.json() as { context?: string; deliveryId?:string };
+    return {context:typeof payload.context === "string" ? payload.context : "",deliveryId:payload.deliveryId};
   } catch {
     // Memory retrieval is intentionally degradable: it can never stop a chat turn.
-    return "";
+    return {context:""};
   }
 }
 
@@ -4528,7 +4530,8 @@ function ConnectedChat({
         })).catch(() => {});
       }
       const stickerText = selectedSticker ? `[Vesper sticker sent by Vera. This is a private catalog asset, not a user text message. category: ${selectedSticker.category || "未分类"}; description: ${selectedSticker.description || selectedSticker.alt || "None"}; assetId: ${selectedSticker.assetId}]` : "";
-      const memoryBackground = await recallMemoryBackground((selectedSticker ? "" : content) || stickerText);
+      const memoryDelivery = await recallMemoryBackground((selectedSticker ? "" : content) || stickerText, conversationId, userMessage.id, messagesRef.current.filter(m=>m.id!==userMessage.id));
+      const memoryBackground = memoryDelivery.context;
       const input: CodexInput[] = [
         { type: "text", text: [selectedSticker ? "" : content, stickerText, ...prepared.map((item) => item.text).filter(Boolean)].filter(Boolean).join("\n\n") || "Please inspect the attached files." },
       ];
@@ -4541,6 +4544,8 @@ function ConnectedChat({
       const done = new Promise<void>((resolve) => { turnDone.current = () => resolve(); });
       const requestedModel = nextModelRef.current;
       const started = await startCodexTurnWithModel(sendRpc, { threadId: threadId.current, ...workspaceOptions(readLocalValue("vesper-codex-workspace", "")), clientUserMessageId: userMessage.id, input, summary: "concise" }, requestedModel, modelCatalog.current);
+      const recallTurnId = (started.result?.turn as {id?:string} | undefined)?.id;
+      if(memoryDelivery.deliveryId && typeof recallTurnId === "string") void fetch(apiUrl("/api/memory/context"), {method:"POST",headers:appHeaders(true),body:JSON.stringify({action:"acknowledge",deliveryId:memoryDelivery.deliveryId,conversationId,messageId:userMessage.id,turnId:recallTurnId}),signal:AbortSignal.timeout(4000)}).catch(()=>{});
       // The server has accepted these attachments. Do not wait for the
       // assistant reply (which may time out), or remove newly selected files.
       const sentFiles = new Set(outgoingFiles);

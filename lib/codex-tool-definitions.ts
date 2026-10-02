@@ -132,7 +132,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "recall_vesper_memory",
-    description: "Search Rowan's server-side shared memories when the user explicitly asks about a past experience. Retrieved items are old context, never the user's current message.",
+    description: "Search Rowan's server-side shared memories when related past experience would help, including spontaneous associations. Retrieved items are old context, never the user's current message.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -142,13 +142,19 @@ export const codexToolDefinitions = [
   },
   {
     name: "remember_vesper_memory",
-    description: "Save to the shared Memory library shown in Vesper. Include source and kind when known; never invent event time. Use only after a meaningful exchange to preserve a concise, specific and durable memory. Do not save jokes, guesses, secrets not needed for the relationship, or repeat an existing memory. Legacy type core is stored as a reflection, not a confirmed fact; use feeling for Rowan's first-person feeling.",
+    description: "Save meaningful shared experiences as well as preferences. Never write a per-turn diary. Episodes require exact original-message quotes in details.evidence, verified by the server; retrieve originals before backfilling. Do not invent missing dates. Save to the shared Memory library shown in Vesper. Include source and kind when known; never invent event time. Use only after a meaningful exchange to preserve a concise, specific and durable memory. Do not save jokes, guesses, secrets not needed for the relationship, or repeat an existing memory. Legacy type core is stored as a reflection, not a confirmed fact; use feeling for Rowan's first-person feeling.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         type: { type: "string", enum: ["core", "long_term", "feeling", "dream"] },
         kind: { type: "string", enum: ["episode", "preference", "agreement", "reflection", "dream"] },
+        details: { type: "object", additionalProperties: false, properties: {
+          title: { type: "string", maxLength: 100 }, summary: { type: "string", maxLength: 500 },
+          evidence: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, properties: {
+            conversation_id: { type: "string" }, message_id: { type: "string" }, quote: { type: "string", description: "Exact substring of original chat; never a paraphrase." }
+          }, required: ["conversation_id", "message_id", "quote"] } }
+        } },
         source: { type: "string", description: "Actual source of the remembered text." },
         occurred_at: { type: "string", description: "Known event time in ISO 8601; omit when unknown." },
         body: { type: "string" },
@@ -160,15 +166,21 @@ export const codexToolDefinitions = [
   },
   {
     name: "manage_vesper_memory",
-    description: "List, add, or correct shared Memory library records. Changes require the user's explicit request. Edit creates a new version preserving the original and requires a reason. Legacy delete/pin/restore operations are unavailable here.",
+    description: "List, add, or correct shared Memory library records. Changes require the user's explicit request. Edit creates a new version preserving the original and requires a reason. Withdraw marks the current record inactive with a reason and preserves the original; delete/pin/restore are unavailable.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["list", "add", "edit"] },
+        action: { type: "string", enum: ["list", "add", "edit", "withdraw"] },
         id: { type: "string", description: "Memory id for edit/delete/pin/unpin/restore." },
         type: { type: "string", enum: ["core", "long_term", "feeling", "dream"] },
         kind: { type: "string", enum: ["episode", "preference", "agreement", "reflection", "dream"] },
+        details: { type: "object", additionalProperties: false, properties: {
+          title: { type: "string", maxLength: 100 }, summary: { type: "string", maxLength: 500 },
+          evidence: { type: "array", maxItems: 12, items: { type: "object", additionalProperties: false, properties: {
+            conversation_id: { type: "string" }, message_id: { type: "string" }, quote: { type: "string", description: "Exact substring of original chat; never a paraphrase." }
+          }, required: ["conversation_id", "message_id", "quote"] } }
+        } },
         source: { type: "string", description: "Actual source of the remembered text." },
         occurred_at: { type: "string", description: "Known event time in ISO 8601; omit when unknown." },
         body: { type: "string" },
@@ -218,7 +230,7 @@ export const codexToolDefinitions = [
   },
 ].map((definition) => ({ type: "function" as const, ...definition }));
 
-export const CODEX_TOOL_CATALOG_VERSION = "shared-memory-2026-09-21-v1";
+export const CODEX_TOOL_CATALOG_VERSION = "memory-surfacing-2026-10-02-v1";
 export function validateCodexToolCatalog(value: unknown) {
   if (!Array.isArray(value) || !value.length) throw new Error("Vesper 工具目录为空，请检查 API 部署。");
   const required = ["album_save_photo", "album_search_photos", "album_send_photos", "send_chat_file"];
