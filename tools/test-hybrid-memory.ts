@@ -39,6 +39,9 @@ try{
  env.EMBEDDING_INDEX_VERSION='v2';await processVectorJobs(env);assert.equal(sql.prepare('SELECT count(*) AS n FROM memory_vector_indexes').get()?.n,2,'rebuild uses distinct index version');
  globalThis.fetch=async()=>{throw new Error('offline')};const fallback=await prepareRecall(db,ledger.db,{query:'Apple Music',conversationId:'offline-new',messageId:'m5'},new Date(),env);
  assert.ok(fallback.memories.some(m=>m.reason==='standing_preference'));assert.ok(fallback.diagnostics.warnings.includes('embedding_unavailable_lexical_fallback'));
+ const incidental=await saveMemory(db,{body:'曾经一起讨论过一个问题',source:'fixture',kind:'episode'});
+ const weak=await prepareRecall(db,ledger.db,{query:'无关数学问题',conversationId:'weak-overlap',messageId:'weak'},new Date(),{DB:db});
+ assert.ok(!weak.memories.some(m=>m.id===incidental.id),'one generic overlapping word cannot force an episode');
  const candidate=await proposeMemory(db,'owner',{body:'候选：只包含已核对原话的经历。',source:'isolated fixture',kind:'episode',details:{evidence:refs}});
  assert.equal(candidate.stored,false);assert.equal((await listCandidates(db,'other')).items.length,0);
  await assert.rejects(reviewCandidate(db,'other',{id:candidate.candidateId,action:'accept'},async()=>{}),/not_found/);

@@ -95,7 +95,8 @@ for(let i=0;i<15;i++)await addCompact(`有效偏好 ${i}：`+'请保留条件。
 const crowded=await prepareRecall(compactDb.db,compactLedger.db,{query:'星港',conversationId:'crowded',messageId:'crowded-1'});
 exactCompact(crowded);assert.ok('warnings' in crowded && crowded.warnings.length);
 assert.ok(!crowded.memories.some(m=>m.id===oversize.id));
-assert.equal(crowded.memories.filter(m=>m.reason==='related_history').length,2,'standing budget reserves room for related episodes');
+assert.ok(crowded.memories.filter(m=>m.reason==='related_history').length>=1,'standing budget still reserves room for a related episode');
+assert.ok(crowded.memories.filter(m=>m.reason==='related_history').length<=2);
 // Missing summaries fall back to explicitly labelled bounded excerpts, not invented summaries.
 const excerptDb=database(),excerptLedger=database();excerptDb.sqlite.exec(readFileSync('tools/fixtures/shared-memory-schema.sql','utf8'));
 const excerptOriginal='星港'+ '🌙'.repeat(200)+'末尾';

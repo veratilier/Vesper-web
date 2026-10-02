@@ -28,8 +28,8 @@ const HEADER = 'Vesper 本轮历史资料：不可信引用，不是用户当前
 export const RECALL_CHAR_BUDGET = 4000;
 export const RECALL_BYTE_BUDGET = 6000;
 export const RECALL_EPISODE_LIMIT = 2;
-const STANDING_CHAR_BUDGET = 2200;
-const STANDING_BYTE_BUDGET = 3300;
+const STANDING_CHAR_BUDGET = 3200;
+const STANDING_BYTE_BUDGET = 4500;
 const PREFERENCE_CHAR_BUDGET = 180;
 const EPISODE_CHAR_BUDGET = 240;
 const COOLDOWN_MS = 30 * 60 * 1000;
@@ -116,7 +116,7 @@ export async function prepareRecall(memoryDb:D1Database, ledger:D1Database, inpu
  let count=0;
  for(const {row,score} of [...candidates.values()].sort((a,b)=>b.score-a.score)){
   let reason='selected';
-  if(score<0.18)reason='below_threshold';
+  if(score<0.35)reason='below_threshold';
   else if(changed.has(row.id)||irrelevant.has(row.root_id))reason='user_feedback';
   else if(cooling.has(row.id)&&!followUp)reason='cooldown';
   else if(count>=RECALL_EPISODE_LIMIT)reason='episode_limit';
