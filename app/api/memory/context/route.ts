@@ -4,6 +4,7 @@ import * as z from 'zod/v4';
 import { authorizeApp } from '@/lib/bridge-auth';
 import { recallSharedMemory } from '@/lib/shared-memory-tools';
 import { prepareRecall, acknowledgeRecall, recentRecall, recallFeedback } from '@/lib/shared-memory-recall';
+import { memoryAdditionalContext } from '@/lib/memory-transport';
 import { MemoryError } from '@/lib/shared-memory-engine';
 import { corsHeaders, optionsResponse } from '@/lib/cors';
 function json(request:Request,value:unknown,status=200){const headers=corsHeaders(request);headers.set('cache-control','no-store');return Response.json(value,{status,headers});}
@@ -26,7 +27,9 @@ export async function POST(request:Request){
   if(action!=='prepare')return json(request,{error:'invalid_action'},400);
   // Existing clients continue to work until their non-visual transport update is installed.
   if(!body.messageId||!body.conversationId)return json(request,await recallSharedMemory(String(body.query||'').slice(0,1000)));
-  return json(request,await prepareRecall(memory,ledger,body as Parameters<typeof prepareRecall>[2]));
+  if((env as unknown as {VESPER_MEMORY_CONTEXT_TRANSPORT?:string}).VESPER_MEMORY_CONTEXT_TRANSPORT!=='additional-context-v1')return json(request,{context:'',memories:[],deliveryId:null,status:'host_not_verified'});
+  const prepared=await prepareRecall(memory,ledger,body as Parameters<typeof prepareRecall>[2]);
+  return json(request,{...prepared,additionalContext:memoryAdditionalContext(prepared.context),transport:'additional-context-v1',retention:'host_history_possible'});
  }catch(error){
   if(error instanceof z.ZodError||error instanceof SyntaxError)return json(request,{error:'invalid_arguments'},400);
   if(error instanceof MemoryError)return json(request,{error:error.code},error.status);

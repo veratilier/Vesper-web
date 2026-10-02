@@ -12,7 +12,7 @@ const db = {
   prepare(sql) { const statement = (args = []) => ({ bind: (...values) => statement(values), first: async () => sqlite.prepare(sql).get(...args) ?? null, all: async () => ({ results: sqlite.prepare(sql).all(...args) }), run: async () => sqlite.prepare(sql).run(...args) }); return statement(); },
   async batch(statements) { sqlite.exec('BEGIN'); try { const result = []; for (const s of statements) result.push(await s.run()); sqlite.exec('COMMIT'); return result; } catch (e) { sqlite.exec('ROLLBACK'); throw e; } },
 };
-globalThis.__sharedFixture = { SHARED_MEMORY_DB: db, VESPER_APP_TOKEN: 'fixture-token', DB: { prepare() { throw new Error('Legacy DB must not be accessed by shared tools'); } } };
+globalThis.__sharedFixture = { SHARED_MEMORY_DB: db, VESPER_MEMORY_CONTEXT_TRANSPORT:'additional-context-v1', VESPER_APP_TOKEN: 'fixture-token', DB: { prepare() { throw new Error('Legacy DB must not be accessed by shared tools'); } } };
 const directory = await mkdtemp(join(tmpdir(), 'vesper-shared-integration-'));
 try {
   const routes = {};
@@ -48,6 +48,7 @@ try {
   const ledgerSqlite=new DatabaseSync(':memory:');
   globalThis.__sharedFixture.DB={prepare(sql){const statement=(args=[])=>({bind:(...v)=>statement(v),first:async()=>ledgerSqlite.prepare(sql).get(...args)??null,all:async()=>({results:ledgerSqlite.prepare(sql).all(...args)}),run:async()=>ledgerSqlite.prepare(sql).run(...args)});return statement();},async batch(statements){ledgerSqlite.exec('BEGIN');try{for(const s of statements)await s.run();ledgerSqlite.exec('COMMIT');}catch(e){ledgerSqlite.exec('ROLLBACK');throw e;}}};
   const batch=await (await routes.context.POST(request('/api/memory/context',{query:'unrelated',conversationId:'fixture',messageId:'user-1'}))).json();
+  assert.equal(Object.keys(batch.additionalContext).sort().map(key=>batch.additionalContext[key].value).join(''),batch.context);
   assert.equal(batch.memories[0].id,saved.memory.id,'standing preference appears without a lexical hit');
   assert.equal((await (await routes.context.GET(request('/api/memory/context'))).json()).items.length,0);
   assert.equal((await routes.context.POST(request('/api/memory/context',{action:'acknowledge',deliveryId:batch.deliveryId,conversationId:'fixture',messageId:'user-1',turnId:'turn-1'}))).status,200);
@@ -56,6 +57,9 @@ try {
   assert.equal((await routes.context.POST(request('/api/memory/context',{action:'feedback',deliveryId:batch.deliveryId,memoryId:saved.memory.id,kind:'changed'}))).status,200);
   const afterReview=await (await routes.tools.POST(request('/api/codex/tools',{name:'recall_vesper_memory',arguments:{query:'nebula'}}))).json();
   assert.equal(afterReview.result.memories.length,0,'pending corrections also disappear from active tool retrieval');
+  delete globalThis.__sharedFixture.VESPER_MEMORY_CONTEXT_TRANSPORT;
+  const gated=await (await routes.context.POST(request('/api/memory/context',{query:'tea',conversationId:'fixture',messageId:'unverified'}))).json();
+  assert.equal(gated.status,'host_not_verified');assert.equal(gated.deliveryId,null);
   ledgerSqlite.close();
   delete globalThis.__sharedFixture.SHARED_MEMORY_DB;
   assert.equal((await routes.tools.POST(request('/api/codex/tools', { name: 'remember_vesper_memory', arguments: { body: 'must not fall back' } }))).status, 400);

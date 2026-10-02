@@ -3294,7 +3294,7 @@ async function persistMemoryMessage(item: BridgeChatMessage) {
   if (!response.ok) throw new Error("memory-message-sync-failed");
 }
 
-type MemoryDelivery = {context:string;deliveryId?:string};
+type MemoryDelivery = {context:string;deliveryId?:string;additionalContext?:Record<string,{kind:"untrusted";value:string}>};
 async function recallMemoryBackground(query: string, conversationId:string, messageId:string, recent:BridgeChatMessage[]):Promise<MemoryDelivery> {
   try {
     const response = await fetch(apiUrl("/api/memory/context"), {
@@ -3305,8 +3305,8 @@ async function recallMemoryBackground(query: string, conversationId:string, mess
       signal: AbortSignal.timeout(4_000),
     });
     if (!response.ok) return {context:""};
-    const payload = await response.json() as { context?: string; deliveryId?:string };
-    return {context:typeof payload.context === "string" ? payload.context : "",deliveryId:payload.deliveryId};
+    const payload = await response.json() as Partial<MemoryDelivery>;
+    return {context:typeof payload.context === "string" ? payload.context : "",deliveryId:payload.deliveryId,additionalContext:payload.additionalContext};
   } catch {
     // Memory retrieval is intentionally degradable: it can never stop a chat turn.
     return {context:""};
@@ -4531,7 +4531,7 @@ function ConnectedChat({
       }
       const stickerText = selectedSticker ? `[Vesper sticker sent by Vera. This is a private catalog asset, not a user text message. category: ${selectedSticker.category || "未分类"}; description: ${selectedSticker.description || selectedSticker.alt || "None"}; assetId: ${selectedSticker.assetId}]` : "";
       const memoryDelivery = await recallMemoryBackground((selectedSticker ? "" : content) || stickerText, conversationId, userMessage.id, messagesRef.current.filter(m=>m.id!==userMessage.id));
-      const memoryBackground = memoryDelivery.context;
+      // Resume does not reliably update instructions on a loaded thread. Use the verified per-turn field.
       const input: CodexInput[] = [
         { type: "text", text: [selectedSticker ? "" : content, stickerText, ...prepared.map((item) => item.text).filter(Boolean)].filter(Boolean).join("\n\n") || "Please inspect the attached files." },
       ];
@@ -4539,13 +4539,13 @@ function ConnectedChat({
       updateMessage(userMessage.id, () => userMessage);
       for (const item of prepared) if (item.input) input.push(item.input);
       if (selectedSticker) { const image = await stickerInputForModel(selectedSticker); if (image) input.push(image); }
-      await connect(memoryBackground, true);
+      await connect("", true);
       if (!threadId.current) throw new Error("No Codex thread");
       const done = new Promise<void>((resolve) => { turnDone.current = () => resolve(); });
       const requestedModel = nextModelRef.current;
-      const started = await startCodexTurnWithModel(sendRpc, { threadId: threadId.current, ...workspaceOptions(readLocalValue("vesper-codex-workspace", "")), clientUserMessageId: userMessage.id, input, summary: "concise" }, requestedModel, modelCatalog.current);
+      const started = await startCodexTurnWithModel(sendRpc, { threadId: threadId.current, ...workspaceOptions(readLocalValue("vesper-codex-workspace", "")), clientUserMessageId: userMessage.id, input, ...(memoryDelivery.additionalContext?{additionalContext:memoryDelivery.additionalContext}:{}), summary: "concise" }, requestedModel, modelCatalog.current);
       const recallTurnId = (started.result?.turn as {id?:string} | undefined)?.id;
-      if(memoryDelivery.deliveryId && typeof recallTurnId === "string") void fetch(apiUrl("/api/memory/context"), {method:"POST",headers:appHeaders(true),body:JSON.stringify({action:"acknowledge",deliveryId:memoryDelivery.deliveryId,conversationId,messageId:userMessage.id,turnId:recallTurnId}),signal:AbortSignal.timeout(4000)}).catch(()=>{});
+      if(memoryDelivery.additionalContext && memoryDelivery.deliveryId && typeof recallTurnId === "string") void fetch(apiUrl("/api/memory/context"), {method:"POST",headers:appHeaders(true),body:JSON.stringify({action:"acknowledge",deliveryId:memoryDelivery.deliveryId,conversationId,messageId:userMessage.id,turnId:recallTurnId}),signal:AbortSignal.timeout(4000)}).catch(()=>{});
       // The server has accepted these attachments. Do not wait for the
       // assistant reply (which may time out), or remove newly selected files.
       const sentFiles = new Set(outgoingFiles);

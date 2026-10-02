@@ -1,3 +1,4 @@
+import { memoryAdditionalContext } from '../lib/memory-transport';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
@@ -37,3 +38,8 @@ await withdrawMemory(memory.db,corrected.id,'test');await withdrawMemory(memory.
 assert.equal((await prepare('不存在的旧事')).context,'');
 const unknown=await save('日期未知的虚构星河事件');assert.equal((await getMemory(memory.db,unknown.id)).occurred_at,null);
 console.log('PASS recall: standing preferences, episodes, context, cooldown, immutable receipts, changed/corrected, withdrawal, nonfacts, empty/unknown dates');
+
+const longContext='茶与星河 🌙'.repeat(3000);const fragments=memoryAdditionalContext(longContext);
+assert.equal(Object.keys(fragments).sort().map(k=>fragments[k].value).join(''),longContext);
+assert.ok(Object.values(fragments).every(part=>Buffer.byteLength(part.value,'utf8')<=768));
+console.log('PASS lossless bounded host fragments; disabled until deployed schema is verified');
