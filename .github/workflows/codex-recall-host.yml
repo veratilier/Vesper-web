@@ -19,6 +19,9 @@ jobs:
         with:
           path: vesper
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libcap-dev clang lld
       - uses: ./.github/actions/setup-rusty-v8
