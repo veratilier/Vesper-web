@@ -33,6 +33,9 @@ class Provider(http.server.BaseHTTPRequestHandler):
         item = {'id': f'msg_fixture_{n}', 'type': 'message', 'role': 'assistant',
                 'status': 'completed', 'content': [{'type': 'output_text',
                 'text': 'Fixture acknowledged.', 'annotations': []}]}
+        if phase == 'tool_roundtrip' and sum(label == phase for label, _, _ in captures) == 1:
+            item = {'type': 'function_call', 'name': 'recall_probe_noop',
+                    'call_id': 'fictional_tool_call', 'arguments': '{}'}
         if self.path.endswith('/compact'):
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -109,6 +112,11 @@ class Host:
                 if params.get('turn', {}).get('status') == 'failed':
                     raise RuntimeError('Fixture turn failed')
                 return
+            if obj.get('method') == 'item/tool/call' and 'id' in obj:
+                if params.get('tool') != 'recall_probe_noop':
+                    raise RuntimeError('Unexpected fixture tool')
+                self.send({'id': obj['id'], 'result': {'success': True,
+                    'contentItems': [{'type': 'inputText', 'text': 'Fictitious tool result.'}]}})
             if obj.get('method') == 'error':
                 raise RuntimeError('Host emitted error during fixture')
         raise TimeoutError('completion')
@@ -142,10 +150,13 @@ def main():
             home = pathlib.Path(tmp)
             host = Host(args.command, home, server.server_port)
             params = {'model': 'gpt-6.1-sol', 'modelProvider': 'recall_probe', 'cwd': tmp, 'approvalPolicy': 'never', 'sandbox': 'read-only'}
+            params['dynamicTools'] = [{'name': 'recall_probe_noop', 'description': 'Isolated no-op fixture',
+                'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}}]
             thread = host.rpc('thread/start', params)['thread']['id']
             host.turn(thread, 'first', fragments(A))
             host.turn(thread, 'replace', fragments(B))
             host.turn(thread, 'clear', {})
+            host.turn(thread, 'tool_roundtrip', fragments(B))
             host.turn(thread, 'long', fragments(LONG))
             host.turn(thread, 'same', fragments(LONG))
             other = host.rpc('thread/start', params)['thread']['id']
@@ -165,7 +176,7 @@ def main():
             host.turn(thread, 'resume', {})
             host.close(); host = None
             expected = {'first': (1, 0), 'replace': (0, 1), 'clear': (0, 0),
-                        'long': (0, 0), 'same': (0, 0), 'other_thread': (0, 0),
+                        'tool_roundtrip': (0, 1), 'long': (0, 0), 'same': (0, 0), 'other_thread': (0, 0),
                         'before_compact': (1, 0), 'compact': (0, 0), 'after_compact': (0, 0),
                         'before_fork': (0, 1), 'fork': (0, 0), 'resume': (0, 0)}
             for label, path, body in captures:
@@ -181,9 +192,10 @@ def main():
                 correct = counts == expected[label]
                 if label in ('long', 'same'):
                     correct = correct and ''.join(pieces) == LONG
-                elif label not in ('first', 'replace', 'before_compact', 'before_fork'):
+                elif label not in ('first', 'replace', 'tool_roundtrip', 'before_compact', 'before_fork'):
                     correct = correct and not pieces
                 checks.append({'phase': label, 'passed': correct, 'alpha': counts[0], 'beta': counts[1], 'recall_bytes': len(''.join(pieces).encode())})
+            checks.append({'phase': 'tool_continuation_captured', 'passed': sum(x[0] == 'tool_roundtrip' for x in captures) == 2})
             checks.append({'phase': 'all_phases_captured', 'passed': set(expected).issubset({x[0] for x in captures})})
             rollouts = list(home.glob('sessions/**/*.jsonl'))
             checks.append({'phase': 'rollout_excludes_recall', 'passed': bool(rollouts) and not any(
