@@ -2,7 +2,7 @@
 .chat-capture { pointer-events: none; }
 .chat-capture .codex-chat .agent-turn .message { justify-content: flex-end; }
 .chat-capture .codex-chat .sent-turn .message { justify-content: flex-start; }
-.chat-capture .app-shell .codex-chat .sent-turn .message.mine > div:not(.sticker-bubble) { width: fit-content; }
+.chat-capture .app-shell .codex-chat .sent-turn .message.mine > div:not(.sticker-bubble) { width: fit-content; margin-left: 0; margin-right: auto; }
 .chat-capture .app-shell .codex-chat .sent-turn .message.mine > div > p { text-align: left; }
 .chat-capture .app-shell .codex-chat .agent-turn .message > div > p { text-align: right; }
 .chat-capture .codex-chat .agent-turn :is(.turn-status,.message-actions,.message-attachments) { align-self: flex-end; }
