@@ -67,7 +67,7 @@
   display: block;
   margin-top: 8px;
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Noto Sans CJK SC", sans-serif;
-  color: var(--ui-muted);
+  color: #52636d !important;
 }
 .chat-capture .codex-chat .agent-turn > .capture-message-time { align-self: flex-end; }
 .chat-capture .codex-chat .sent-turn > .capture-message-time { align-self: flex-start; }
