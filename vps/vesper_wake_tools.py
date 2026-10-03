@@ -1,7 +1,7 @@
 """Explicit unattended permissions; external results never grant new permissions."""
 import copy, hashlib
 
-SEND_TYPES = {'album_send_photos': 'photos', 'send_chat_file': 'files', 'sticker_send': 'stickers'}
+SEND_TYPES = {'chat_capture_messages': 'photos', 'album_send_photos': 'photos', 'send_chat_file': 'files', 'sticker_send': 'stickers'}
 
 
 def allowed_tools(access, ceiling):

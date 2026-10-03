@@ -1,7 +1,7 @@
 'use client';
 import { type ReactNode, type PointerEvent, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-export type GalleryAttachment = { key: string; url: string; name: string; type: string; size: number };
+export type GalleryAttachment = { sourceConversationId?: string; sourceMessageId?: string; key: string; url: string; name: string; type: string; size: number };
 export function AttachmentGallery({ items, onSaveAsSticker, renderDetail }: { renderDetail?: (item: GalleryAttachment) => ReactNode; items: GalleryAttachment[]; onSaveAsSticker?: (item: GalleryAttachment) => void }) {
   const [index, setIndex] = useState(0);
   const [retry, setRetry] = useState(0);

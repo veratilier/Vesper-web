@@ -34,3 +34,8 @@ assert.equal(new Set([...first.photos, ...second.photos].map(p => p.id)).size, 4
 assert.equal(second.nextOffset, null);
 assert.equal(saved.url, 'https://example.test/api/media/abc-123.jpg');
 console.log('Album: explicit archive, owner isolation, replay identity, safe search and pagination passed');
+
+await exports.linkPhotoSource('vera', saved.key, { conversationId: 'real-chat', messageId: 'real-message', messageIds: ['real-message'] });
+assert.equal((await getAlbumPhoto('vera', saved.id, origin)).sourceMessageId, 'real-message');
+assert.equal((await listAlbumPhotos('vera', { query: '100%' }, origin)).photos[0].sourceConversationId, 'real-chat');
+assert.equal((await listAlbumPhotos('other', {}, origin)).photos.length, 0, 'provenance must not cross owners');

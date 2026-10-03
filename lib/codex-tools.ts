@@ -1,3 +1,4 @@
+import { createChatKeep, historyRead, verifyPhotoSource } from './chat-keeps';
 import { WEB_MUSIC, neteaseTrackId, initializeWebMusicQueue } from "./web-music";
 import { cleanMusicDocument } from '@/lib/music-data';
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
@@ -133,17 +134,28 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     return name === 'bookmark_create' ? createBookmark(memoryScope.userId,input)
       : listBookmarks(memoryScope.userId,Number(input.limit || 30),String(input.before || ''));
   }
+  if (name === 'chat_search_messages') {
+    if (!memoryScope) throw new Error('Account context required');
+    const query = String(input.query || '').trim();
+    if (!query || query.length > 300) throw new Error('Supply a search phrase of 1–300 characters');
+    return historyRead('/search?' + new URLSearchParams({ q: query, conversationId: String(input.conversationId || ''), offset: String(Math.max(0, Math.min(100000, Number(input.offset) || 0))) }));
+  }
+  if (name === 'chat_capture_messages') {
+    if (!memoryScope || !context.origin || !context.conversationId) throw new Error('Conversation context required');
+    return createChatKeep(memoryScope.userId, input, context.origin);
+  }
   await ensureSchema();
   if (['album_save_photo', 'album_search_photos', 'album_send_photos'].includes(name)) {
     if (!memoryScope || !context.origin) throw new Error('Account context required');
     if (name === 'album_save_photo') {
+      if (input.sourceConversationId || input.sourceMessageId) await verifyPhotoSource(memoryScope.userId, String(input.key || ''), String(input.sourceConversationId || ''), String(input.sourceMessageId || ''));
       if (typeof input.evaluation !== 'string' || !input.evaluation.trim()) throw new Error('保存照片时请填写评价');
       return { photo: await saveAlbumPhoto(memoryScope.userId, String(input.key || ''), input.category, input.evaluation.trim().slice(0,240), context.origin) };
     }
     if (name === 'album_search_photos') return listAlbumPhotos(memoryScope.userId, input, context.origin);
     if (!context.conversationId || !Array.isArray(input.photoIds) || !input.photoIds.length || input.photoIds.length > 8 || input.photoIds.some(id => typeof id !== 'string')) throw new Error('Choose 1–8 exact album photo IDs');
     const photos = await Promise.all([...new Set(input.photoIds as string[])].map(id => getAlbumPhoto(memoryScope.userId, id, context.origin!)));
-    return { attachments: photos, message: String(input.message || '').slice(0, 2000) };
+    return { attachments: photos, fromGallery: true, message: String(input.message || '').slice(0, 2000) };
   }
   if (name === "read_codex_task_progress") {
     if (!memoryScope || !context.conversationId) throw new Error("Conversation context required");

@@ -18,6 +18,7 @@ import vesper_watch as watch
 import vesper_terminal as terminal
 import vesper_codex_records as codex_records
 import vesper_music_search as music_search
+import vesper_chat_screenshot as chat_screenshot
 
 
 DB_PATH = Path(os.environ.get("VESPER_HISTORY_DB", "/home/ubuntu/.vesper/chat-history.sqlite3"))
@@ -210,7 +211,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(401, {"error": "Unauthorized"})
             return
         path = [unquote(part) for part in urlparse(self.path).path.strip("/").split("/") if part]
-        if len(path) >= 3 and path[0] == "conversations" and path[2] == "terminal":
+        if len(path) == 3 and path[0] == "conversations" and path[2] == "screenshot" and self.command == "POST":
+            try:
+                body = self.body()
+                if body.get('perspective') != 'agent':
+                    raise ValueError('Screenshot perspective must be agent')
+                with db() as connection:
+                    data = chat_screenshot.select_messages(connection, path[1], body.get('messageIds'))
+                self.send_json(200, chat_screenshot.render(data))
+            except chat_screenshot.ScreenshotUnavailable as error:
+                self.send_json(503, {'error': str(error)})
+        elif len(path) >= 3 and path[0] == "conversations" and path[2] == "terminal":
             self.conversation_terminal(path)
         elif path and path[0] == "terminal":
             try:

@@ -638,7 +638,7 @@ type MusicPlaybackState = { trackId?: string; playing?: boolean; positionSeconds
 type MusicResumeState = Pick<MusicPlaybackState, "trackId" | "positionSeconds" | "updatedAt">;
 type MusicQueueUpdate = { autoplay?: boolean; trackId?: string };
 type ConnectionSettings = Record<string, Record<string, string>>;
-type ChatAttachment = {
+type ChatAttachment = { sourceConversationId?: string; sourceMessageId?: string;
   key: string;
   url: string;
   name: string;
@@ -779,6 +779,16 @@ function HomeContent() {
   const openChat = (id: string, messageId = "") => {
     setTerminalOpen(false); setConversationId(id); setFocusMessageId(messageId); setChatDetailOpen(true); setChatEverOpened(true);
   };
+  useEffect(() => {
+    const openSource = (event: Event) => {
+      const source = (event as CustomEvent<{ conversationId: string; messageId: string }>).detail;
+      if (!source?.conversationId || !source?.messageId) return;
+      document.querySelectorAll<HTMLDialogElement>("dialog.gallery-dialog[open]").forEach(dialog => dialog.close());
+      setActive("聊天"); setTerminalOpen(false); setConversationId(source.conversationId); setFocusMessageId(source.messageId); setChatDetailOpen(true); setChatEverOpened(true);
+    };
+    window.addEventListener('vesper-open-photo-source', openSource);
+    return () => window.removeEventListener('vesper-open-photo-source', openSource);
+  }, []);
   const newChat = () => {
     const id = `chat-${Date.now()}-${crypto.randomUUID()}`;
     rememberConversation(id, "New conversation"); openChat(id);
@@ -3936,7 +3946,7 @@ function ConnectedChat({
     observeExecution("item/started", { threadId: activityThread, turnId: activityTurn, item: { id: activityId, type: "dynamicToolCall", name, status: "inProgress" } });
     try {
       const result = await callServerTool(name, argumentsValue, itemId);
-      if (['send_chat_file', 'album_send_photos'].includes(name) && result && typeof result === 'object' && 'attachments' in result) {
+      if (['send_chat_file', 'album_send_photos', 'chat_capture_messages'].includes(name) && result && typeof result === 'object' && 'attachments' in result) {
         const sent = result as { attachments: ChatAttachment[]; message?: string };
         const attachmentId = `files:${threadId.current}:${itemId}`;
         const existing = messagesRef.current.find(item => item.id === attachmentId);
@@ -4942,7 +4952,7 @@ function MessageAttachments({ items, onSaveAsSticker }: { items: ChatAttachment[
   if (!items.length) return null;
   return (
     <div className="message-attachments">
-      <AttachmentGallery items={items.filter(item => item.type.startsWith('image/'))} onSaveAsSticker={onSaveAsSticker} />
+      <AttachmentGallery items={items.filter(item => item.type.startsWith('image/'))} onSaveAsSticker={onSaveAsSticker} renderDetail={photo => photo.sourceConversationId && photo.sourceMessageId ? <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('vesper-open-photo-source', { detail: { conversationId: photo.sourceConversationId, messageId: photo.sourceMessageId } }))}>Original conversation</button> : null} />
       {items.filter(item => !item.type.startsWith('image/')).map((item) =>
         item.type.startsWith("video/") ? (
           <video src={item.url} controls playsInline key={item.key} />
