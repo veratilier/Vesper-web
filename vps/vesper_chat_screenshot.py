@@ -162,7 +162,7 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
             const stamp = row.querySelector('.capture-message-time');
             const text = row.querySelector('.message > div > p');
-            if (!stamp) return false;
+            if (!stamp || getComputedStyle(stamp).opacity !== "1" || getComputedStyle(stamp).animationName !== "none") return false;
             const r = row.getBoundingClientRect(), t = stamp.getBoundingClientRect();
             const own = row.classList.contains('agent-turn');
             return (!text || getComputedStyle(text).fontSize === '17px') &&
