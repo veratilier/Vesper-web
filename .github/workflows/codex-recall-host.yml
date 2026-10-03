@@ -1,7 +1,7 @@
 name: Codex request-scoped recall host
 on:
   push:
-    branches: ['codex/request-scoped-memory-recall']
+    branches: ['main', 'codex/request-scoped-memory-recall', 'codex/recall-runtime-tool-host']
     paths: ['vps/codex-recall/**', '.github/workflows/codex-recall-host.yml']
   workflow_dispatch:
 permissions:
@@ -45,17 +45,20 @@ jobs:
           cargo update --workspace
           git diff -- Cargo.lock > ../release-lock.diff
           python3 ../vesper/vps/codex-recall/check-lock.py Cargo.lock
-          cargo build --locked --release --bin codex-app-server
+          cargo build --locked --release --bin codex-app-server --bin codex-code-mode-host
       - name: Package verifiable runtime
         run: |
           mkdir -p release
           cp codex-rs/target/release/codex-app-server release/
+          cp codex-rs/target/release/codex-code-mode-host release/
           git rev-parse HEAD > release/upstream-commit.txt
           git -C vesper rev-parse HEAD > release/vesper-commit.txt
           cp vesper/vps/codex-recall/request-scoped.patch release/
           cp release-lock.diff release/
           cd release
-          sha256sum codex-app-server request-scoped.patch > SHA256SUMS
+          sha256sum codex-app-server codex-code-mode-host request-scoped.patch > SHA256SUMS
+      - name: Verify the packaged runtime including real Code Mode execution
+        run: python3 vesper/vps/codex-recall/acceptance.py --command "$PWD/release/codex-app-server"
       - uses: actions/upload-artifact@v4
         with:
           name: vesper-codex-recall-host
