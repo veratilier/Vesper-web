@@ -1073,6 +1073,7 @@ function HomeContent() {
   }, []);
   useEffect(() => {
     if ("serviceWorker" in navigator) {
+      if (chatCaptureRequest()) return;
       void navigator.serviceWorker.register("/sw.js?v=29", { scope: "/", updateViaCache: "none" }).then((registration) => registration.update());
     }
   }, []);

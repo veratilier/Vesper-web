@@ -109,7 +109,11 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             if kind == 'history': headers['authorization'] = 'Bearer ' + token
             if kind == 'app': headers['x-vesper-device-token'] = token
             if fixtures is not None and kind in fixtures:
-                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(fixtures[kind], ensure_ascii=False))
+                payload = fixtures[kind]
+                key = parse_qs(urlparse(route.request.url).query).get('key', [None])[0]
+                if kind == 'app' and key:
+                    payload = {'key': key, 'value': payload['documents'].get(key, {}).get('value'), 'updatedAt': '2026-10-03T12:00:00+08:00'}
+                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(payload, ensure_ascii=False))
                 loaded[kind] = True; return
             url = route.request.url
             if asset_proxy and kind == 'asset':
