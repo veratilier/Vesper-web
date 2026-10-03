@@ -1,6 +1,4 @@
-function json(value: unknown, status = 200) {
-  return Response.json(value, { status });
-}
+import { corsHeaders, optionsResponse } from "@/lib/cors";
 
 function safeHttpsUrl(value: unknown) {
   let url: URL;
@@ -18,9 +16,15 @@ function safeHttpsUrl(value: unknown) {
   return url;
 }
 
+export const OPTIONS = optionsResponse;
+
 export async function POST(request: Request) {
+  const json = (value: unknown, status = 200) => Response.json(value, { status, headers: corsHeaders(request) });
   try {
     const body = (await request.json()) as { text?: string; connection?: Record<string, string> };
+    const audioHeaders = corsHeaders(request);
+    audioHeaders.set("content-type", "audio/mpeg");
+    audioHeaders.set("cache-control", "no-store");
     const text = String(body.text || "").trim().slice(0, 4_000);
     const connection = body.connection || {};
     if (!text) return json({ error: "Text to speak is required." }, 400);
@@ -64,9 +68,10 @@ export async function POST(request: Request) {
       const encoded = payload.data?.audio || payload.audio;
       if (!encoded) return json({ error: payload.base_resp?.status_msg || "MiniMax returned no audio." }, 502);
       const bytes = /^[0-9a-f]+$/i.test(encoded) ? Uint8Array.from(encoded.match(/.{1,2}/g) || [], (pair) => parseInt(pair, 16)) : Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
-      return new Response(bytes, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
+      return new Response(bytes, { headers: audioHeaders });
     }
-    return new Response(response.body, { headers: { "content-type": response.headers.get("content-type") || "audio/mpeg", "cache-control": "no-store" } });
+    audioHeaders.set("content-type", response.headers.get("content-type") || "audio/mpeg");
+    return new Response(response.body, { headers: audioHeaders });
   } catch (reason) {
     return json({ error: reason instanceof Error ? reason.message : "TTS request failed" }, 400);
   }

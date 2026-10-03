@@ -1,9 +1,9 @@
+import { corsHeaders, optionsResponse } from "@/lib/cors";
 import { ensureSchema, getDb } from "@/lib/db";
 import { authorizeApp } from "@/lib/bridge-auth";
 
 type Message = { role: "user" | "assistant" | "system"; content: string };
 type ToolCall = { id: string; function: { name: string; arguments: string } };
-const json = (value: unknown, status = 200) => Response.json(value, { status });
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : "AI connection request failed";
 
 function parseMcpText(value: unknown): string {
@@ -118,7 +118,10 @@ async function executeTool(
   throw new Error(`Unknown tool: ${name}`);
 }
 
+export const OPTIONS = optionsResponse;
+
 export async function POST(request: Request) {
+  const json = (value: unknown, status = 200) => Response.json(value, { status, headers: corsHeaders(request) });
   try {
     const body = (await request.json()) as {
       mode?: "api" | "mcp"; connection?: Record<string, string>; conversationId?: string;

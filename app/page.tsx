@@ -2,6 +2,7 @@
 import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/desire/routing.js";
 import { WEB_MUSIC, neteaseTrackId, webQueue } from "@/lib/web-music";
 import { resolveWebMusic } from "@/lib/web-music-playback";
+import { createVoiceRecognition, type SpeechSession } from "@/lib/voice-recognition";
 import { browserStorage } from "@/lib/browser-storage";
 import "./storage-notice.css";
 import { Capacitor } from "@capacitor/core";
@@ -2303,237 +2304,190 @@ function VoiceCallModal({
   const speakerRef = useRef(speaker);
   const playback = useRef<HTMLAudioElement | null>(null);
   const playbackUrl = useRef("");
-  const recognition = useRef<{ start: () => void; stop: () => void } | null>(null);
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
-  useEffect(() => {
-    mutedRef.current = muted;
-  }, [muted]);
-  useEffect(() => {
-    speakerRef.current = speaker;
-  }, [speaker]);
-  const restartRecognition = () => {
-    if (mutedRef.current || stateRef.current !== "listening") return;
-    window.setTimeout(() => {
-      try {
-        recognition.current?.start();
-      } catch {}
-    }, 180);
-  };
+  const recognition = useRef<ReturnType<typeof createVoiceRecognition> | null>(null);
+  const request = useRef<AbortController | null>(null);
+  const history = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const closed = useRef(false);
+  const restartRecognition = () => recognition.current?.resume();
   const stopPlayback = () => {
-    playback.current?.pause();
+    const audio = playback.current;
     playback.current = null;
+    if (audio) { audio.onended = null; audio.onerror = null; audio.onplay = null; audio.pause(); }
     if (playbackUrl.current) URL.revokeObjectURL(playbackUrl.current);
     playbackUrl.current = "";
   };
-  const speak = async (text: string, id: number) => {
-    if (generation.current !== id) return;
-    if (!speakerRef.current) {
-      stateRef.current = "listening";
-      setState("listening");
-      restartRecognition();
-      return;
-    }
+  const currentTurn = (id: number) => !closed.current && generation.current === id;
+  const listen = (id: number) => {
+    if (!currentTurn(id)) return;
+    stateRef.current = "listening";
+    setState("listening");
+    restartRecognition();
+  };
+  const speak = async (text: string, id: number, signal: AbortSignal) => {
+    if (!currentTurn(id)) return;
+    if (!speakerRef.current) { listen(id); return; }
     try {
       if (!ttsSettings.baseUrl || !ttsSettings.apiKey)
         throw new Error("Configure TTS in Settings → Agent Voice first.");
-      const response = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
+      const response = await fetch(apiUrl("/api/tts"), {
+        method: "POST", signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+        headers: deviceHeaders(),
         body: JSON.stringify({ text, connection: ttsSettings }),
       });
       if (!response.ok) {
         const result = (await response.json()) as { error?: string };
         throw new Error(result.error || "TTS request failed");
       }
-      if (generation.current !== id) return;
+      const blob = await response.blob();
+      if (!currentTurn(id)) return;
+      // Turning sound off during synthesis must also release the listening gate.
+      if (!speakerRef.current) { listen(id); return; }
       stopPlayback();
-      const url = URL.createObjectURL(await response.blob());
+      const url = URL.createObjectURL(blob);
       playbackUrl.current = url;
       const audio = new Audio(url);
       playback.current = audio;
       audio.onplay = () => {
-        if (generation.current === id) {
-          stateRef.current = "speaking";
-          setState("speaking");
-        }
+        if (currentTurn(id)) { stateRef.current = "speaking"; setState("speaking"); }
       };
       audio.onended = () => {
-        stopPlayback();
-        if (generation.current !== id) return;
-        stateRef.current = "listening";
-        setState("listening");
-        restartRecognition();
+        if (!currentTurn(id) || playback.current !== audio) return;
+        stopPlayback(); listen(id);
       };
       audio.onerror = () => {
-        stopPlayback();
-        setCaption("Could not play TTS audio");
-        stateRef.current = "listening";
-        setState("listening");
-        restartRecognition();
+        if (!currentTurn(id) || playback.current !== audio) return;
+        stopPlayback(); setCaption("Could not play TTS audio"); listen(id);
       };
       await audio.play();
     } catch (reason) {
+      if (!currentTurn(id)) return;
+      stopPlayback();
       setCaption(reason instanceof Error ? reason.message : "TTS playback failed");
-      stateRef.current = "listening";
-      setState("listening");
-      restartRecognition();
+      listen(id);
     }
   };
   const runTurn = async (text: string) => {
     const clean = text.trim();
-    if (!clean) return;
+    if (!clean || closed.current || mutedRef.current || stateRef.current !== "listening") return;
     const id = ++generation.current;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     stopPlayback();
+    recognition.current?.suspend();
     setCaption(clean);
     stateRef.current = "thinking";
     setState("thinking");
-    try { recognition.current?.stop(); } catch {}
     try {
+      let answer: string;
       if (connections.active === "cyberboss") {
+        // The bridge returns a queue receipt, not the AI answer. Keep this turn
+        // locked until a new delivered reply arrives, rather than starting STT.
+        const endpoint = apiUrl(`/api/chat?conversationId=${encodeURIComponent(conversationId)}`);
+        const before = await fetch(endpoint, { headers: deviceHeaders(), cache: "no-store", signal: controller.signal });
+        if (!before.ok) throw new Error("Could not read the AI conversation.");
+        const baseline = await before.json() as { messages?: BridgeChatMessage[] };
+        const known = new Set((baseline.messages || []).map(item => item.id));
         const response = await fetch(apiUrl("/api/chat"), {
-          method: "POST",
-          headers: deviceHeaders(),
+          method: "POST", headers: deviceHeaders(), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]),
           body: JSON.stringify({ conversationId, content: clean }),
         });
         if (!response.ok) throw new Error("The AI service is not responding.");
-        if (generation.current === id) {
-          setCaption("Message sent to the AI service. Waiting for a reply.");
-          stateRef.current = "listening";
-          setState("listening");
-          restartRecognition();
+        const receipt = await response.json() as { message: BridgeChatMessage };
+        const deadline = Date.now() + 120_000;
+        answer = "";
+        while (currentTurn(id) && Date.now() < deadline) {
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => { clearTimeout(timer); reject(new DOMException("Call ended", "AbortError")); };
+            const timer = setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, 1000);
+            controller.signal.addEventListener("abort", abort, { once: true });
+            if (controller.signal.aborted) abort();
+          });
+          const result = await fetch(endpoint, { headers: deviceHeaders(), cache: "no-store", signal: controller.signal });
+          if (!result.ok) throw new Error("Could not receive the AI reply.");
+          const snapshot = await result.json() as { messages?: BridgeChatMessage[] };
+          const messages = snapshot.messages || [];
+          const userIndex = messages.findIndex(item => item.id === receipt.message.id);
+          const reply = userIndex < 0 ? undefined : messages.slice(userIndex + 1).find(item =>
+            !known.has(item.id) && item.role === "agent" && item.content.trim() &&
+            ["delivered", "completed", "sent"].includes(item.status) &&
+            !item.metadata?.wake && !item.metadata?.execution &&
+            (!item.metadata?.blockType || item.metadata.blockType === "final"));
+          if (reply) { answer = reply.content; break; }
         }
-        return;
+        if (!answer) throw new Error("The AI reply timed out. Please restart the call.");
+      } else {
+        const response = await fetch(apiUrl("/api/ai"), {
+          method: "POST", headers: deviceHeaders(), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]),
+          body: JSON.stringify({
+            mode: connections.active, connection: connections[connections.active], conversationId,
+            messages: [...history.current, { role: "user", content: clean }],
+          }),
+        });
+        const result = (await response.json()) as { content?: string; error?: string };
+        if (!response.ok) throw new Error(result.error || "Voice call request failed");
+        answer = result.content || "I’m here.";
       }
-      const response = await fetch("/api/ai", {
-        method: "POST",
-        headers: deviceHeaders(),
-        body: JSON.stringify({
-          mode: connections.active,
-          connection: connections[connections.active],
-          conversationId,
-          messages: [{ role: "user", content: clean }],
-        }),
-      });
-      const result = (await response.json()) as { content?: string; error?: string };
-      if (!response.ok) throw new Error(result.error || "Voice call request failed");
-      if (generation.current !== id) return;
-      const answer = result.content || "I’m here.";
+      if (!currentTurn(id)) return;
+      history.current = [...history.current, { role: "user", content: clean }, { role: "assistant", content: answer }].slice(-40) as typeof history.current;
       setCaption(answer);
-      void speak(answer, id);
+      await speak(answer, id, controller.signal);
     } catch (reason) {
-      if (generation.current !== id) return;
+      if (!currentTurn(id)) return;
       setCaption(reason instanceof Error ? reason.message : "Voice call connection failed");
-      stateRef.current = "error";
-      setState("error");
+      stateRef.current = "error"; setState("error");
     }
   };
+  const cleanup = () => {
+    closed.current = true;
+    generation.current += 1;
+    request.current?.abort(); request.current = null;
+    recognition.current?.close(); recognition.current = null;
+    stopPlayback();
+    stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
+  };
   const start = async () => {
-    setState("connecting");
+    if (stateRef.current === "connecting") return;
+    cleanup(); closed.current = false;
+    const id = generation.current;
+    stateRef.current = "connecting"; setState("connecting");
     try {
-      stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const Speech = (
-        window as Window & {
-          SpeechRecognition?: new () => {
-            lang: string;
-            continuous: boolean;
-            interimResults: boolean;
-            onresult: (event: {
-              results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
-              resultIndex: number;
-            }) => void;
-            onend: () => void;
-            onerror: () => void;
-            start: () => void;
-            stop: () => void;
-          };
-          webkitSpeechRecognition?: new () => {
-            lang: string;
-            continuous: boolean;
-            interimResults: boolean;
-            onresult: (event: {
-              results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
-              resultIndex: number;
-            }) => void;
-            onend: () => void;
-            onerror: () => void;
-            start: () => void;
-            stop: () => void;
-          };
-        }
-      ).SpeechRecognition ||
-        (window as Window & { webkitSpeechRecognition?: new () => {
-          lang: string;
-          continuous: boolean;
-          interimResults: boolean;
-          onresult: (event: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>; resultIndex: number }) => void;
-          onend: () => void;
-          onerror: () => void;
-          start: () => void;
-          stop: () => void;
-        } }).webkitSpeechRecognition;
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!currentTurn(id)) { media.getTracks().forEach(track => track.stop()); return; }
+      stream.current = media;
+      media.getAudioTracks().forEach(track => { track.enabled = !mutedRef.current; });
+      const browser = window as Window & {
+        SpeechRecognition?: new () => SpeechSession;
+        webkitSpeechRecognition?: new () => SpeechSession;
+      };
+      const Speech = browser.SpeechRecognition || browser.webkitSpeechRecognition;
       if (!Speech) throw new Error("Live speech recognition is not supported in this browser.");
-      const session = new Speech();
-      session.lang = "en-US";
-      session.continuous = false;
-      session.interimResults = true;
-      session.onresult = (event) => {
-        let interim = "";
-        let final = "";
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
-          const part = event.results[index];
-          if (part.isFinal) final += part[0].transcript;
-          else interim += part[0].transcript;
-        }
-        if (interim) {
-          if (stateRef.current === "speaking") {
-            generation.current += 1;
-            stopPlayback();
-          }
-          setCaption(interim);
-        }
-        if (final) void runTurn(final);
-      };
-      session.onend = () => {
-        if (stream.current && !mutedRef.current && stateRef.current === "listening") restartRecognition();
-      };
-      session.onerror = () => {
-        if (stream.current) restartRecognition();
-      };
-      recognition.current = session;
-      stateRef.current = "listening";
-      setState("listening");
-      setCaption("Listening");
-      session.start();
+      recognition.current = createVoiceRecognition({
+        create: () => new Speech(),
+        canListen: () => !closed.current && Boolean(stream.current) && !mutedRef.current && stateRef.current === "listening",
+        onFinal: text => { void runTurn(text); },
+        onInterim: setCaption,
+        onError: message => { stateRef.current = "error"; setState("error"); setCaption(message); },
+      });
+      setCaption("Listening"); listen(id);
     } catch (reason) {
-      setState("error");
+      if (!currentTurn(id)) return;
+      cleanup(); stateRef.current = "error"; setState("error");
       setCaption(reason instanceof Error ? reason.message : "Could not start the call. Check microphone and speech recognition permissions.");
     }
   };
-  const finish = () => {
-    generation.current += 1;
-    stopPlayback();
-    recognition.current?.stop();
-    recognition.current = null;
-    stream.current?.getTracks().forEach((track) => track.stop());
-    stream.current = null;
-    onClose();
-  };
+  const finish = () => { cleanup(); onClose(); };
   useEffect(() => {
     if (!["listening", "thinking", "speaking"].includes(state)) return;
-    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    const timer = window.setInterval(() => setSeconds(value => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [state]);
-  useEffect(() => () => {
-    stopPlayback();
-    stream.current?.getTracks().forEach((track) => track.stop());
-  }, []);
+  useEffect(() => () => { cleanup(); }, []);
   const toggleMute = () => {
-    const next = !muted;
-    stream.current?.getAudioTracks().forEach((track) => (track.enabled = !next));
-    if (next) recognition.current?.stop();
-    else restartRecognition();
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    stream.current?.getAudioTracks().forEach(track => { track.enabled = !next; });
+    if (next) recognition.current?.suspend(); else restartRecognition();
     setMuted(next);
   };
   return (
@@ -2571,7 +2525,7 @@ function VoiceCallModal({
               const next = !speakerRef.current;
               speakerRef.current = next;
               setSpeaker(next);
-              if (!next) stopPlayback();
+              if (!next && stateRef.current === "speaking") { stopPlayback(); listen(generation.current); }
             }} aria-label="Speaker">
               <Icon name="volume" />
               <small>{speaker ? "Speaker" : "Earpiece"}</small>
