@@ -41,6 +41,9 @@ class Provider(http.server.BaseHTTPRequestHandler):
             item = {'type': 'custom_tool_call', 'name': 'exec',
                     'call_id': 'fictional_code_mode_call',
                     'input': 'text(await tools.recall_probe_noop({}));'}
+        if phase in ('catalog_refresh', 'cold_catalog_refresh') and sum(label == phase for label, _, _ in captures) == 1:
+            item = {'type': 'custom_tool_call', 'name': 'exec', 'call_id': 'fictional_refreshed_call',
+                    'input': 'text(await tools.new_capture_probe({}));'}
         if self.path.endswith('/compact'):
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -119,7 +122,7 @@ class Host:
                     raise RuntimeError('Fixture turn failed')
                 return
             if obj.get('method') == 'item/tool/call' and 'id' in obj:
-                if params.get('tool') != 'recall_probe_noop':
+                if params.get('tool') not in ('recall_probe_noop', 'new_capture_probe'):
                     raise RuntimeError('Unexpected fixture tool')
                 tool_calls.append(phase)
                 self.send({'id': obj['id'], 'result': {'success': True,
@@ -195,7 +198,7 @@ def main():
             host.rpc('thread/resume', {'threadId': thread, 'dynamicTools': params['dynamicTools'], 'excludeTurns': True})
             host.turn(thread, 'resume', {})
             host.close(); host = None
-            expected = {'first': (1, 0), 'replace': (0, 1), 'clear': (0, 0),
+            expected = {'catalog_refresh': (1, 0), 'catalog_remove': (1, 0), 'cold_catalog_refresh': (1, 0), 'first': (1, 0), 'replace': (0, 1), 'clear': (0, 0),
                         'tool_roundtrip': (0, 1), 'code_mode': (0, 1), 'long': (0, 0), 'same': (0, 0), 'other_thread': (0, 0),
                         'before_compact': (1, 0), 'compact': (0, 0), 'after_compact': (0, 0),
                         'before_fork': (0, 1), 'fork': (0, 0), 'resume': (0, 0)}
@@ -212,7 +215,7 @@ def main():
                 correct = counts == expected[label]
                 if label in ('long', 'same'):
                     correct = correct and ''.join(pieces) == LONG
-                elif label not in ('first', 'replace', 'tool_roundtrip', 'code_mode', 'before_compact', 'before_fork'):
+                elif label not in ('catalog_refresh', 'catalog_remove', 'cold_catalog_refresh', 'first', 'replace', 'tool_roundtrip', 'code_mode', 'before_compact', 'before_fork'):
                     correct = correct and not pieces
                 checks.append({'phase': label, 'passed': correct, 'alpha': counts[0], 'beta': counts[1], 'recall_bytes': len(''.join(pieces).encode())})
             checks.append({'phase': 'tool_continuation_captured', 'passed': sum(x[0] == 'tool_roundtrip' for x in captures) == 2})
@@ -224,6 +227,7 @@ def main():
                 len(code_requests) == 2 and tool_calls.count('code_mode') == 1
                 and len(code_outputs) == 1
                 and 'Fictitious tool result.' in json.dumps(code_outputs[0])})
+            checks.append({'phase': 'refreshed_catalog_code_mode_roundtrip', 'passed': tool_calls.count('catalog_refresh') == 1 and tool_calls.count('cold_catalog_refresh') == 1})
             checks.append({'phase': 'all_phases_captured', 'passed': set(expected).issubset({x[0] for x in captures})})
             rollouts = list(home.glob('sessions/**/*.jsonl'))
             checks.append({'phase': 'rollout_excludes_recall', 'passed': bool(rollouts) and not any(
