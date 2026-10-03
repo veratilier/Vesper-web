@@ -17,7 +17,7 @@ TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-
 HISTORY=Path(os.environ.get('VESPER_HISTORY_DB',str(Path.home()/'.vesper/chat-history.sqlite3')))
 WORK=Path.home()/'.vesper/wake-workspace'
 ALLOWED={'read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
-         'music_get_status','music_search','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
+         'music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
          'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
 READ_ONLY={'bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','music_get_status','music_search','album_search_photos','sticker_search'}
