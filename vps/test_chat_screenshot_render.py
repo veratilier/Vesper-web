@@ -18,7 +18,7 @@ class ScreenshotRenderTests(unittest.TestCase):
         history = {'conversation': {'id': data['conversationId'], 'title': data['title']}, 'messages': [dict(m, conversationId=data['conversationId'], status='delivered', metadata={'attachments': m['attachments']}) for m in data['messages']], 'tombstones': []}
         app = {'documents': {'profile': {'value': {'userName': 'Vera', 'agentName': 'Rowan'}}, 'appearance': {'value': {'accent': '#b8dce8', 'background': 'url("/backgrounds/vesper-marble-20260908.jpg")'}}}}
         with open('/tmp/vesper-capture-web.log', 'w') as log:
-            server = subprocess.Popen(['npm', 'run', 'dev', '--', '-H', '127.0.0.1', '-p', '5173'], stdout=log, stderr=log)
+            server = subprocess.Popen(['npm', 'run', 'start', '--', '-H', '127.0.0.1', '-p', '5173'], stdout=log, stderr=log)
             try:
                 for attempt in range(60):
                     try:
