@@ -86,6 +86,9 @@ def request_policy(url, method, data):
     return None
 
 
+VISIBLE_IMAGES_READY = 'Array.from(document.querySelectorAll(".chat-capture img")).filter(i => i.checkVisibility()).every(i => i.complete && i.naturalWidth > 0)'
+
+
 def render_child(data, token, *, asset_proxy=None, fixtures=None):
     # asset_proxy/fixtures are only supplied directly by the isolated CI test.
     # Production stdin cannot select a host, proxy or fixture.
@@ -154,7 +157,7 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             raise ValueError('Webpage did not apply the requested agent perspective')
         phase('fonts and images')
         page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
-        page.wait_for_function('Array.from(document.querySelectorAll(".chat-capture img")).every(i => i.complete && i.naturalWidth > 0)', timeout=10000)
+        page.wait_for_function(VISIBLE_IMAGES_READY, timeout=10000)
         # Wait for the actual saved background, including a data-URI upload.
         page.evaluate(r"""async () => {
           const bg = getComputedStyle(document.querySelector('.chat-capture')).backgroundImage;

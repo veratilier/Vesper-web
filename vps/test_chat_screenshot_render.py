@@ -12,6 +12,19 @@ import vesper_chat_screenshot as screenshot
 
 @unittest.skipUnless(os.environ.get('VESPER_TEST_SCREENSHOT_RENDER') == '1', 'real Chrome integration runs in screenshot CI')
 class ScreenshotRenderTests(unittest.TestCase):
+    def test_hidden_broken_images_do_not_block_visible_excerpt(self):
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel='chrome', headless=True)
+            page = browser.new_page()
+            page.set_content('<main class="chat-capture"><section hidden><img src="data:image/png;base64,invalid"></section></main>')
+            self.assertTrue(page.evaluate(screenshot.VISIBLE_IMAGES_READY))
+            page.locator('section').evaluate('el => el.hidden = false')
+            self.assertFalse(page.evaluate(screenshot.VISIBLE_IMAGES_READY))
+            page.locator('img').evaluate("el => el.src = 'data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>'")
+            page.wait_for_function(screenshot.VISIBLE_IMAGES_READY)
+            browser.close()
+
     def test_jpeg_from_actual_webpage(self):
         faulthandler.dump_traceback_later(75, exit=True)
         data = {'title': '截图测试', 'conversationId': 'capture-fixture', 'messageIds': ['u', 'a'], 'messages': [
