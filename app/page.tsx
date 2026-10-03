@@ -2384,7 +2384,7 @@ function VoiceCallModal({
         // The bridge returns a queue receipt, not the AI answer. Keep this turn
         // locked until a new delivered reply arrives, rather than starting STT.
         const endpoint = apiUrl(`/api/chat?conversationId=${encodeURIComponent(conversationId)}`);
-        const before = await fetch(endpoint, { headers: deviceHeaders(), cache: "no-store", signal: controller.signal });
+        const before = await fetch(endpoint, { headers: deviceHeaders(), cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
         if (!before.ok) throw new Error("Could not read the AI conversation.");
         const baseline = await before.json() as { messages?: BridgeChatMessage[] };
         const known = new Set((baseline.messages || []).map(item => item.id));
@@ -2403,7 +2403,7 @@ function VoiceCallModal({
             controller.signal.addEventListener("abort", abort, { once: true });
             if (controller.signal.aborted) abort();
           });
-          const result = await fetch(endpoint, { headers: deviceHeaders(), cache: "no-store", signal: controller.signal });
+          const result = await fetch(endpoint, { headers: deviceHeaders(), cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
           if (!result.ok) throw new Error("Could not receive the AI reply.");
           const snapshot = await result.json() as { messages?: BridgeChatMessage[] };
           const messages = snapshot.messages || [];
@@ -2525,7 +2525,7 @@ function VoiceCallModal({
               const next = !speakerRef.current;
               speakerRef.current = next;
               setSpeaker(next);
-              if (!next && stateRef.current === "speaking") { stopPlayback(); listen(generation.current); }
+              if (!next && playback.current) { stopPlayback(); listen(generation.current); }
             }} aria-label="Speaker">
               <Icon name="volume" />
               <small>{speaker ? "Speaker" : "Earpiece"}</small>
