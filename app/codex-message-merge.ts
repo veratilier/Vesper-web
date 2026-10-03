@@ -1,3 +1,4 @@
+import { visibleUserContext } from "../lib/web-chat-context.ts";
 export type MergeableCodexMessage = {
   id: string;
   role: string;
@@ -32,7 +33,7 @@ export function isCompletedCodexItem(items: MergeableCodexMessage[], itemId: str
 const scopeKey = (item: MergeableCodexMessage) => item.conversationId || item.metadata?.threadId || "";
 
 export function mergeCodexMessages<T extends MergeableCodexMessage>(...groups: T[][]): T[] {
-  const all = groups.flat();
+  const all = groups.flat().map(item => item.role === "user" ? { ...item, content: visibleUserContext(item.content) } as T : item);
   const familyKey = (item: T, parentId: string) => JSON.stringify([scopeKey(item), parentId]);
   const splitFamilies = new Set(all.flatMap((item) => {
     const bubble = codexBubbleIdentity(item);
