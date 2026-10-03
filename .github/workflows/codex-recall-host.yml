@@ -1,7 +1,7 @@
 name: Codex request-scoped recall host
 on:
   push:
-    branches: ['main', 'codex/request-scoped-memory-recall', 'codex/recall-runtime-tool-host']
+    branches: ['main', 'codex/request-scoped-memory-recall', 'codex/recall-runtime-tool-host', 'codex/refresh-resumed-tool-catalog']
     paths: ['vps/codex-recall/**', '.github/workflows/codex-recall-host.yml']
   workflow_dispatch:
 permissions:

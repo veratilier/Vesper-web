@@ -161,6 +161,14 @@ def main():
                 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}}]
             thread = host.rpc('thread/start', params)['thread']['id']
             host.turn(thread, 'first', fragments(A))
+            refreshed = params['dynamicTools'] + [{'name': 'new_capture_probe', 'description': 'NEW_CAPTURE_CATALOG_FIXTURE',
+                'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}}]
+            host.rpc('thread/resume', {'threadId': thread, 'dynamicTools': refreshed, 'excludeTurns': True})
+            host.turn(thread, 'catalog_refresh', fragments(A))
+            assert 'new_capture_probe' in json.dumps(captures[-1][2]), 'Resumed model request kept stale tools'
+            host.rpc('thread/resume', {'threadId': thread, 'dynamicTools': params['dynamicTools'], 'excludeTurns': True})
+            host.turn(thread, 'catalog_remove', fragments(A))
+            assert 'new_capture_probe' not in json.dumps(captures[-1][2]), 'Removed tool leaked into next request'
             host.turn(thread, 'replace', fragments(B))
             host.turn(thread, 'clear', {})
             host.turn(thread, 'tool_roundtrip', fragments(B))
@@ -181,6 +189,10 @@ def main():
             # A new process must rebuild history without the automatic snippets.
             host = Host(args.command, home, server.server_port)
             host.rpc('thread/resume', {'threadId': thread, **params})
+            host.rpc('thread/resume', {'threadId': thread, 'dynamicTools': refreshed, 'excludeTurns': True})
+            host.turn(thread, 'cold_catalog_refresh', fragments(A))
+            assert 'new_capture_probe' in json.dumps(captures[-1][2]), 'Cold resume failed to refresh tools'
+            host.rpc('thread/resume', {'threadId': thread, 'dynamicTools': params['dynamicTools'], 'excludeTurns': True})
             host.turn(thread, 'resume', {})
             host.close(); host = None
             expected = {'first': (1, 0), 'replace': (0, 1), 'clear': (0, 0),
