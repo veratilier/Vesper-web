@@ -7,6 +7,8 @@ import re
 import subprocess
 import sys
 import threading
+from pathlib import Path
+from datetime import datetime
 
 RENDER_LOCK = threading.BoundedSemaphore(1)
 
@@ -38,6 +40,9 @@ def select_messages(connection, conversation_id, ids):
 
 
 def document(data):
+    # Bundle the actual default Vesper artwork so background rendering needs no
+    # external request and still works while the app is closed.
+    artwork = base64.b64encode((Path(__file__).parent / 'screenshot-assets' / 'vesper-marble.jpg').read_bytes()).decode('ascii')
     rows = []
     for message in data['messages']:
         own = message['role'] == 'agent'
@@ -50,13 +55,21 @@ def document(data):
                 images.append('<img src="https://api.vesper.r-vera.com/api/media/' + key + '">')
             else:
                 images.append('<p class="file">' + html.escape(str(item.get('name', 'Attachment'))) + '</p>')
-        rows.append('<section class="row ' + ('own' if own else 'other') + '"><small>' + ('Rowan' if own else 'Vera') + ' · ' + html.escape(message['createdAt']) + '</small><div class="bubble">' + ''.join(images) + '<div class="text">' + html.escape(message['content']) + '</div></div></section>')
+        try:
+            timestamp = datetime.fromisoformat(message['createdAt'].replace('Z', '+00:00')).strftime('%H:%M')
+        except ValueError:
+            timestamp = message['createdAt']
+        rows.append('<section class="row ' + ('own' if own else 'other') + '"><small>' + ('Rowan' if own else 'Vera') + ' · ' + html.escape(timestamp) + '</small><div class="bubble">' + ''.join(images) + '<div class="text">' + html.escape(message['content']) + '</div></div></section>')
     return '''<!doctype html><html lang="zh"><meta charset="utf-8"><style>
-    *{box-sizing:border-box}body{margin:0;background:#f7f8fb;color:#222;font:16px/1.65 Arial,"Noto Sans CJK SC",sans-serif;width:430px;padding:24px 18px}
-    header{font-size:18px;text-align:center;padding:0 0 20px;border-bottom:1px solid #dbe0e8;margin-bottom:20px}
-    header small{display:block;font-size:11px;color:#627080}.row{display:flex;flex-direction:column;align-items:flex-start;margin:18px 0}.own{align-items:flex-end}
-    small{font-size:10px;color:#69788a;margin-bottom:5px}.bubble{max-width:88%;border-radius:17px;background:white;padding:12px 15px;overflow-wrap:anywhere}.own .bubble{background:#e0eaf5}.text{white-space:pre-wrap}img{max-width:100%;max-height:420px;object-fit:contain;border-radius:9px}.file{font-size:12px}footer{text-align:center;font-size:10px;color:#718098;margin-top:24px}
-    </style><header>''' + html.escape(data['title']) + '<small>Rowan’s view · Selected original messages</small></header>' + ''.join(rows) + '<footer>Vesper</footer></html>'
+    *{box-sizing:border-box}body{margin:0;width:430px;padding:24px 20px 18px;color:#2b3b45;font:15px/1.75 "PingFang SC","Noto Sans CJK SC",sans-serif;
+    background-color:#eaf0f5;background-image:linear-gradient(rgba(255,255,255,.16),rgba(255,255,255,.16)),url("data:image/jpeg;base64,''' + artwork + '''");background-position:center;background-size:cover}
+    header{padding:0 4px 18px;border-bottom:1px solid rgba(57,76,79,.12);margin-bottom:26px}
+    .brand{font-size:24px;line-height:1.2;font-weight:400;letter-spacing:.015em}header small{display:block;font-size:11px;margin-top:8px}
+    .row{display:flex;flex-direction:column;align-items:flex-start;margin:28px 0}.own{align-items:flex-end;text-align:right}
+    small{font-size:10px;color:#576b75;margin-bottom:7px}.bubble{max-width:88%;padding:4px;overflow-wrap:anywhere;background:transparent;border:0;border-radius:0}
+    .text{white-space:pre-wrap}img{max-width:100%;max-height:420px;object-fit:contain;border-radius:14px}.file{font-size:12px}
+    footer{font-size:10px;color:#576b75;border-top:1px solid rgba(57,76,79,.12);padding-top:12px;margin-top:30px;letter-spacing:.03em}
+    </style><header><div class="brand">Vesper</div><small>''' + html.escape(data['title']) + '</small></header>' + ''.join(rows) + '<footer>Rowan · Vera</footer></html>'
 
 
 def render(data):
