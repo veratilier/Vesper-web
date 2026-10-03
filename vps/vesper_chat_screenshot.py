@@ -150,6 +150,8 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.querySelector('.message > div > p')?.textContent || ''}))")
         if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
             raise ValueError('Rendered webpage messages do not match the selected originals')
+        if not page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.every(row => { const p=row.querySelector('.message > div > p'); return !p || getComputedStyle(p).textAlign === (row.classList.contains('agent-turn') ? 'right' : 'left'); })"):
+            raise ValueError('Webpage did not apply the requested agent perspective')
         phase('fonts and images')
         page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
         page.wait_for_function('Array.from(document.querySelectorAll(".chat-capture img")).every(i => i.complete && i.naturalWidth > 0)', timeout=10000)
