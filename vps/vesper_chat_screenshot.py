@@ -112,6 +112,10 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             if asset_proxy and kind == 'asset':
                 parsed = urlparse(url)
                 url = asset_proxy + parsed.path + ('?' + parsed.query if parsed.query else '')
+                # Dev servers reject a forwarded production Origin. This is
+                # confined to the isolated local-application integration test.
+                headers['origin'] = asset_proxy
+                headers['referer'] = asset_proxy + '/'
             response = route.fetch(url=url, headers=headers, max_redirects=0, timeout=15000)
             if response.status != 200:
                 route.abort(); return
