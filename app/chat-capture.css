@@ -21,7 +21,7 @@
   --text-chat: 17px;
   width: 100% !important;
   max-width: 393px !important;
-  min-height: 852px;
+  min-height: 852px !important;
   margin: 0 auto !important;
   border: 0 !important;
   border-radius: 0 !important;
