@@ -103,7 +103,7 @@ def render_child(data):
             raise ValueError('Original images failed to load')
         if page.evaluate('document.documentElement.scrollHeight') > 10000:
             raise ValueError('Excerpt is too tall; select fewer original messages')
-        picture = page.screenshot(type='jpeg', quality=82, full_page=True)
+        picture = page.locator('body').screenshot(type='jpeg', quality=82)
         browser.close()
         if len(picture) > 4 * 1024 * 1024:
             raise ValueError('Screenshot too large; select fewer messages')
