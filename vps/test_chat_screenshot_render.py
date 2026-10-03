@@ -1,5 +1,6 @@
 """Browser integration: real Vesper app served locally, fixture read APIs only."""
 import base64
+import faulthandler
 import os
 import subprocess
 import time
@@ -12,6 +13,7 @@ import vesper_chat_screenshot as screenshot
 @unittest.skipUnless(os.environ.get('VESPER_TEST_SCREENSHOT_RENDER') == '1', 'real Chrome integration runs in screenshot CI')
 class ScreenshotRenderTests(unittest.TestCase):
     def test_jpeg_from_actual_webpage(self):
+        faulthandler.dump_traceback_later(75, exit=True)
         data = {'title': '截图测试', 'conversationId': 'capture-fixture', 'messageIds': ['u', 'a'], 'messages': [
             {'id': 'u', 'role': 'user', 'content': '哥哥，记得这个下午吗？\n测试消息 <script>不会执行</script>', 'createdAt': '2026-10-03T12:00:00+08:00', 'attachments': []},
             {'id': 'a', 'role': 'agent', 'content': '记得。把这段留在相册里。', 'createdAt': '2026-10-03T12:01:00+08:00', 'attachments': []}]}
@@ -35,6 +37,7 @@ class ScreenshotRenderTests(unittest.TestCase):
                 print(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
                 raise
             finally:
+                faulthandler.cancel_dump_traceback_later()
                 server.terminate()
                 try: server.wait(timeout=5)
                 except subprocess.TimeoutExpired: server.kill()

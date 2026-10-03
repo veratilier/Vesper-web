@@ -123,10 +123,14 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             route.fulfill(response=response)
         context.route('**/*', route_request)
         page = context.new_page()
+        def phase(name):
+            if fixtures is not None: print('Capture fixture phase:', name, file=sys.stderr, flush=True)
         if fixtures is not None:
             page.on('pageerror', lambda error: print('Capture fixture page error:', str(error), file=sys.stderr))
             page.on('console', lambda message: print('Capture fixture console:', message.text[:600], file=sys.stderr) if message.type == 'error' else None)
+        phase('navigation')
         page.goto(capture_url(data), wait_until='domcontentloaded', timeout=20000)
+        phase('chat readiness')
         try:
             page.locator('.chat-capture[data-capture-ready="true"] .codex-chat[data-capture-history="ready"]').wait_for(timeout=20000)
         except Exception:
@@ -134,23 +138,26 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
                 print('Capture fixture DOM:', page.locator('body').inner_text()[:2000], 'Read APIs:', loaded, file=sys.stderr)
             raise
         if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
+        phase('original text verification')
         # Verify that the real UI rendered precisely the selected original text.
         actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.querySelector('.message > div > p')?.textContent || ''}))")
         if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
             raise ValueError('Rendered webpage messages do not match the selected originals')
-        page.evaluate('document.fonts.ready')
+        phase('fonts and images')
+        page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
         page.wait_for_function('Array.from(document.querySelectorAll(".chat-capture img")).every(i => i.complete && i.naturalWidth > 0)', timeout=10000)
         # Wait for the actual saved background, including a data-URI upload.
         page.evaluate(r"""async () => {
           const bg = getComputedStyle(document.querySelector('.chat-capture')).backgroundImage;
-          await Promise.all([...bg.matchAll(/url\(["']?(.+?)["']?\)/g)].map(match => new Promise((resolve,reject) => {
+          await Promise.race([Promise.all([...bg.matchAll(/url\(["']?(.+?)["']?\)/g)].map(match => new Promise((resolve,reject) => {
             const image = new Image(); image.onload=resolve; image.onerror=reject; image.src=match[1];
-          })));
+          }))), new Promise((_,reject)=>setTimeout(()=>reject(new Error('Background did not load')),10000))]);
         }""")
         target = page.locator('.chat-capture > .app-shell')
         height = target.evaluate('el => Math.ceil(el.scrollHeight)')
         if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
         page.set_viewport_size({'width': 430, 'height': max(300, height)})
+        phase('screenshot')
         picture = target.screenshot(type='jpeg', quality=82)
         browser.close()
     if len(picture) > 4 * 1024 * 1024:
