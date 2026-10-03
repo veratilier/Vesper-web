@@ -15,3 +15,60 @@
 .chat-capture .app-shell { height: auto !important; overflow: visible !important; }
 .chat-capture .scroll-view:not([hidden]) { position: relative !important; height: auto !important; overflow: visible !important; padding-bottom: 0 !important; }
 .chat-capture .scroll-view[hidden] { display: none !important; }
+
+/* A phone-width transcript in Rowan's perspective, using the real chat DOM. */
+.chat-capture .app-shell {
+  --text-chat: 17px;
+  width: 100% !important;
+  max-width: 393px !important;
+  min-height: 852px;
+  margin: 0 auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.chat-capture .app-shell .app-header.chat-mode {
+  height: 76px;
+  min-height: 76px;
+  padding: 12px 20px;
+  background: transparent;
+}
+.chat-capture .app-header > .icon-button {
+  display: grid !important;
+  width: 32px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.chat-capture .app-header > .icon-button svg { width: 26px; height: 26px; }
+.chat-capture .chat-identity { gap: 5px; }
+.chat-capture .chat-identity .identity-avatar,
+.chat-capture .chat-identity .identity-avatar :is(img, .avatar-mark) {
+  width: 40px !important;
+  height: 40px !important;
+}
+.chat-capture .app-shell .codex-chat {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+}
+.chat-capture .app-shell .codex-chat .chat-stream { padding: 18px 20px 30px !important; gap: 24px; }
+.chat-capture .app-shell .codex-chat .message > div {
+  max-width: calc(100% - 42px);
+  padding: 0 !important;
+}
+.chat-capture .app-shell .codex-chat .message p {
+  font-size: 17px !important;
+  line-height: 1.6 !important;
+}
+.chat-capture .app-shell .codex-chat .agent-turn .message p { font-weight: 600; }
+.chat-capture .app-shell .codex-chat .chat-date-divider { font-family: inherit; font-size: 12px; margin: 4px 0; }
+.codex-chat .capture-message-time { display: none; }
+.chat-capture .codex-chat .capture-message-time {
+  display: block;
+  margin-top: 8px;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Noto Sans CJK SC", sans-serif;
+  color: var(--ui-muted);
+}
+.chat-capture .codex-chat .agent-turn > .capture-message-time { align-self: flex-end; }
+.chat-capture .codex-chat .sent-turn > .capture-message-time { align-self: flex-start; }
+.chat-capture .codex-chat :is(.turn-status, .message-actions) { display: none !important; }

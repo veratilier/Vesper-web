@@ -45,6 +45,11 @@ class ScreenshotRenderTests(unittest.TestCase):
                 picture = base64.b64decode(result['base64'])
                 self.assertTrue(picture.startswith(b'\xff\xd8'))
                 self.assertGreater(len(picture), 10000)
+                from io import BytesIO
+                from PIL import Image
+                width, height = Image.open(BytesIO(picture)).size
+                self.assertEqual(width, screenshot.PHONE_WIDTH * 2)
+                self.assertGreaterEqual(height, screenshot.PHONE_HEIGHT * 2)
                 Path('screenshot-fixture.jpg').write_bytes(picture)
             except Exception:
                 print(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
