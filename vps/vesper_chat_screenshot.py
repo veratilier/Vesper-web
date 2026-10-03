@@ -58,6 +58,9 @@ def _render(data, token):
     return output
 
 
+PHONE_WIDTH = 393
+PHONE_HEIGHT = 852
+
 WEB_ORIGIN = 'https://vesper.r-vera.com'
 API_ORIGIN = 'https://api.vesper.r-vera.com'
 HISTORY_ORIGIN = 'https://codex.r-vera.com'
@@ -95,7 +98,7 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel='chrome', headless=True)
-        context = browser.new_context(viewport={'width': 430, 'height': 800}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
+        context = browser.new_context(viewport={'width': PHONE_WIDTH, 'height': PHONE_HEIGHT}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
         # A routed socket without connect_to_server is isolated and drops its
         # messages. Closing inside the route callback can stall Chrome's route
         # handshake; no actual backend connection is made here.
@@ -155,6 +158,17 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             raise ValueError('Rendered webpage messages do not match the selected originals')
         if not page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.every(row => { const p=row.querySelector('.message > div > p'); return !p || getComputedStyle(p).textAlign === (row.classList.contains('agent-turn') ? 'right' : 'left'); })"):
             raise ValueError('Webpage did not apply the requested agent perspective')
+        # Both the text and its actual timestamp must follow the chosen side.
+        if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
+            const stamp = row.querySelector('.capture-message-time');
+            const text = row.querySelector('.message > div > p');
+            if (!stamp) return false;
+            const r = row.getBoundingClientRect(), t = stamp.getBoundingClientRect();
+            const own = row.classList.contains('agent-turn');
+            return (!text || getComputedStyle(text).fontSize === '17px') &&
+                (own ? Math.abs(t.right - r.right) < 4 : Math.abs(t.left - r.left) < 4);
+        })"""):
+            raise ValueError('Capture timestamp alignment or phone text sizing was not applied')
         phase('fonts and images')
         page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
         page.wait_for_function(VISIBLE_IMAGES_READY, timeout=10000)
@@ -168,7 +182,7 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         target = page.locator('.chat-capture > .app-shell')
         height = target.evaluate('el => Math.ceil(el.scrollHeight)')
         if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
-        page.set_viewport_size({'width': 430, 'height': max(300, height)})
+        page.set_viewport_size({'width': PHONE_WIDTH, 'height': max(PHONE_HEIGHT, height)})
         phase('screenshot')
         picture = target.screenshot(type='jpeg', quality=82)
         browser.close()

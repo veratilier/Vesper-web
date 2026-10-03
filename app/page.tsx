@@ -3655,6 +3655,7 @@ function CodexChatMessage({
         <button className="message-action danger" aria-label="Delete" title="Delete" onClick={() => void onDelete(item).catch(() => {})}><Icon name="trash" /></button>
       </div>}
       <MessageAttachments items={item.metadata?.attachments || []} onSaveAsSticker={onSaveAttachmentAsSticker ? (attachment) => onSaveAttachmentAsSticker(attachment, item) : undefined} />
+      <time className="capture-message-time" dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined}>{stamp}</time>
     </div>
   );
 }
