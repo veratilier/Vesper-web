@@ -26,6 +26,7 @@ jobs:
       - run: node --experimental-strip-types tools/test-chat-terminal-feed.ts
       - run: npm run test:codex
       - run: npm run test:memory
+      - run: node tools/test-chat-keeps.mjs
       - run: node tools/test-reconcile.mjs
       - run: node --test tests/service-worker.test.mjs tests/browser-storage.test.mjs
       - name: VPS isolated regression tests
