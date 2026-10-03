@@ -93,7 +93,10 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel='chrome', headless=True)
         context = browser.new_context(viewport={'width': 430, 'height': 800}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
-        context.route_web_socket('**/*', lambda socket: socket.close())
+        # A routed socket without connect_to_server is isolated and drops its
+        # messages. Closing inside the route callback can stall Chrome's route
+        # handshake; no actual backend connection is made here.
+        context.route_web_socket('**/*', lambda socket: None)
         context.add_init_script("localStorage.setItem('vesper-device-token','capture-session');")
         loaded = {'history': False, 'app': False}
         def route_request(route):
