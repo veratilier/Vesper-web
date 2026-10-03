@@ -1,3 +1,98 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+index 2e166d5..82e8f47 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+@@ -353,6 +353,10 @@ pub struct ThreadSettingsUpdatedNotification {
+ /// Prefer using thread_id whenever possible.
+ pub struct ThreadResumeParams {
+     pub thread_id: String,
++    /// Vesper: replace host-owned tools for future turns. Omitted preserves them.
++    #[serde(default, deserialize_with = "codex_protocol::dynamic_tools::deserialize_dynamic_tool_specs")]
++    #[ts(optional = nullable)]
++    pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
+ 
+     /// [UNSTABLE] FOR CODEX CLOUD - DO NOT USE.
+     /// If specified, the thread will be resumed with the provided history
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+index 289cb63..c749859 100644
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -562,6 +562,9 @@ impl ThreadRequestProcessor {
+         app_server_client_version: Option<String>,
+         client_mcp_extensions: ClientMcpExtensions,
+     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
++        if let Some(tools) = &params.dynamic_tools {
++            validate_dynamic_tools(tools).map_err(invalid_request)?;
++        }
+         let mut prepared_config = None;
+         // Keep the resume future off the request handler's stack.
+         while Box::pin(self.thread_resume_inner(
+@@ -3668,6 +3671,13 @@ impl ThreadRequestProcessor {
+             should_redact_thread_resume_payloads(app_server_client_name.as_deref());
+ 
+         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
++        // Refresh a loaded thread before the resume response can reach its host.
++        if let Some(tools) = &params.dynamic_tools
++            && let Ok(id) = ThreadId::from_string(&params.thread_id)
++            && let Ok(thread) = self.thread_manager.get_thread(id).await
++        {
++            thread.replace_dynamic_tools(tools.clone()).await;
++        }
+         let stored_thread_from_running_probe = match target {
+             ThreadResumeTarget::Client(request_id) => match self
+                 .resume_running_thread(
+@@ -3704,6 +3714,7 @@ impl ThreadRequestProcessor {
+ 
+         let ThreadResumeParams {
+             thread_id,
++            dynamic_tools,
+             history,
+             path,
+             model,
+@@ -3991,6 +4002,9 @@ impl ThreadRequestProcessor {
+                 session_configured,
+                 ..
+             }) => {
++                if let Some(tools) = dynamic_tools {
++                    codex_thread.replace_dynamic_tools(tools).await;
++                }
+                 let ThreadResumeTarget::Client(request_id) = target else {
+                     // Observe lifecycle events without attaching a client subscription.
+                     self.thread_watch_manager
+diff --git a/codex-rs/core/src/codex_thread.rs b/codex-rs/core/src/codex_thread.rs
+index 316af05..17aa623 100644
+--- a/codex-rs/core/src/codex_thread.rs
++++ b/codex-rs/core/src/codex_thread.rs
+@@ -617,6 +617,13 @@ impl CodexThread {
+ 
+     /// Queues settings for future turns and waits for Core to accept or reject them.
+     /// Rejections are returned to the caller instead of emitted as thread errors.
++    pub async fn replace_dynamic_tools(
++        &self,
++        tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
++    ) {
++        self.session.replace_dynamic_tools(tools).await;
++    }
++
+     pub async fn update_thread_settings(
+         &self,
+         thread_settings: ThreadSettingsOverrides,
+diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
+index 902d183..b15959e 100644
+--- a/codex-rs/core/src/session/mod.rs
++++ b/codex-rs/core/src/session/mod.rs
+@@ -1844,6 +1844,11 @@ impl Session {
+         state.set_previous_turn_settings(previous_turn_settings);
+     }
+ 
++    pub(crate) async fn replace_dynamic_tools(&self, tools: Vec<DynamicToolSpec>) {
++        // Accepted turns own a snapshot; refresh only subsequent turn contexts.
++        self.state.lock().await.session_configuration.dynamic_tools = tools;
++    }
++
+     pub(crate) async fn update_settings(
+         &self,
+         updates: SessionSettingsUpdate,
 diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
 index b88b343..d561777 100644
 --- a/codex-rs/core/src/session/turn.rs
