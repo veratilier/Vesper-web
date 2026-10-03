@@ -6,6 +6,8 @@ This change uses the existing private history service, Worker media bucket and s
 
 Update `codex_history_server.py`, `vesper_chat_screenshot.py`, `vesper_wake_runner.py`, `vesper_wake_store.py`, `vesper_wake_tools.py` together from the checked main commit into the existing `/home/ubuntu/vesper-codex-history` checkout. Preserve its database, token and service configuration.
 
+Also copy `vps/screenshot-assets/` alongside `vesper_chat_screenshot.py`. It contains the existing Vesper default blue marble artwork used by the native App and Web. Screenshots use the native chat's transparent text layout, blue ink and CJK system-font fallback, with Rowan right and Vera left. The renderer uses this bundled default theme; it does not yet synchronize device-local black/white palette choices.
+
 As the existing service user, install the renderer:
 
 ```sh
