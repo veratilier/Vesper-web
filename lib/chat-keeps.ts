@@ -7,10 +7,11 @@ export async function historyRead(path: string, body?: unknown) {
   const token = (env as unknown as { VESPER_APP_TOKEN?: string }).VESPER_APP_TOKEN;
   if (!token) throw new Error('History access is unavailable');
   const response = await fetch('https://codex.r-vera.com/history' + path, {
-    method: body === undefined ? 'GET' : 'POST', redirect: 'error',
+    method: body === undefined ? 'GET' : 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(45000),
   });
+  if (response.status >= 300 && response.status < 400) throw new Error('History redirect blocked; screenshot access was not confirmed');
   const data = await response.json() as { error?: string; mimeType?: string; base64?: string; digest?: string; messageIds?: string[]; results?: Record<string, unknown>[]; hasMore?: boolean; messages?: { id: string; metadata?: { attachments?: { key?: string }[] } }[] };
   if (!response.ok) throw new Error(data.error || 'History request failed');
   return data;
