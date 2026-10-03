@@ -22,6 +22,8 @@ jobs:
       - run: npm run test:desire
       - run: node --experimental-strip-types tools/test-voice-recognition.ts
       - run: node tools/test-voice-http.mjs
+      - run: node --experimental-strip-types tools/test-web-chat-context.ts
+      - run: node --experimental-strip-types tools/test-chat-terminal-feed.ts
       - run: npm run test:codex
       - run: npm run test:memory
       - run: node tools/test-reconcile.mjs

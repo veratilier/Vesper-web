@@ -3,6 +3,11 @@ import { VESPER_DESIRE_SESSION_CONFIG, VESPER_DESIRE_INSTRUCTIONS } from "@/lib/
 import { WEB_MUSIC, neteaseTrackId, webQueue } from "@/lib/web-music";
 import { resolveWebMusic } from "@/lib/web-music-playback";
 import { createVoiceRecognition, type SpeechSession } from "@/lib/voice-recognition";
+import { visibleUserContext, visibleUserItem } from "@/lib/web-chat-context";
+import { ChatContacts } from "./chat-contacts";
+import { ChatLiveTerminal } from "./chat-live-terminal";
+import { ChatStatusPopover } from "./chat-status-popover";
+import "./web-chat-parity.css";
 import { browserStorage } from "@/lib/browser-storage";
 import "./storage-notice.css";
 import { Capacitor } from "@capacitor/core";
@@ -411,7 +416,7 @@ const brokenIconPaths: Record<string, string[]> = {
   menu: ["M4 6h16M4 12h10M18 12h2M4 18h16"],
 };
 function Icon({ name }: { name: string }) {
-  const paths = brokenIconPaths[name] || iconPaths[name] || iconPaths.sparkles;
+  const paths = name === "chatBack" ? ["m15 5-7 7 7 7"] : name === "terminal" ? ["M3 4h18v16H3z", "m6 8 3 3-3 3", "M12 15h5"] : brokenIconPaths[name] || iconPaths[name] || iconPaths.sparkles;
   return (
     <svg
       className="ui-icon"
@@ -764,9 +769,20 @@ function HomeContent() {
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
+  const [chatDetailOpen, setChatDetailOpen] = useState(false);
+  const [chatEverOpened, setChatEverOpened] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [historyTab, setHistoryTab] = useState<"conversations" | "favorites">("conversations");
   const [conversationId, setConversationId] = useState(() => latestLocalConversationId());
   const [watchConversationId, setWatchConversationId] = useLocalDocument("watch-conversation", "watch-together");
   const [focusMessageId, setFocusMessageId] = useState("");
+  const openChat = (id: string, messageId = "") => {
+    setTerminalOpen(false); setConversationId(id); setFocusMessageId(messageId); setChatDetailOpen(true); setChatEverOpened(true);
+  };
+  const newChat = () => {
+    const id = `chat-${Date.now()}-${crypto.randomUUID()}`;
+    rememberConversation(id, "New conversation"); openChat(id);
+  };
   const initialProfile = readLocalValue("vesper-local-profile", { userName: "Vera", agentName: "Rowan", userAvatar: "", agentAvatar: "" });
   const storedAppearance = readLocalValue("vesper-local-appearance", { accent: "#647e94", background: DEFAULT_APP_BACKGROUND });
   const initialAppearance = {
@@ -1048,7 +1064,7 @@ function HomeContent() {
       if (event.data?.type !== 'vesper-open-section') return;
       if (event.data.section === 'chat' && typeof event.data.conversationId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(event.data.conversationId)) {
         setVisitedSections(sections => sections.includes('聊天') ? sections : [...sections, '聊天']);
-        setConversationId(event.data.conversationId); setActive('聊天'); return;
+        setConversationId(event.data.conversationId); setChatDetailOpen(true); setChatEverOpened(true); setActive('聊天'); return;
       }
       if (event.data.section !== 'desire') return;
       setVisitedSections(sections => sections.includes('欲望') ? sections : [...sections, '欲望']);
@@ -1061,7 +1077,7 @@ function HomeContent() {
     const query = new URLSearchParams(window.location.search);
     if (query.get('section') === 'chat' && /^[a-zA-Z0-9:_-]{1,128}$/.test(query.get('conversation') || '')) {
       setVisitedSections(sections => sections.includes('聊天') ? sections : [...sections, '聊天']);
-      setConversationId(query.get('conversation')!); setActive('聊天');
+      setConversationId(query.get('conversation')!); setChatDetailOpen(true); setChatEverOpened(true); setActive('聊天');
     }
     if (query.get('section') === 'desire') {
       setVisitedSections(sections => sections.includes('欲望') ? sections : [...sections, '欲望']);
@@ -1328,22 +1344,13 @@ function HomeContent() {
   } as CSSProperties;
   const navigateTo = (label: string) => {
     setDrawerOpen(false);
+    setTerminalOpen(false);
+    if (label === "聊天") setChatDetailOpen(false);
     if (label !== active) setActive(label);
   };
-  const chatInitialized = useRef(false);
   useEffect(() => {
-    if (active !== "聊天" || chatInitialized.current) return;
-    let cancelled = false;
-    void resolveLatestConversationId().then((id) => {
-      if (!cancelled) {
-        chatInitialized.current = true;
-        setConversationId(id);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
+    if (wakeRequest) { setChatDetailOpen(true); setChatEverOpened(true); }
+  }, [wakeRequest]);
   useEffect(() => {
     let live = true;
     let hasLocalAppearance = false;
@@ -1444,11 +1451,12 @@ function HomeContent() {
         >
           <button
             className="icon-button"
-            aria-label="Open navigation"
-            onClick={() => setDrawerOpen(true)}
+            aria-label={active === "聊天" && chatDetailOpen ? "Back to contacts" : "Open navigation"}
+            onClick={() => { if (active === "聊天" && chatDetailOpen) { setChatDetailOpen(false); setTerminalOpen(false); } else setDrawerOpen(true); }}
           >
-            <Icon name="menu" />
+            <Icon name={active === "聊天" && chatDetailOpen ? "chatBack" : "menu"} />
           </button>
+          {active === "聊天" && chatDetailOpen && <span id="web-chat-status-anchor" />}
           {active === "今日" ? (
             <div className="wordmark">
               <span className="home-app-mark">
@@ -1456,7 +1464,7 @@ function HomeContent() {
               </span>
               <b>Vesper</b>
             </div>
-          ) : active === "聊天" ? (
+          ) : active === "聊天" && chatDetailOpen ? (
             <div
               className="chat-identity"
               aria-label={`${userName} and ${agentName}`}
@@ -1469,28 +1477,14 @@ function HomeContent() {
           )}
           {active === "聊天" ? (
             <div className="chat-header-actions">
-              <button
-                aria-label="New conversation"
-                onClick={() => {
-                  const id = `chat-${Date.now()}-${crypto.randomUUID()}`;
-                  rememberConversation(id, "New conversation");
-                  setConversationId(id);
-                }}
-              >
-                <Icon name="plus" />
-              </button>
-              <button
-                aria-label="Voice call"
-                onClick={() => setVoiceCallOpen(true)}
-              >
-                <Icon name="phone" />
-              </button>
-              <button
-                aria-label="Chat history"
-                onClick={() => setHistoryOpen(true)}
-              >
-                <Icon name="archive" />
-              </button>
+              {chatDetailOpen ? <>
+                <button aria-label="Live terminal" onClick={() => setTerminalOpen(true)}><Icon name="terminal" /></button>
+                <button aria-label="Voice call" onClick={() => setVoiceCallOpen(true)}><Icon name="phone" /></button>
+              </> : <>
+                <button aria-label="New conversation" onClick={newChat}><Icon name="plus" /></button>
+                <button aria-label="Favorites" onClick={() => { setHistoryTab("favorites"); setHistoryOpen(true); }}><Icon name="bookmark" /></button>
+              </>}
+              <button aria-label="Chat history" onClick={() => { setHistoryTab("conversations"); setHistoryOpen(true); }}><Icon name="archive" /></button>
             </div>
           ) : active === "音乐" ? (
             <span className="music-header-spacer" aria-hidden="true" />
@@ -1521,12 +1515,16 @@ function HomeContent() {
               onOpenSection={(section) => setActive(section)}
             />
           ) : section === "聊天" ? (
-              active === "Cinema" && conversationId === watchConversationId ? null : <ConnectedChat
+            <>
+              {!chatDetailOpen && <ChatContacts active={active === "聊天"} agentName={agentName} avatar={agentAvatar} cached={readLocalValue<ConversationSummary[]>("vesper-local-conversation-index", [])} request={requestContactHistory} onSelect={openChat} onNew={newChat} />}
+              {chatEverOpened && <div className="chat-detail-host" hidden={!chatDetailOpen}>
+              {active === "Cinema" && conversationId === watchConversationId ? null : <ConnectedChat
+                chatVisible={active === "聊天" && chatDetailOpen}
                 wakeRequest={wakeRequest}
                 onWakeHandled={() => setWakeRequest(null)}
                 key={conversationId}
                 conversationId={conversationId}
-                onSelectConversation={setConversationId}
+                onSelectConversation={openChat}
               agentName={agentName}
               userName={userName}
                 favorites={favorites}
@@ -1543,7 +1541,8 @@ function HomeContent() {
                   setMusicPlaylistIntent(card);
                   setActive("音乐");
                 }}
-              />
+              />}</div>}
+            </>
           ) : section === "日记" ? (
             <Diary />
           ) : section === "便笺" ? (
@@ -1611,6 +1610,7 @@ function HomeContent() {
             <DesirePanel agentName={agentName} apiUrl={apiUrl} headers={appHeaders} active={active === "欲望"} onWake={() => { setWakeRequest(crypto.randomUUID()); navigateTo("聊天"); }} />
           ) : section === "设置" ? (
             <SettingsPage
+              active={active === "设置"}
               onOpenSection={navigateTo}
               accent={accent}
               onAccent={(value) => setAccent(normalizeNeutralAccent(value))}
@@ -1689,25 +1689,25 @@ function HomeContent() {
         </div>
         {historyOpen && (
           <HistoryModal
+            initialTab={historyTab}
             activeId={conversationId}
             favorites={favorites}
             onSelect={(id) => {
-              setConversationId(id);
-              setFocusMessageId("");
+              openChat(id);
               setHistoryOpen(false);
             }}
             onDelete={(id) => {
               if (id === conversationId) setConversationId("main");
             }}
             onSelectFavorite={(item) => {
-              setConversationId(item.conversationId);
-              setFocusMessageId(item.messageId);
+              openChat(item.conversationId, item.messageId);
               setHistoryOpen(false);
             }}
             onRemoveFavorite={(id) => setFavorites((items) => items.filter((item) => item.id !== id))}
             onClose={() => setHistoryOpen(false)}
           />
         )}
+        {terminalOpen && <ChatLiveTerminal key={conversationId} conversationId={conversationId} request={requestTerminalHistory} onClose={() => setTerminalOpen(false)} />}
         {voiceCallOpen && (
           <VoiceCallModal
             agentName={agentName}
@@ -2082,6 +2082,7 @@ type ConversationSummary = {
   updatedAt: string;
   createdAt?: string;
   messageCount: number;
+  preview?: string;
 };
 
 function conversationUpdatedTimestamp(item: ConversationSummary) {
@@ -2141,6 +2142,7 @@ function rememberConversation(id: string, title = "New conversation", messageCou
 }
 
 function HistoryModal({
+  initialTab = "conversations",
   activeId,
   favorites,
   onSelect,
@@ -2149,6 +2151,7 @@ function HistoryModal({
   onDelete,
   onClose,
 }: {
+  initialTab?: "conversations" | "favorites";
   activeId: string;
   favorites: FavoriteItem[];
   onSelect: (id: string) => void;
@@ -2161,7 +2164,7 @@ function HistoryModal({
     readLocalValue<ConversationSummary[]>("vesper-local-conversation-index", []),
   );
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"conversations" | "favorites">("conversations");
+  const [tab, setTab] = useState<"conversations" | "favorites">(initialTab);
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuId, setMenuId] = useState("");
   const [historyError, setHistoryError] = useState("");
@@ -3207,13 +3210,7 @@ function visibleAssistantText(item: CodexItem) {
 }
 
 function visibleUserText(item: CodexItem) {
-  if (typeof item.text === "string") return item.text;
-  if (!Array.isArray(item.content)) return "";
-  return item.content.flatMap((part) => {
-    if (!part || typeof part !== "object") return [];
-    const value = part as { text?: unknown };
-    return typeof value.text === "string" ? [value.text] : [];
-  }).join("");
+  return visibleUserItem(item);
 }
 
 function codexTimestamp(value: unknown, fallback = "") {
@@ -3232,7 +3229,9 @@ function normalizeCodexMessages(value: unknown, conversationId: string): BridgeC
   if (!Array.isArray(value)) return [];
   return value.flatMap((raw) => {
     if (!raw || typeof raw !== "object") return [];
-    const item = raw as BridgeChatMessage;
+    const original = raw as BridgeChatMessage;
+    const item = original.role === "user" ? { ...original, content: visibleUserContext(original.content || "") } : original;
+    if (original.role === "user" && original.content && !item.content.trim() && !item.metadata?.attachments?.length && !item.metadata?.sticker) return [];
     // These markers identify only Vesper's former internal presentation and
     // memory input. They are never user-authored messages and must not survive
     // a restore from local cache, the VPS history service, or a legacy import.
@@ -3272,6 +3271,13 @@ const CODEX_HISTORY_ORIGIN = "https://codex.r-vera.com/history";
 
 function codexHistoryUrl(path: string) {
   return `${CODEX_HISTORY_ORIGIN}${path}`;
+}
+
+function requestContactHistory(path: string, signal: AbortSignal) {
+  return fetch(codexHistoryUrl(path), { headers: codexHistoryHeaders(), cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]) });
+}
+function requestTerminalHistory(path: string, options: RequestInit = {}) {
+  return fetch(codexHistoryUrl(path), { ...options, headers: codexHistoryHeaders(options.method === "POST"), cache: "no-store" });
 }
 
 function codexHistoryHeaders(json = false) {
@@ -3697,6 +3703,7 @@ function MusicMessageCard({
 }
 
 function ConnectedChat({
+  chatVisible = false,
   watchMode = false,
   watchActive = false,
   wakeRequest,
@@ -3715,6 +3722,7 @@ function ConnectedChat({
   onOpenMusic,
   onAddMusicToPlaylist,
 }: {
+  chatVisible?: boolean;
   watchMode?: boolean;
   watchActive?: boolean;
   wakeRequest?: string | null;
@@ -4887,12 +4895,12 @@ function ConnectedChat({
         socket.current.send(JSON.stringify({ id: request.id, result }));
         setToolQuestions(current => current.filter(entry => entry.id !== request.id));
       }} />}
-      <div className="chat-status-stack">
+      <ChatStatusPopover fallback={watchMode} visible={chatVisible} online={online} busy={busy || !historyReady} warning={Boolean(error || historyWarning || toolUpgradeNeeded || resumeError)}>
         {error && <div className="chat-restore-error" role="alert"><span>{error}</span>{!online && <button type="button" disabled={busy} onClick={() => void connect().catch(reason => setError(reason instanceof Error ? reason.message : "Connection failed. Please try again."))}>Reconnect</button>}</div>}
         {historyWarning && <div className="chat-history-warning" role="status">{historyWarning}</div>}
         {toolUpgradeNeeded && !resumeError && <div className="chat-history-warning" role="status"><span>This conversation uses an older tool catalog. Start a new conversation to load all current tools, including Vesper’s independent Desire. Existing history is preserved.</span><button type="button" disabled={busy || !online} onClick={() => void createReplacementConversation()}>New conversation with updated tools</button></div>}
         {resumeError && <div className="chat-restore-error" role="alert"><span>{resumeError}</span><button onClick={() => void createReplacementConversation()}>Continue in a new conversation</button></div>}
-      </div>
+      </ChatStatusPopover>
       <div className="chat-stream">
         {!messages.length && !Object.keys(streamingItems).length && <div className="chat-empty"><Icon name="chat" /><b>{!historyReady ? "Preparing conversation…" : "A quiet place to think"}</b><span>One private Codex connection · files, images, audio and tools ready</span></div>}
         {visibleRows.map((item, index) => {
@@ -5163,6 +5171,7 @@ function Todos() {
 }
 
 function SettingsPage({
+  active,
   onOpenSection,
   accent,
   onAccent,
@@ -5170,6 +5179,7 @@ function SettingsPage({
   environment,
   onEnvironment,
 }: {
+  active: boolean;
   onOpenSection: (section: string) => void;
   accent: string;
   onAccent: (value: string) => void;
@@ -5219,6 +5229,7 @@ function SettingsPage({
   return (
     <div className={`${selected ? "page-body settings-page detail-active" : "page-body settings-page"}${detailClosing ? " detail-closing" : ""}`}>
       <PageIntro eyebrow="PREFERENCES" title="Settings" text="Make Vesper feel like you." />
+      <div className="surface settings-usage-card"><SubscriptionUsage active={active && !selected} socketUrl={codexSocketUrl} /></div>
       <div className="settings-category-list settings-accordion">
         <section className="surface settings-accordion-item"><SettingRow icon="sparkles" title="Autonomous Wake" sub="Schedule, controls and recent activity" onClick={() => setSelected("Autonomous Wake")} /></section>
         {[
