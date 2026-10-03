@@ -31,6 +31,9 @@ class ScreenshotRenderTests(unittest.TestCase):
                 self.assertTrue(picture.startswith(b'\xff\xd8'))
                 self.assertGreater(len(picture), 10000)
                 Path('screenshot-fixture.jpg').write_bytes(picture)
+            except Exception:
+                print(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
+                raise
             finally:
                 server.terminate()
                 try: server.wait(timeout=5)

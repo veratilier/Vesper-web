@@ -119,8 +119,16 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             route.fulfill(response=response)
         context.route('**/*', route_request)
         page = context.new_page()
+        if fixtures is not None:
+            page.on('pageerror', lambda error: print('Capture fixture page error:', str(error), file=sys.stderr))
+            page.on('console', lambda message: print('Capture fixture console:', message.text[:600], file=sys.stderr) if message.type == 'error' else None)
         page.goto(capture_url(data), wait_until='domcontentloaded', timeout=20000)
-        page.locator('.chat-capture[data-capture-ready="true"] .codex-chat[data-capture-history="ready"]').wait_for(timeout=20000)
+        try:
+            page.locator('.chat-capture[data-capture-ready="true"] .codex-chat[data-capture-history="ready"]').wait_for(timeout=20000)
+        except Exception:
+            if fixtures is not None:
+                print('Capture fixture DOM:', page.locator('body').inner_text()[:2000], 'Read APIs:', loaded, file=sys.stderr)
+            raise
         if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
         # Verify that the real UI rendered precisely the selected original text.
         actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.querySelector('.message > div > p')?.textContent || ''}))")
