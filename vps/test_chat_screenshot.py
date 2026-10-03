@@ -21,11 +21,9 @@ class OriginalScreenshotTests(unittest.TestCase):
     def test_original_order_and_perspective(self):
         data = screenshot.select_messages(self.db,'one',['u','a'])
         self.assertEqual(data['messages'][0]['content'],'你好 <script>steal()</script>')
-        rendered = screenshot.document(data)
-        self.assertIn('class="row own"><small>Rowan',rendered)
-        self.assertIn('class="row other"><small>Vera',rendered)
-        self.assertIn('&lt;script&gt;',rendered)
-        self.assertNotIn('<script>',rendered)
+        self.assertEqual(data['conversationId'], 'one')
+        self.assertEqual(data['messages'][1]['role'], 'agent')
+        self.assertIn('capture=agent', screenshot.capture_url(data))
 
     def test_wrong_missing_duplicate_reordered_private_ids(self):
         for ids in (['other'],['missing'],['u','u'],['a','u'],['hidden'],[]):
@@ -41,11 +39,14 @@ class OriginalScreenshotTests(unittest.TestCase):
         self.db.execute('UPDATE messages SET content=? WHERE id="u"',('字'*16001,))
         with self.assertRaises(ValueError): screenshot.select_messages(self.db,'one',['u'])
 
-    def test_image_url_is_reconstructed_from_media_key(self):
-        data=screenshot.select_messages(self.db,'one',['u'])
-        data['messages'][0]['attachments']=[{'key':'abc-123.jpg','type':'image/jpeg','url':'http://127.0.0.1/private'}]
-        self.assertIn('https://api.vesper.r-vera.com/api/media/abc-123.jpg',screenshot.document(data))
-        self.assertNotIn('127.0.0.1',screenshot.document(data))
+    def test_browser_request_policy_and_credentials_scope(self):
+        data=screenshot.select_messages(self.db,'one',['u','a'])
+        exact='https://codex.r-vera.com/history/conversations/one?captureMessageId=u&captureMessageId=a'
+        self.assertEqual(screenshot.request_policy(exact,'GET',data),'history')
+        self.assertEqual(screenshot.request_policy('https://api.vesper.r-vera.com/api/state','GET',data),'app')
+        self.assertEqual(screenshot.request_policy('https://vesper.r-vera.com/backgrounds/vesper-marble-20260908.jpg','GET',data),'asset')
+        for url,method in [(exact,'POST'),(exact.replace('one','two'),'GET'),(exact.replace('&captureMessageId=a',''),'GET'),('http://127.0.0.1/private','GET'),('https://evil.test/photo.jpg','GET'),('https://api.vesper.r-vera.com/api/codex/tools','GET'),('https://vesper.r-vera.com/api/state','PUT')]:
+            with self.subTest(url=url,method=method): self.assertIsNone(screenshot.request_policy(url,method,data))
 
 
 if __name__ == '__main__': unittest.main()

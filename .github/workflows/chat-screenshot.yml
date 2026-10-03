@@ -10,11 +10,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python3 -m pip install playwright==1.58.0
-      - run: python3 -m playwright install --with-deps chromium
+      - run: python3 -m playwright install --with-deps chrome
       - run: sudo apt-get install -y fonts-noto-cjk
       - run: python3 vps/test_chat_screenshot.py
       - run: VESPER_TEST_SCREENSHOT_RENDER=1 python3 vps/test_chat_screenshot_render.py

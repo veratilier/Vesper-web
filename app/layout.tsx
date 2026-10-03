@@ -17,6 +17,7 @@ import "./type-scale.css";
 import "./backgrounds.css";
 import "./home-glass.css";
 import "./compact-interface.css";
+import "./chat-capture.css";
 
 const pinyonScript = Pinyon_Script({
   variable: "--font-pinyon-script",

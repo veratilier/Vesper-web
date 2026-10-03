@@ -218,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Screenshot perspective must be agent')
                 with db() as connection:
                     data = chat_screenshot.select_messages(connection, path[1], body.get('messageIds'))
-                self.send_json(200, chat_screenshot.render(data))
+                self.send_json(200, chat_screenshot.render(data, self.watch_secret()))
             except chat_screenshot.ScreenshotUnavailable as error:
                 self.send_json(503, {'error': str(error)})
         elif len(path) >= 3 and path[0] == "conversations" and path[2] == "terminal":
@@ -380,6 +380,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {"results": [dict(message(row), title=row["title"]) for row in rows[:60]], "hasMore": len(rows)>60})
 
     def get_conversation(self, conversation_id: str) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        capture_ids = query.get('captureMessageId')
+        if capture_ids:
+            # Read-only capture does not sync Codex records or write presence.
+            with db() as connection:
+                data = chat_screenshot.select_messages(connection, conversation_id, capture_ids)
+                rows = connection.execute('SELECT * FROM messages WHERE vesper_conversation_id=? AND id IN (' + ','.join('?' for _ in capture_ids) + ') ORDER BY created_at,rowid', (conversation_id, *capture_ids)).fetchall()
+            self.send_json(200, {'conversation': {'id': conversation_id, 'title': data['title']}, 'messages': [message(row) for row in rows], 'tombstones': [], 'hasMore': False})
+            return
         with db() as connection:
             if conversation_delete.is_deleted(connection, conversation_id):
                 self.send_json(404, {"error": "Conversation not found"}); return

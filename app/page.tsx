@@ -17,6 +17,7 @@ import { nativeOAuthCode } from "@/lib/mcp-oauth-callback";
 import { documentSyncAction } from "@/lib/document-sync";
 import { NotificationSettings } from "./notification-settings";
 import { WindowOpening } from "./window-opening";
+import { chatCaptureRequest } from './chat-capture';
 import { WatchPlayer } from "./watch-player";
 import type { WatchFrame } from "./watch-context";
 import { ReadingRoom, type ReadingBook } from "./reading-room";
@@ -776,6 +777,13 @@ function HomeContent() {
   const [conversationId, setConversationId] = useState(() => latestLocalConversationId());
   const [watchConversationId, setWatchConversationId] = useLocalDocument("watch-conversation", "watch-together");
   const [focusMessageId, setFocusMessageId] = useState("");
+  const [captureMode, setCaptureMode] = useState(false);
+  useEffect(() => {
+    const capture = chatCaptureRequest();
+    if (!capture) return;
+    setCaptureMode(true); setActive('聊天'); setConversationId(capture.conversationId);
+    setChatDetailOpen(true); setChatEverOpened(true);
+  }, [setActive]);
   const openChat = (id: string, messageId = "") => {
     setTerminalOpen(false); setConversationId(id); setFocusMessageId(messageId); setChatDetailOpen(true); setChatEverOpened(true);
   };
@@ -1411,7 +1419,7 @@ function HomeContent() {
     );
   }, [storageReady, userName, agentName, userAvatar, agentAvatar]);
   useEffect(() => {
-    if (!storageReady) return;
+    if (!storageReady || chatCaptureRequest()) return;
     browserStorage.setItem(
       "vesper-local-appearance",
       JSON.stringify({ accent, background: customBackground }),
@@ -1437,8 +1445,8 @@ function HomeContent() {
       </main>
     );
   return (
-    <main className="stage" style={shellStyle}>
-      <WindowOpening />
+    <main className={`stage${captureMode ? ' chat-capture' : ''}`} style={shellStyle} data-capture-ready={captureMode && storageReady ? 'true' : undefined}>
+      {!captureMode && <WindowOpening />}
       <input ref={avatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "userAvatar"); e.target.value = ""; }} />
       <input ref={agentAvatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "agentAvatar"); e.target.value = ""; }} />
       <audio
@@ -4609,6 +4617,7 @@ function ConnectedChat({
     }).catch(reason => setError(reason.message));
   }, [wakeRequest, onWakeHandled, onSelectConversation]);
   useEffect(() => {
+    if (chatCaptureRequest()) return;
     const deviceId = `web-${conversationId}-${crypto.randomUUID()}`;
     const publish = () => { void fetch(codexHistoryUrl('/wake'), {method:'POST',headers:codexHistoryHeaders(true),
       body:JSON.stringify({action:'presence',deviceId,busy})}).catch(() => {}); };
@@ -4617,7 +4626,7 @@ function ConnectedChat({
       body:JSON.stringify({action:'presence',deviceId,busy:false}),keepalive:true}).catch(() => {});};
   }, [busy, conversationId]);
   useEffect(() => {
-    if (!conversationId || !historyReady || busy) return;
+    if (!conversationId || !historyReady || busy || chatCaptureRequest()) return;
     let stopped=false;
     const refresh=async () => {
       if (document.visibilityState !== 'visible') return;
@@ -4661,13 +4670,15 @@ function ConnectedChat({
     let cancelled = false;
     const restore = async () => {
       setHistoryReady(false);
+      const capture = chatCaptureRequest();
       try {
-        await migrateLegacyHistory();
+        if (!capture) await migrateLegacyHistory();
       } catch {
         if (!cancelled) setHistoryWarning("History not synced yet");
       }
       try {
-        const response = await fetch(codexHistoryUrl(`/conversations/${encodeURIComponent(conversationId)}`), {
+        const captureQuery = capture ? '?' + new URLSearchParams(capture.messageIds.map(id => ['captureMessageId', id])).toString() : '';
+        const response = await fetch(codexHistoryUrl(`/conversations/${encodeURIComponent(conversationId)}${captureQuery}`), {
           headers: codexHistoryHeaders(),
           cache: "no-store",
         });
@@ -4686,7 +4697,7 @@ function ConnectedChat({
         // item into the VPS history through a legacy migration. Remove only
         // those tagged internal records, then immediately exclude them from
         // this render even if the cleanup request is temporarily offline.
-        void removeLeakedInternalHistoryMessages(conversationId, rawRemote)
+        if (!capture) void removeLeakedInternalHistoryMessages(conversationId, rawRemote)
           .catch(() => setHistoryWarning("History not synced yet"));
         const remote = normalizeCodexMessages(rawRemote, conversationId);
         const cached = normalizeCodexMessages(readLocalValue(`vesper-codex-chat-${conversationId}`, []), conversationId);
@@ -4698,7 +4709,7 @@ function ConnectedChat({
       } finally {
         if (!cancelled) setHistoryReady(true);
       }
-      if (cancelled) return;
+      if (cancelled || capture) return;
       try {
         await connect();
       } catch (reason) {
@@ -4895,7 +4906,7 @@ function ConnectedChat({
   const displayedModel = nextModel || currentModel;
   const displayedModelName = models.find((item) => item.model === displayedModel?.model)?.displayName || displayedModel?.model || "Select model";
   return (
-    <div className={`page-body chat-page codex-chat${watchMode ? " watch-chat" : ""}`}>
+    <div className={`page-body chat-page codex-chat${watchMode ? " watch-chat" : ""}`} data-capture-history={historyReady && !historyWarning ? 'ready' : undefined}>
       {watchMode && <WatchPlayer active={watchActive} busy={busy || !historyReady} captureRef={watchCapture} onShare={frame => send(undefined, undefined, frame)} />}
       {toolQuestions[0] && <CodexUserInput key={toolQuestions[0].id} request={toolQuestions[0]} onRespond={result => {
         const request = toolQuestions[0];
