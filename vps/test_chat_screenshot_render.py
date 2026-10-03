@@ -1,23 +1,46 @@
-"""Optional real Chromium smoke test; enabled in the dedicated screenshot CI job."""
+"""Browser integration: real Vesper app served locally, fixture read APIs only."""
 import base64
+import faulthandler
 import os
+import subprocess
+import time
 import unittest
+import urllib.request
 from pathlib import Path
 import vesper_chat_screenshot as screenshot
 
 
-@unittest.skipUnless(os.environ.get('VESPER_TEST_SCREENSHOT_RENDER') == '1', 'real Chromium smoke test runs in screenshot CI')
+@unittest.skipUnless(os.environ.get('VESPER_TEST_SCREENSHOT_RENDER') == '1', 'real Chrome integration runs in screenshot CI')
 class ScreenshotRenderTests(unittest.TestCase):
-    def test_jpeg_with_original_unicode_and_both_sides(self):
-        data = {'title': 'Vesper · 真实聊天', 'messageIds': ['u', 'a'], 'messages': [
-            {'id': 'u', 'role': 'user', 'content': '哥哥，记得这个下午吗？\nA real original message.', 'createdAt': '2026-10-03T12:00:00+08:00', 'attachments': []},
+    def test_jpeg_from_actual_webpage(self):
+        faulthandler.dump_traceback_later(75, exit=True)
+        data = {'title': '截图测试', 'conversationId': 'capture-fixture', 'messageIds': ['u', 'a'], 'messages': [
+            {'id': 'u', 'role': 'user', 'content': '哥哥，记得这个下午吗？\n测试消息 <script>不会执行</script>', 'createdAt': '2026-10-03T12:00:00+08:00', 'attachments': []},
             {'id': 'a', 'role': 'agent', 'content': '记得。把这段留在相册里。', 'createdAt': '2026-10-03T12:01:00+08:00', 'attachments': []}]}
-        result = screenshot.render(data)
-        picture = base64.b64decode(result['base64'])
-        self.assertTrue(picture.startswith(b'\xff\xd8'))
-        self.assertGreater(len(picture), 10000)
-        self.assertEqual(result['messageIds'], ['u', 'a'])
-        Path('screenshot-fixture.jpg').write_bytes(picture)
+        history = {'conversation': {'id': data['conversationId'], 'title': data['title']}, 'messages': [dict(m, conversationId=data['conversationId'], status='delivered', metadata={'attachments': m['attachments']}) for m in data['messages']], 'tombstones': []}
+        app = {'documents': {'profile': {'value': {'userName': 'Vera', 'agentName': 'Rowan'}}, 'appearance': {'value': {'accent': '#b8dce8', 'background': 'url("/backgrounds/vesper-marble-20260908.jpg")'}}}}
+        with open('/tmp/vesper-capture-web.log', 'w') as log:
+            server = subprocess.Popen(['npm', 'run', 'start', '--', '-H', '127.0.0.1', '-p', '5173'], stdout=log, stderr=log)
+            try:
+                for attempt in range(60):
+                    try:
+                        urllib.request.urlopen('http://127.0.0.1:5173/', timeout=2).close(); break
+                    except Exception:
+                        if server.poll() is not None: self.fail(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
+                        time.sleep(0.5)
+                result = screenshot.render_child(data, 'fixture-only-token', asset_proxy='http://127.0.0.1:5173', fixtures={'history': history, 'app': app})
+                picture = base64.b64decode(result['base64'])
+                self.assertTrue(picture.startswith(b'\xff\xd8'))
+                self.assertGreater(len(picture), 10000)
+                Path('screenshot-fixture.jpg').write_bytes(picture)
+            except Exception:
+                print(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
+                raise
+            finally:
+                faulthandler.cancel_dump_traceback_later()
+                server.terminate()
+                try: server.wait(timeout=5)
+                except subprocess.TimeoutExpired: server.kill()
 
 
 if __name__ == '__main__': unittest.main()

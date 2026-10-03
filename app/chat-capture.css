@@ -1,0 +1,17 @@
+/* Capture the actual chat DOM. Only alignment and viewport chrome change. */
+.chat-capture { pointer-events: none; }
+.chat-capture .codex-chat .agent-turn .message { justify-content: flex-end; }
+.chat-capture .codex-chat .sent-turn .message { justify-content: flex-start; }
+.chat-capture .app-shell .codex-chat .sent-turn .message.mine > div:not(.sticker-bubble) { width: fit-content; margin-left: 0; margin-right: auto; }
+.chat-capture .app-shell .codex-chat .sent-turn .message.mine > div > p { text-align: left; }
+.chat-capture .app-shell .codex-chat .agent-turn .message > div > p { text-align: right; }
+.chat-capture .codex-chat .agent-turn :is(.turn-status,.message-actions,.message-attachments) { align-self: flex-end; }
+.chat-capture .codex-chat .sent-turn :is(.message-actions,.message-attachments) { align-self: flex-start; }
+.chat-capture :is(.chat-compose,.chat-scroll-to-bottom,.chat-status-stack,.bridge-presence,.codex-connection-pill,.chat-header-actions,.app-header>.icon-button,.mobile-navigation) { display: none !important; }
+.chat-capture .message-action { display: none !important; }
+.chat-capture #web-chat-status-anchor { display: none !important; }
+.chat-capture .codex-chat { display: block; height: auto !important; }
+.chat-capture .chat-stream { height: auto !important; max-height: none !important; overflow: visible !important; padding-bottom: 20px !important; }
+.chat-capture .app-shell { height: auto !important; overflow: visible !important; }
+.chat-capture .scroll-view:not([hidden]) { position: relative !important; height: auto !important; overflow: visible !important; padding-bottom: 0 !important; }
+.chat-capture .scroll-view[hidden] { display: none !important; }

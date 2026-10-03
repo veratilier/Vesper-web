@@ -1,14 +1,12 @@
 """Render only verified chat records. No model HTML, arbitrary URL or shell input."""
 import base64
 import hashlib
-import html
 import json
 import re
 import subprocess
 import sys
 import threading
-from pathlib import Path
-from datetime import datetime
+from urllib.parse import urlencode, urlparse, parse_qs, quote
 
 RENDER_LOCK = threading.BoundedSemaphore(1)
 
@@ -36,92 +34,146 @@ def select_messages(connection, conversation_id, ids):
         messages.append({'id': row['id'], 'role': row['role'], 'content': row['content'], 'createdAt': row['created_at'], 'attachments': metadata.get('attachments', [])})
     if sum(len(m['content']) for m in messages) > 16000:
         raise ValueError('Choose a shorter excerpt; original text will not be truncated')
-    return {'title': conversation['title'], 'messages': messages, 'messageIds': ids}
+    return {'title': conversation['title'], 'conversationId': conversation_id, 'messages': messages, 'messageIds': ids}
 
 
-def document(data):
-    # Bundle the actual default Vesper artwork so background rendering needs no
-    # external request and still works while the app is closed.
-    artwork = base64.b64encode((Path(__file__).parent / 'screenshot-assets' / 'vesper-marble.jpg').read_bytes()).decode('ascii')
-    rows = []
-    for message in data['messages']:
-        own = message['role'] == 'agent'
-        images = []
-        for item in message['attachments']:
-            if not isinstance(item, dict):
-                raise ValueError('Invalid original attachment')
-            key = item.get('key', '')
-            if str(item.get('type', '')).startswith('image/') and re.fullmatch(r'[a-zA-Z0-9-]+\.[a-zA-Z0-9]+', key):
-                images.append('<img src="https://api.vesper.r-vera.com/api/media/' + key + '">')
-            else:
-                images.append('<p class="file">' + html.escape(str(item.get('name', 'Attachment'))) + '</p>')
-        try:
-            timestamp = datetime.fromisoformat(message['createdAt'].replace('Z', '+00:00')).strftime('%H:%M')
-        except ValueError:
-            timestamp = message['createdAt']
-        rows.append('<section class="row ' + ('own' if own else 'other') + '"><small>' + ('Rowan' if own else 'Vera') + ' · ' + html.escape(timestamp) + '</small><div class="bubble">' + ''.join(images) + '<div class="text">' + html.escape(message['content']) + '</div></div></section>')
-    return '''<!doctype html><html lang="zh"><meta charset="utf-8"><style>
-    *{box-sizing:border-box}body{margin:0;width:430px;padding:24px 20px 18px;color:#2b3b45;font:15px/1.75 "PingFang SC","Noto Sans CJK SC",sans-serif;
-    background-color:#eaf0f5;background-image:linear-gradient(rgba(255,255,255,.16),rgba(255,255,255,.16)),url("data:image/jpeg;base64,''' + artwork + '''");background-position:center;background-size:cover}
-    header{padding:0 4px 18px;border-bottom:1px solid rgba(57,76,79,.12);margin-bottom:26px}
-    .brand{font-size:24px;line-height:1.2;font-weight:400;letter-spacing:.015em}header small{display:block;font-size:11px;margin-top:8px}
-    .row{display:flex;flex-direction:column;align-items:flex-start;margin:28px 0}.own{align-items:flex-end;text-align:right}
-    small{font-size:10px;color:#576b75;margin-bottom:7px}.bubble{max-width:88%;padding:4px;overflow-wrap:anywhere;background:transparent;border:0;border-radius:0}
-    .text{white-space:pre-wrap}img{max-width:100%;max-height:420px;object-fit:contain;border-radius:14px}.file{font-size:12px}
-    footer{font-size:10px;color:#576b75;border-top:1px solid rgba(57,76,79,.12);padding-top:12px;margin-top:30px;letter-spacing:.03em}
-    </style><header><div class="brand">Vesper</div><small>''' + html.escape(data['title']) + '</small></header>' + ''.join(rows) + '<footer>Rowan · Vera</footer></html>'
-
-
-def render(data):
+def render(data, token):
     if not RENDER_LOCK.acquire(blocking=False):
         raise ScreenshotUnavailable("Screenshot renderer is busy; retry shortly")
     try:
-        return _render(data)
+        return _render(data, token)
     finally:
         RENDER_LOCK.release()
 
 
-def _render(data):
+def _render(data, token):
     try:
-        result = subprocess.run([sys.executable, __file__, '--render'], input=json.dumps(data, ensure_ascii=False), capture_output=True, text=True, timeout=40)
+        result = subprocess.run([sys.executable, __file__, '--render'], input=json.dumps({'data': data, 'token': token}, ensure_ascii=False), capture_output=True, text=True, timeout=40)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ScreenshotUnavailable('Screenshot renderer timed out or is unavailable') from exc
     if result.returncode:
-        raise ScreenshotUnavailable('Screenshot renderer unavailable. Install Playwright Chromium and CJK fonts on the VPS; no screenshot was created.')
+        raise ScreenshotUnavailable('Screenshot renderer unavailable. Install Playwright, Google Chrome and CJK fonts; deploy the matching Vesper Web capture view. No screenshot was created.')
     output = json.loads(result.stdout)
     output.update(messageIds=data['messageIds'])
     return output
 
 
-def render_child(data):
+WEB_ORIGIN = 'https://vesper.r-vera.com'
+API_ORIGIN = 'https://api.vesper.r-vera.com'
+HISTORY_ORIGIN = 'https://codex.r-vera.com'
+
+
+def capture_url(data):
+    return WEB_ORIGIN + '/?' + urlencode([('capture', 'agent'), ('conversation', data['conversationId']), *[('message', i) for i in data['messageIds']]])
+
+
+def request_policy(url, method, data):
+    """Credentials are added only to the precise read endpoints, never assets."""
+    parsed = urlparse(url)
+    origin = parsed.scheme + '://' + parsed.netloc
+    if method != 'GET' or parsed.username or parsed.password:
+        return None
+    if origin == HISTORY_ORIGIN and parsed.path == '/history/conversations/' + quote(data['conversationId'], safe=''):
+        if parse_qs(parsed.query).get('captureMessageId') == data['messageIds']:
+            return 'history'
+        return None
+    if origin == API_ORIGIN and parsed.path == '/api/state':
+        return 'app'
+    if origin in (API_ORIGIN, WEB_ORIGIN) and re.fullmatch(r'/api/media/[a-zA-Z0-9-]+\.[a-zA-Z0-9]+', parsed.path):
+        return 'media'
+    if origin == WEB_ORIGIN and not parsed.path.startswith('/api/'):
+        return 'asset'
+    return None
+
+
+def render_child(data, token, *, asset_proxy=None, fixtures=None):
+    # asset_proxy/fixtures are only supplied directly by the isolated CI test.
+    # Production stdin cannot select a host, proxy or fixture.
     from playwright.sync_api import sync_playwright
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(viewport={'width': 430, 'height': 800}, device_scale_factor=2)
-        # Block every request except existing Vesper media. Redirects cannot escape.
+        browser = playwright.chromium.launch(channel='chrome', headless=True)
+        context = browser.new_context(viewport={'width': 430, 'height': 800}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
+        # A routed socket without connect_to_server is isolated and drops its
+        # messages. Closing inside the route callback can stall Chrome's route
+        # handshake; no actual backend connection is made here.
+        context.route_web_socket('**/*', lambda socket: None)
+        context.add_init_script("localStorage.setItem('vesper-device-token','capture-session');")
+        loaded = {'history': False, 'app': False}
         def route_request(route):
+            if route.request.method == 'OPTIONS' and request_policy(route.request.url, 'GET', data) in ('history', 'app', 'media'):
+                route.fulfill(status=204, headers={'access-control-allow-origin': WEB_ORIGIN, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'authorization,content-type,x-vesper-device-token'}); return
+            kind = request_policy(route.request.url, route.request.method, data)
+            if kind is None or route.request.redirected_from is not None:
+                route.abort(); return
+            headers = {k: v for k, v in route.request.headers.items() if k not in ('authorization', 'x-vesper-device-token')}
+            if kind == 'history': headers['authorization'] = 'Bearer ' + token
+            if kind == 'app': headers['x-vesper-device-token'] = token
+            if fixtures is not None and kind in fixtures:
+                payload = fixtures[kind]
+                key = parse_qs(urlparse(route.request.url).query).get('key', [None])[0]
+                if kind == 'app' and key:
+                    payload = {'key': key, 'value': payload['documents'].get(key, {}).get('value'), 'updatedAt': '2026-10-03T12:00:00+08:00'}
+                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(payload, ensure_ascii=False))
+                loaded[kind] = True; return
             url = route.request.url
-            if route.request.redirected_from is None and re.fullmatch(r'https://api\.vesper\.r-vera\.com/api/media/[a-zA-Z0-9-]+\.[a-zA-Z0-9]+', url):
-                response = route.fetch(max_redirects=0, timeout=10000)
-                if response.status != 200 or not response.headers.get('content-type', '').startswith('image/'):
-                    route.abort()
-                else:
-                    route.fulfill(response=response)
-            else:
-                route.abort()
-        page.route('**/*', route_request)
-        page.set_content(document(data), wait_until='networkidle', timeout=25000)
-        page.evaluate('document.fonts.ready')
-        if not page.evaluate('Array.from(document.images).every(i => i.complete && i.naturalWidth > 0)'):
-            raise ValueError('Original images failed to load')
-        if page.evaluate('document.documentElement.scrollHeight') > 10000:
-            raise ValueError('Excerpt is too tall; select fewer original messages')
-        picture = page.locator('body').screenshot(type='jpeg', quality=82)
+            if asset_proxy and kind == 'asset':
+                parsed = urlparse(url)
+                url = asset_proxy + parsed.path + ('?' + parsed.query if parsed.query else '')
+                # Dev servers reject a forwarded production Origin. This is
+                # confined to the isolated local-application integration test.
+                headers['origin'] = asset_proxy
+                headers['referer'] = asset_proxy + '/'
+            response = route.fetch(url=url, headers=headers, max_redirects=0, timeout=15000)
+            if response.status != 200:
+                route.abort(); return
+            if kind in loaded: loaded[kind] = True
+            route.fulfill(response=response)
+        context.route('**/*', route_request)
+        page = context.new_page()
+        def phase(name):
+            if fixtures is not None: print('Capture fixture phase:', name, file=sys.stderr, flush=True)
+        if fixtures is not None:
+            page.on('pageerror', lambda error: print('Capture fixture page error:', str(error), file=sys.stderr))
+            page.on('console', lambda message: print('Capture fixture console:', message.text[:600], file=sys.stderr) if message.type == 'error' else None)
+        phase('navigation')
+        page.goto(capture_url(data), wait_until='domcontentloaded', timeout=20000)
+        phase('chat readiness')
+        try:
+            page.locator('.chat-capture[data-capture-ready="true"] .codex-chat[data-capture-history="ready"]').wait_for(timeout=20000)
+        except Exception:
+            if fixtures is not None:
+                print('Capture fixture DOM:', page.locator('body').inner_text()[:2000], 'Read APIs:', loaded, file=sys.stderr)
+            raise
+        if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
+        phase('original text verification')
+        # Verify that the real UI rendered precisely the selected original text.
+        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.querySelector('.message > div > p')?.textContent || ''}))")
+        if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
+            raise ValueError('Rendered webpage messages do not match the selected originals')
+        if not page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.every(row => { const p=row.querySelector('.message > div > p'); return !p || getComputedStyle(p).textAlign === (row.classList.contains('agent-turn') ? 'right' : 'left'); })"):
+            raise ValueError('Webpage did not apply the requested agent perspective')
+        phase('fonts and images')
+        page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
+        page.wait_for_function('Array.from(document.querySelectorAll(".chat-capture img")).every(i => i.complete && i.naturalWidth > 0)', timeout=10000)
+        # Wait for the actual saved background, including a data-URI upload.
+        page.evaluate(r"""async () => {
+          const bg = getComputedStyle(document.querySelector('.chat-capture')).backgroundImage;
+          await Promise.race([Promise.all([...bg.matchAll(/url\(["']?(.+?)["']?\)/g)].map(match => new Promise((resolve,reject) => {
+            const image = new Image(); image.onload=resolve; image.onerror=reject; image.src=match[1];
+          }))), new Promise((_,reject)=>setTimeout(()=>reject(new Error('Background did not load')),10000))]);
+        }""")
+        target = page.locator('.chat-capture > .app-shell')
+        height = target.evaluate('el => Math.ceil(el.scrollHeight)')
+        if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
+        page.set_viewport_size({'width': 430, 'height': max(300, height)})
+        phase('screenshot')
+        picture = target.screenshot(type='jpeg', quality=82)
         browser.close()
-        if len(picture) > 4 * 1024 * 1024:
-            raise ValueError('Screenshot too large; select fewer messages')
-        return {'mimeType': 'image/jpeg', 'base64': base64.b64encode(picture).decode(), 'digest': hashlib.sha256(picture).hexdigest()[:24]}
+    if len(picture) > 4 * 1024 * 1024:
+        raise ValueError('Screenshot exceeds attachment size; select fewer messages')
+    return {'mimeType': 'image/jpeg', 'base64': base64.b64encode(picture).decode('ascii'), 'digest': hashlib.sha256(picture).hexdigest()[:24]}
 
 
-if __name__ == '__main__':
-    print(json.dumps(render_child(json.load(sys.stdin))))
+if __name__ == '__main__' and '--render' in sys.argv:
+    payload = json.load(sys.stdin)
+    print(json.dumps(render_child(payload['data'], payload['token'])))

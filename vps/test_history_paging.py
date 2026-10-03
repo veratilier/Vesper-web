@@ -27,4 +27,18 @@ with tempfile.TemporaryDirectory() as directory:
     assert [x['id'] for x in request.value['results']]==['other']
     request.path='/search?q=%27%20OR%201%3D1--'
     server.Handler.search_messages(request);assert request.value['results']==[]
+    def forbidden_sync(*args): raise AssertionError('Capture must not recover/write history')
+    original_sync = server.codex_records.sync
+    server.codex_records.sync = forbidden_sync
+    try:
+        request.path='/conversations/one?captureMessageId=5&captureMessageId=7'
+        server.Handler.get_conversation(request,'one')
+        assert [row['id'] for row in request.value['messages']]==['5','7']
+        assert [row['content'] for row in request.value['messages']]==['original 5 100%','original 7 100%']
+        request.path='/conversations/one?captureMessageId=other'
+        try: server.Handler.get_conversation(request,'one')
+        except ValueError: pass
+        else: raise AssertionError('Cross-conversation capture must fail')
+    finally:
+        server.codex_records.sync = original_sync
 print('History pagination and scoped search passed')

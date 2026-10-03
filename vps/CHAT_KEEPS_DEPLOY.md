@@ -1,21 +1,21 @@
 # Vesper chat screenshots and keeps
 
-This change uses the existing private history service, Worker media bucket and saved photo album. Screenshots are server-rendered original selected chat messages in Rowan's perspective. It works without an open iPhone. No chat/image deletion or automatic 30-photo expiry is introduced.
+This change uses the existing private history service, Worker media bucket and saved photo album. On the VPS, Playwright launches Google Chrome and opens the real Vesper webpage in read-only capture mode. Existing chat components, CSS, saved Web appearance and avatars render selected original messages in Rowan's perspective. It works without an open iPhone. No chat/image deletion or automatic 30-photo expiry is introduced.
 
 ## Existing VPS
 
 Update `codex_history_server.py`, `vesper_chat_screenshot.py`, `vesper_wake_runner.py`, `vesper_wake_store.py`, `vesper_wake_tools.py` together from the checked main commit into the existing `/home/ubuntu/vesper-codex-history` checkout. Preserve its database, token and service configuration.
 
-Also copy `vps/screenshot-assets/` alongside `vesper_chat_screenshot.py`. It contains the existing Vesper default blue marble artwork used by the native App and Web. Screenshots use the native chat's transparent text layout, blue ink and CJK system-font fallback, with Rowan right and Vera left. The renderer uses this bundled default theme; it does not yet synchronize device-local black/white palette choices.
+Deploy the matching Web commit before restarting the VPS renderer. The browser loads `https://vesper.r-vera.com/?capture=agent&conversation=…&message=…` and the authenticated original-history read endpoint. Appearance and avatars come from the existing Web state API. Native device-local palettes are not synchronized to Web automatically.
 
 As the existing service user, install the renderer:
 
 ```sh
 python3 -m pip install --user playwright==1.58.0
-python3 -m playwright install chromium
+python3 -m playwright install chrome
 ```
 
-Install Chromium system dependencies with the administrator's existing deployment procedure (`python3 -m playwright install-deps chromium`), and `fonts-noto-cjk` if absent. Restart the existing `vesper-codex-history` service. It continues to use the same bearer token. No new port or public renderer is introduced. The renderer uses an isolated subprocess with a 40-second deadline and permits only Vesper media image requests, with no redirects.
+Install Chrome system dependencies with the administrator's existing deployment procedure (`python3 -m playwright install-deps chrome`), and `fonts-noto-cjk` if absent. Restart the existing `vesper-codex-history` service. It continues to use the same bearer token. No new port or public renderer is introduced. The renderer uses an isolated subprocess with a 40-second deadline and uses an ephemeral Chrome context with only the fixed Vesper origins allowed. Credentials are attached only to the precise state/history reads, never browser storage or URLs. Non-GET requests, WebSockets, service workers and redirects are blocked. A failed or outdated Web capture view produces no image; there is no HTML-rendering fallback.
 
 ## Worker and app
 
