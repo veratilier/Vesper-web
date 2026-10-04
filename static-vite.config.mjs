@@ -5,6 +5,7 @@ import path from 'node:path';
 export default defineConfig({
   base: './',
   plugins: [react()],
+  resolve: { alias: { '@': path.resolve(process.cwd()) } },
   build: {
     outDir: 'github-pages-spa',
     emptyOutDir: true,
