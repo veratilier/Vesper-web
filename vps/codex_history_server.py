@@ -257,7 +257,11 @@ class Handler(BaseHTTPRequestHandler):
                 except music_search.SearchUnavailable as error:
                     self.send_json(error.status, {"error": str(error)})
         elif path == ["wake"] and self.command == "GET":
-            self.send_json(200, wake_store.status())
+            query = parse_qs(urlparse(self.path).query)
+            if query.get('view') == ['workflow']:
+                try: self.send_json(200, wake_store.workflow_run(query['id'][0]) if query.get('id') else wake_store.workflow_runs(int(query.get('limit', ['20'])[0]), int(query.get('offset', ['0'])[0])))
+                except ValueError: self.send_json(400, {'error': 'Invalid workflow page'})
+            else: self.send_json(200, wake_store.status())
         elif path == ["wake"] and self.command == "POST":
             body = self.body()
             if body.get("action") == "presence":

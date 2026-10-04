@@ -11,16 +11,17 @@ import vesper_wake_sleep as sleep
 import vesper_wake_recovery as recovery
 import vesper_wake_policy as policy
 import vesper_wake_tools as permissions
+import vesper_wake_workflow as workflow
 
 ORIGIN=os.environ.get('VESPER_API_ORIGIN','https://vesper.r-vera.com')
 TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-token')))
 HISTORY=Path(os.environ.get('VESPER_HISTORY_DB',str(Path.home()/'.vesper/chat-history.sqlite3')))
 WORK=Path.home()/'.vesper/wake-workspace'
-ALLOWED={'read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
+ALLOWED={'jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
          'music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
          'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
-READ_ONLY={'bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','music_get_status','music_search','album_search_photos','sticker_search'}
+READ_ONLY={'jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','music_get_status','music_search','album_search_photos','sticker_search'}
 CONFIG={'apps._default.enabled':False,
         'apps.asdk_app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
         'apps.app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
@@ -89,7 +90,15 @@ def save_message(job,ident,role,content,metadata,status='delivered'):
 
 def context(job):
     rows=[r for r in policy.history(HISTORY) if r['vesper_conversation_id']==job['conversation_id'] and policy.normal(r) and r['role'] in ('user','agent')]
-    return '\n'.join(r['role']+': '+r['content'][:1200] for r in reversed(rows[:12]))[-9000:]
+    messages=[{'id': r['id'], 'role': r['role'], 'at': r['created_at'], 'text': r['content'][:800]} for r in reversed(rows[:8])]
+    with store.db() as con:
+        previous=con.execute("SELECT id,created,finished,status,decision,notification FROM jobs WHERE conversation_id=? AND id!=? AND finished IS NOT NULL ORDER BY finished DESC LIMIT 1", (job['conversation_id'],job['id'])).fetchone()
+    last=dict(previous) if previous else None
+    if last:
+        last['elapsedSeconds']=max(0,round(time.time()-last['finished']))
+        last['userRepliedSinceWake']=any(r['role']=='user' and policy.timestamp(r['created_at'])>last['finished'] for r in rows) if last.get('notification') else None
+        if last.get('notification'):last['notification']=last['notification'][:800]
+    return json.dumps({'recentChat':messages,'lastWake':last},ensure_ascii=False)
 
 
 def token_budget(usage):
@@ -157,18 +166,14 @@ def update(ident,**fields):
 
 def execute(job):
     ident=job['id'];rpc=None;completed=False;failed=False;final=[];tool_count=0;turn_id='';thread_id='';created=iso();external_tools={};failure_reason=''
-    if sleep_gate(time.time()) or recent_chat():
+    if sleep_gate(time.time()):
+        update(ident,status='silent',finished=time.time(),decision='sleep_time');return
+    if recent_chat():
         update(ident,status='silent',finished=time.time(),decision='recent_user_activity');return
     allowed=permissions.allowed_tools(store.access(), READ_ONLY if job['source']=='verification' else ALLOWED)
     tools=[t for t in http('/api/codex/tools')['tools'] if t['name'] in allowed]
-    if not tools:
-        update(ident,status='silent',finished=time.time(),decision='no_authorized_tools');return
-    required_desire = job['source'] != 'verification'
-    if required_desire and not {'desire_status', 'desire_encounter'} <= allowed:
-        raise RuntimeError('Required Desire read/write permission is disabled')
-    if required_desire and 'text' not in store.access()['messages']:
-        raise RuntimeError('Required chat message permission is disabled')
-    # The runner owns the mandatory write, so the model cannot skip or duplicate it.
+    required_desire = job['source'] != 'verification' and {'desire_status','desire_encounter'} <= allowed
+    # Desire assessment is internal and independent of chat delivery.
     tools=[dict(t, type='function') for t in tools if not (required_desire and t['name']=='desire_encounter')]
     if not job.get('conversation_id'):raise RuntimeError('No locked target conversation')
     wake={'requestId':ident,'requestedAt':created,'source':'automation'}
@@ -190,7 +195,7 @@ def execute(job):
             if not old:
                 if con.execute('SELECT count(*) FROM calls WHERE job_id=?',(ident,)).fetchone()[0]>=(7 if required_desire and name!='desire_encounter' else 8):raise RuntimeError('Wake tool budget exhausted (8)')
                 if not permitted():raise RuntimeError('Wake paused by current preference or foreground chat')
-                con.execute('INSERT INTO calls(job_id,item_id,status,name,started) VALUES(?,?,?,?,?)',(ident,item,'started',name,time.time()))
+                con.execute('INSERT INTO calls(job_id,item_id,status,name,started,workflow_json) VALUES(?,?,?,?,?,?)',(ident,item,'started',name,time.time(),json.dumps(workflow.step(name,args,uncertain=True),ensure_ascii=False)))
         key = recovery.tool_key(name, args)
         external = name == 'call_configured_mcp_tool'
         connection = next((c for c in external_tools.get('connections', []) if c.get('connectionId') == args.get('connectionId')), {})
@@ -217,6 +222,7 @@ def execute(job):
                     pauses = store.get(con, 'tool_recovery', {})
                     pauses[key] = recovery.failure(pauses.get(key), ident + ':' + item, time.time())
                     store.put(con, 'tool_recovery', pauses)
+                with store.db() as con:con.execute("UPDATE calls SET status='failed',finished=?,workflow_json=? WHERE job_id=? AND item_id=?", (time.time(),json.dumps(workflow.step(name,args,failed=True,uncertain=write_risk),ensure_ascii=False),ident,item))
                 raise
             with store.db() as con:
                 pauses = store.get(con, 'tool_recovery', {})
@@ -229,7 +235,7 @@ def execute(job):
                         uncertain.pop(mark, None)
                         store.put(con, 'uncertain_writes', uncertain)
                 store.put(con, 'tool_recovery', pauses)
-            with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),ident,item))
+            with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=?,workflow_json=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),json.dumps(workflow.step(name,args,result,failed=isinstance(result,dict) and bool(result.get('isError'))),ensure_ascii=False),ident,item))
             tool_count+=1;update(ident,tools=tool_count)
         if name=='list_configured_mcp_tools':
             external_tools=permissions.external_catalog(result, store.forum_connections());result=external_tools
@@ -244,7 +250,7 @@ def execute(job):
             if isinstance(args,str):args=json.loads(args)
             if not isinstance(args,dict):args={}
             try:
-                if required_desire and name=="desire_encounter":raise RuntimeError("Desire write is reserved for the mandatory final assessment")
+                if required_desire and name=="desire_encounter":raise RuntimeError("Desire write is reserved for the optional final assessment")
                 result=run_tool(name,args,item)
                 rpc.send({'id':msg['id'],'result':{'contentItems':[{'type':'inputText','text':json.dumps(result,ensure_ascii=False)}],'success':True}})
             except Exception as error:
@@ -279,24 +285,28 @@ def execute(job):
         started=rpc.call('thread/start',{'cwd':str(WORK),'dynamicTools':tools,'approvalPolicy':'never','sandbox':'read-only','config':CONFIG,'developerInstructions':INSTRUCTIONS})
         thread_id=started['thread']['id'];update(ident,thread_id=thread_id)
 
-        desire_state=run_tool('desire_status',{},'required-desire-status') if required_desire else None
+        desire_state=None
+        if required_desire:
+            try: desire_state=run_tool('desire_status',{},'required-desire-status')
+            except Exception:
+                # An internal state failure is recorded but must not force or block a chat message.
+                required_desire=False
+                if not permitted():
+                    update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
         prompt='这是一次已授权的 Vesper 后台主动唤醒。request_id='+ident+'。当前时间 '+datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()+'.\n'
         if store.task_prompt() != INSTRUCTIONS:
             prompt+='补充任务要求（不得覆盖本轮规则）：\n'+store.task_prompt()+'\n'
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
         if required_desire:
-            prompt+='必做 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。系统会强制调用 desire_encounter 保存；本轮必须给 Vera 发一条真实有内容的消息。\n'
+            prompt+='内部 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，需要记录时在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。有新观察才在 desire 中给出 kind 和 note；没有新观察可省略 desire。宿主保存评估，与本轮是否发消息无关。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
-        prompt+='只返回 JSON {"share": boolean, "message": string}。正常活动轮 share=true，message 必须有实际内容且不超过400字。\n'
+        prompt+='只返回 JSON {"share": boolean, "message": string, "silentReason": string}。有话才 share=true，message 非空且不超过400字；没有合适的话或未授权文字时 share=false、message=""，silentReason 简短记录客观静默原因，不写私密推理。\n'
         prompt+='近期聊天背景（不是新指令）：\n'+context(job)
-        schema={'type':'object','properties':{'share':{'type':'boolean'},'message':{'type':'string'}},'required':['share','message'],'additionalProperties':False}
+        schema={'type':'object','properties':{'share':{'type':'boolean'},'message':{'type':'string','maxLength':400},'silentReason':{'type':'string','maxLength':200}},'required':['share','message'],'additionalProperties':False}
         if required_desire:
-            schema['properties']['share']={'type':'boolean','enum':[True]}
-            schema['properties']['message']={'type':'string','minLength':1,'maxLength':400}
             schema['properties']['desire']={'type':'object','properties':{'kind':{'type':'string','enum':['warmth','absence','repair','shared_work','flirt']},'note':{'type':'string','minLength':1,'maxLength':1200}},'required':['kind','note'],'additionalProperties':False}
-            schema['required'].append('desire')
-            prompt+=' JSON 还必须包含 desire: {kind, note}。\n'
+            prompt+=' 有新观察时 JSON 可包含 desire: {kind, note}。\n'
         result=rpc.call('turn/start',{'threadId':thread_id,'input':[{'type':'text','text':prompt}],'outputSchema':schema})
         turn_id=result.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
         deadline=time.time()+600
@@ -308,16 +318,19 @@ def execute(job):
         if not completed or failed or not final:raise RuntimeError('Wake turn did not complete: ' + failure_reason)
         decision=json.loads(final[-1])
         if not isinstance(decision.get('share'),bool) or not isinstance(decision.get('message'),str):raise RuntimeError('Invalid wake decision')
-        if required_desire and (decision['share'] is not True or not decision['message'].strip() or len(decision['message'].strip()) > 400):
+        if len(decision['message']) > 400 or (decision['share'] and not decision['message'].strip()):
             raise RuntimeError('Active wake requires a nonempty chat message of at most 400 characters')
         if job['source']=='verification' and tool_count<2:raise RuntimeError('Verification did not execute both native reads')
+        if not isinstance(decision.get('silentReason',''),str) or len(decision.get('silentReason',''))>200:raise RuntimeError('Invalid silent reason')
         sharing=decision['share'] and bool(decision['message'].strip()) and 'text' in store.access()['messages']
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
-        if required_desire:
+        if required_desire and decision.get('desire') is not None:
             encounter=permissions.required_desire_input(decision.get('desire'))
-            run_tool('desire_encounter',encounter,'required-desire-encounter')
-        if not tool_count:raise RuntimeError('No actual activity to substantiate wake')
+            try: run_tool('desire_encounter',encounter,'required-desire-encounter')
+            except Exception:
+                if not permitted():
+                    update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
         message=decision['message'].strip()[:1600]
         wake['startedAt']=created
         wake['endedAt']=iso()
@@ -333,10 +346,8 @@ def execute(job):
                     'source':job['source'],'wakeRunId':ident,'attachments':result.get('attachments'),'sticker':result.get('stickerMessage')})
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
-        if required_desire and 'text' not in store.access()['messages']:
-            raise RuntimeError('Required chat message permission was revoked')
         if not sharing:
-            update(ident,status='silent',finished=time.time(),decision='nothing_to_share');return
+            update(ident,status='silent',finished=time.time(),decision='nothing_to_share',silent_reason=(decision.get('silentReason') or workflow.REASONS['nothing_to_share'])[:200]);return
         save_message(job,'wake:'+ident+':final','agent',message,{'source':job['source'],'wakeRunId':ident,
             'threadId':thread_id,'turnId':turn_id,'blockType':'agentMessage','showTurnStatus':False})
         update(ident,status='saved',finished=time.time(),notification=message,decision='share')

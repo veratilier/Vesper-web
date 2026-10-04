@@ -4,6 +4,7 @@ import { cleanMusicDocument } from '@/lib/music-data';
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
+import { createJotting, listJottings } from './jottings';
 import { legacyDesireRead } from './desire/routing.js';
 import { env } from 'cloudflare:workers';
 import { executeDesire, type NativeDesireEnv } from './desire/native';
@@ -195,6 +196,10 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const result = await getDb().prepare("UPDATE vesper_documents SET value = ?, updated_at = ? WHERE key = ? AND value = ?").bind(JSON.stringify(books), new Date().toISOString(), "readingRoom", previous).run();
     if (!result.meta.changes) throw new Error("Reading room changed. Read again and retry with the same noteId.");
     return { note, replayed: false };
+  }
+  if (name === 'jotting_create' || name === 'jotting_list') {
+    if (!memoryScope) throw new Error('Jotting scope is unavailable');
+    return name === 'jotting_create' ? createJotting(memoryScope.userId, input) : listJottings(memoryScope.userId, Number(input.limit || 30), String(input.before || ''));
   }
   if (name === "read_vesper_state") {
     const section = String(input.section || "notes").toLowerCase();

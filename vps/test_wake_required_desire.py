@@ -15,7 +15,7 @@ class RequiredDesireTests(unittest.TestCase):
         store.request('test',source='automation')
         self.job={'id':'test','source':'automation','conversation_id':'chat','user_message_id':'user'}
         self.calls=[];self.messages=[]
-    def execute(self, assessment, fail_write=False, share=True, message="A real observation."):
+    def execute(self, assessment, fail_write=False, fail_read=False, share=True, message="A real observation."):
         owner=self
         class RPC:
             handler=None
@@ -35,7 +35,7 @@ class RequiredDesireTests(unittest.TestCase):
             if path=='/api/wake':return {'delivered':1}
             if body is None:return {'tools':[{'name':'desire_status'},{'name':'desire_encounter'}]}
             owner.calls.append(body)
-            return {'result':{'isError':True} if fail_write and body['name']=='desire_encounter' else {'longing':22}}
+            return {'result':{'isError':True} if (fail_write and body['name']=='desire_encounter') or (fail_read and body['name']=='desire_status') else {'longing':22}}
         with patch.object(runner,'Rpc',RPC),patch.object(runner,'http',side_effect=http),patch.object(runner,'context',return_value='Visible context'),patch.object(runner,'current_preferences',return_value={}),patch.object(runner,'front_busy',return_value=False),patch.object(runner.policy,'history',return_value=[{'id':'user','vesper_conversation_id':'chat'}]),patch.object(runner.policy,'normal',return_value=True):
             runner.execute(self.job)
     def test_active_run_reads_writes_then_sends_message(self):
@@ -48,18 +48,26 @@ class RequiredDesireTests(unittest.TestCase):
         self.assertEqual(args['note'],'A current observation.')
         self.assertTrue(args['request_id'].startswith('wake-'))
         with store.db() as con:self.assertEqual(con.execute("SELECT status FROM jobs WHERE id='test'").fetchone()[0],'completed')
+    def test_failed_internal_read_does_not_block_chat_or_claim_success(self):
+        self.execute(None,fail_read=True)
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
+        self.assertEqual(len(self.messages),1)
+        self.assertEqual(store.status()['jobs'][0]['outcome'],'partial_failure')
+
     def test_missing_note_cannot_complete_or_write(self):
         with self.assertRaises(RuntimeError):self.execute({'kind':'absence','note':''})
         self.assertEqual(len(self.calls),1)
     def test_failed_write_cannot_mark_run_successful(self):
-        with self.assertRaises(RuntimeError):self.execute({'kind':'absence','note':'Current thought.'},True)
+        self.execute({'kind':'absence','note':'Current thought.'},True)
         with store.db() as con:
             self.assertEqual(con.execute("SELECT status FROM calls WHERE item_id='required-desire-encounter'").fetchone()[0],'failed')
-            self.assertNotEqual(con.execute("SELECT status FROM jobs WHERE id='test'").fetchone()[0],'silent')
-    def test_revoked_permission_is_not_bypassed(self):
+            self.assertEqual(store.status()['jobs'][0]['outcome'],'partial_failure')
+        self.assertEqual(len(self.messages),1)
+    def test_revoked_desire_permission_is_not_bypassed(self):
         with store.db() as con:store.put(con,'permissions',{'tools':['desire_status'],'messages':[]})
-        with self.assertRaisesRegex(RuntimeError,'permission'):self.execute({'kind':'absence','note':'Current thought.'})
+        self.execute({'kind':'absence','note':'Current thought.'})
         self.assertEqual(self.calls,[])
+        self.assertEqual(self.messages,[])
 
     def test_recent_chat_is_silent_without_any_rpc_or_write(self):
         with patch.object(runner, 'recent_chat', return_value=True), patch.object(runner, 'Rpc') as rpc, patch.object(runner, 'http') as http:
@@ -68,12 +76,25 @@ class RequiredDesireTests(unittest.TestCase):
         with store.db() as con:
             self.assertEqual(con.execute("SELECT decision FROM jobs WHERE id='test'").fetchone()[0], 'recent_user_activity')
 
-    def test_empty_or_silent_active_response_cannot_write_or_publish(self):
-        for share,message in [(False,''),(True,'   '),(False,'text'),(True,'x'*401)]:
-            with self.assertRaisesRegex(RuntimeError,'nonempty chat'):
-                self.execute({'kind':'absence','note':'Real observation'},share=share,message=message)
+    def test_silent_response_records_desire_without_chat(self):
+        self.execute({'kind':'absence','note':'Real observation'},share=False,message='')
+        self.assertEqual([c['name'] for c in self.calls],['desire_status','desire_encounter'])
         self.assertEqual(self.messages,[])
-        self.assertTrue(all(c['name']=='desire_status' for c in self.calls))
+        self.assertEqual(store.status()['jobs'][0]['status'],'silent')
+        self.assertTrue(store.status()['jobs'][0]['silentReason'])
+
+    def test_invalid_shared_message_cannot_publish(self):
+        for message in ['   ','x'*401]:
+            with self.assertRaisesRegex(RuntimeError,'nonempty chat'):
+                self.execute({'kind':'absence','note':'Real observation'},message=message)
+        self.assertEqual(self.messages,[])
+
+    def test_no_tools_no_desire_and_no_message_is_valid(self):
+        with store.db() as con:store.put(con,'permissions',{'tools':[],'messages':[]})
+        self.execute(None,share=False,message='')
+        self.assertEqual(self.calls,[])
+        self.assertEqual(self.messages,[])
+        self.assertEqual(store.status()['jobs'][0]['status'],'silent')
 
     def test_user_returns_before_desire_write_blocks_publication(self):
         with patch.object(runner, 'recent_chat', side_effect=[False,False,True]):
@@ -81,11 +102,11 @@ class RequiredDesireTests(unittest.TestCase):
         self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
 
-    def test_disabled_text_permission_prevents_model_and_desire(self):
+    def test_disabled_text_permission_does_not_block_internal_assessment(self):
         with store.db() as con:store.put(con,'permissions',{'tools':['desire_status','desire_encounter'],'messages':[]})
-        with self.assertRaisesRegex(RuntimeError,'message permission'):
-            self.execute({'kind':'absence','note':'Observation'})
-        self.assertEqual(self.calls,[])
+        self.execute({'kind':'absence','note':'Observation'})
+        self.assertEqual([c['name'] for c in self.calls],['desire_status','desire_encounter'])
+        self.assertEqual(self.messages,[])
 
 class ExternalRecoveryTests(unittest.TestCase):
     def setUp(self):
