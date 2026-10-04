@@ -2,7 +2,7 @@
 ACTIONS = {
     'desire_status': '查看此刻的 Desire', 'desire_encounter': '保存此刻的心绪',
     'read_vesper_state': '读取 Vesper 内容', 'search_vesper_state': '查找 Vesper 内容',
-    'jotting_list': '翻阅随写', 'jotting_create': '保存随写',
+    'jotting_list': '翻阅 Sketch', 'jotting_create': '保存 Sketch',
     'bookmark_list': '翻阅书签', 'bookmark_create': '保存图文书签',
     'reading_room_read': '阅读 Library', 'reading_room_annotate': '留下阅读批注',
     'write_vesper_state': '保存文字', 'recall_vesper_memory': '查找相关记忆',
@@ -36,7 +36,7 @@ def step(name, args=None, result=None, failed=False, uncertain=False):
         if name == ('jotting_create' if key == 'jotting' else 'bookmark_create') and isinstance(saved, dict) and isinstance(saved.get('id'), str):
             title = saved.get('title') if key == 'jotting' else ''
             label = ('《' + title[:80] + '》') if isinstance(title,str) and title.strip() else ''
-            value.update(completion='completed', result=('已保存随写' + label + '。') if key == 'jotting' else '已保存到书签。',
+            value.update(completion='completed', result=('已保存 Sketch' + label + '。') if key == 'jotting' else '已保存到书签。',
                          references=[{'kind': kind, 'id': saved['id'][:128]}])
     if name == 'write_vesper_state' and result.get('saved') is True:
         section = result.get('section')
