@@ -24,7 +24,7 @@ import { ReadingRoom, type ReadingBook } from "./reading-room";
 import { SubscriptionUsage } from "./subscription-usage";
 import { SharedMemoryLibrary } from "./shared-memory-library";
 import "./app-center.css";
-import { DesirePanel, HomeDesire } from "./desire-panel";
+import { DesirePanel } from "./desire-panel";
 import { WakeCard } from "./wake-card";
 import type { WakeRecord } from "./wake-summary";
 import { executionEvent, savedExecution, workspaceOptions, type Execution } from './codex-execution';
@@ -52,6 +52,8 @@ import { CodexUserInput, type UserInputRequest } from "./codex-user-input";
 import { attachmentInputText, imageAttachmentInput } from "./codex-attachment-input";
 import { useMobileViewport } from "./use-mobile-viewport";
 import "./mobile-navigation.css";
+import "./home-desktop.css";
+import { latestRowanNote, homeCountdown, darkHomeBackground, homeWeatherCondition } from "@/lib/home-desktop";
 import { subscribe, serializeSubscription } from "@mmmike/web-push/client";
 import { codexBubbleIdentity, hasCodexChatBubbles, isCompletedCodexItem, mergeCodexMessages } from "./codex-message-merge";
 import {
@@ -285,6 +287,7 @@ function Anniversaries() {
 }
 
 const iconPaths: Record<string, string[]> = {
+  palette: ["M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.5-3.3 2 2 0 0 1 1.5-3.3H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.4Z", "M7 9h.01M10 6h.01M15 6h.01M18 9h.01"],
   archive: ["M3 5h18v5H3z", "M5 10v10h14V10", "M10 14h4"],
   box: ["M3 8l9-5 9 5v8l-9 5-9-5z", "m3 8 9 5 9-5", "M12 13v8"],
   calendar: [
@@ -305,6 +308,7 @@ const iconPaths: Record<string, string[]> = {
   ],
   home: ["M15 21v-8H9v8", "M3 10 12 2l9 8v9H3z"],
   library: ["m16 6 4 14", "M12 6v14", "M8 8v12", "M4 4v16"],
+  grid: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M3 14h7v7H3z", "M14 14h7v7h-7z"],
   menu: ["M4 6h16", "M4 12h16", "M4 18h16"],
   music: ["M12 18V3l7 3", "M12 18a4 4 0 1 1-4-4 4 4 0 0 1 4 4"],
   diary: [
@@ -533,6 +537,7 @@ const uiLabel = (key: string) => uiLabels[key] || key;
 const nav = [
   { label: "今日", english: "Today", icon: "home" },
   { label: "聊天", english: "Chat", icon: "chat" },
+  { label: "Collection", english: "Collection", icon: "grid" },
   { label: "欲望", english: "Desire", icon: "heart" },
   { label: "日记", english: "Journal", icon: "diary" },
   { label: "便笺", english: "Notes", icon: "note" },
@@ -749,6 +754,7 @@ function HomeContent() {
     return () => document.removeEventListener("focusin", hideAccessory);
   }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [desktopNavigation, setDesktopNavigation] = useState(false);
   useEffect(() => {
     const viewport = window.matchMedia("(min-width: 1024px)");
@@ -1340,7 +1346,8 @@ function HomeContent() {
     window.setTimeout(() => setMusicToast(""), 1600);
   };
   const isPhotoBackground = customBackground.includes("url(");
-  const canvasColor = isPhotoBackground ? DEFAULT_CANVAS_COLOR : customBackground || DEFAULT_CANVAS_COLOR;
+  const darkHome = darkHomeBackground(customBackground);
+  const canvasColor = darkHome ? "#111111" : isPhotoBackground ? DEFAULT_CANVAS_COLOR : customBackground || DEFAULT_CANVAS_COLOR;
   // Keep Safari chrome and the overscroll canvas in step with the saved appearance.
   useEffect(() => {
     const root = document.documentElement;
@@ -1446,7 +1453,7 @@ function HomeContent() {
       </main>
     );
   return (
-    <main className={`stage${captureMode ? ' chat-capture' : ''}`} style={shellStyle} data-capture-ready={captureMode && storageReady ? 'true' : undefined}>
+    <main className={`stage${captureMode ? ' chat-capture' : ''}`} style={shellStyle} data-home-theme={darkHome ? "black" : "light"} data-capture-ready={captureMode && storageReady ? 'true' : undefined}>
       {!captureMode && <WindowOpening />}
       <input ref={avatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "userAvatar"); e.target.value = ""; }} />
       <input ref={agentAvatarInput} type="file" accept="image/*" hidden onChange={e => { void changeAvatar(e.target.files?.[0], "agentAvatar"); e.target.value = ""; }} />
@@ -1505,6 +1512,8 @@ function HomeContent() {
               </>}
               <button aria-label="Chat history" onClick={() => { setHistoryTab("conversations"); setHistoryOpen(true); }}><Icon name="archive" /></button>
             </div>
+          ) : active === "今日" ? (
+            <button className="icon-button" aria-label="Appearance" onClick={() => setAppearanceOpen(true)}><Icon name="palette" /></button>
           ) : active === "音乐" ? (
             <span className="music-header-spacer" aria-hidden="true" />
           ) : (
@@ -1525,6 +1534,8 @@ function HomeContent() {
           {section === "今日" ? (
             <Today
               active={active === "今日"}
+              dark={darkHome}
+              environment={environment}
               onPrevious={() => { if (activeTracks.length) setTrackIndex(index => (index - 1 + activeTracks.length) % activeTracks.length); }}
               onNext={() => { if (activeTracks.length) setTrackIndex(index => (index + 1) % activeTracks.length); }}
               track={currentTrack}
@@ -1533,6 +1544,12 @@ function HomeContent() {
               userName={userName}
               onOpenSection={(section) => setActive(section)}
             />
+          ) : section === "Collection" ? (
+            <div className="desktop-collection" aria-label="Collection">
+              {nav.filter(item => !["今日", "聊天", "Collection", "日记", "设置"].includes(item.label)).map(item => (
+                <button key={item.label} type="button" onClick={() => navigateTo(item.label)}><Icon name={item.icon} /><span>{item.english}</span></button>
+              ))}
+            </div>
           ) : section === "聊天" ? (
             <>
               {!chatDetailOpen && <ChatContacts active={active === "聊天"} agentName={agentName} avatar={agentAvatar} cached={readLocalValue<ConversationSummary[]>("vesper-local-conversation-index", [])} request={requestContactHistory} onSelect={openChat} onNew={newChat} />}
@@ -1643,7 +1660,7 @@ function HomeContent() {
         </div>
         ))}
         <nav className="mobile-navigation" aria-label="Navigation">
-          {nav.filter(({ label }) => ["今日", "聊天", "音乐", "设置"].includes(label)).map(({ label, english, icon }) => (
+          {nav.filter(({ label }) => ["今日", "聊天", "Collection", "日记", "设置"].includes(label)).map(({ label, english, icon }) => (
             <button key={label} type="button" aria-current={active === label ? "page" : undefined}
               onClick={() => navigateTo(label)}>
               <NavIcon name={icon} />
@@ -1706,6 +1723,7 @@ function HomeContent() {
             </div>
           </aside>
         </div>
+        {appearanceOpen && <AppearanceModal accent={accent} onAccent={setAccent} onBackground={setCustomBackground} onClose={() => setAppearanceOpen(false)} />}
         {historyOpen && (
           <HistoryModal
             initialTab={historyTab}
@@ -1986,113 +2004,67 @@ async function sendAutonomousPush(
 
 
 function Today({
-  active, onPrevious, onNext,
-  track,
-  playing,
-  onToggle,
-  userName,
-  onOpenSection,
+  active, dark, environment, onPrevious, onNext, track, playing, onToggle, userName, onOpenSection,
 }: {
-  active: boolean;
-  onPrevious: () => void;
-  onNext: () => void;
-  track?: Track;
-  playing: boolean;
-  onToggle: () => void;
-  userName: string;
-  onOpenSection: (section: "便笺" | "提醒" | "纪念日" | "音乐" | "日记" | "欲望") => void;
+  active: boolean; dark: boolean; environment: EnvironmentSnapshot;
+  onPrevious: () => void; onNext: () => void; track?: Track;
+  playing: boolean; onToggle: () => void; userName: string;
+  onOpenSection: (section: "便笺" | "提醒" | "纪念日" | "音乐" | "日记" | "欲望" | "设置") => void;
 }) {
   const [notes] = usePersistentDocument<NoteItem[]>("notes", []);
   const [todos, setTodos] = usePersistentDocument<TodoItem[]>("todos", []);
-  const now = new Date();
-  const dateText = new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  }).format(now);
+  const [dates] = usePersistentDocument<AnniversaryItem[]>("anniversaries", []);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!active) return;
+    const refresh = () => { if (document.visibilityState !== "hidden") setNow(new Date()); };
+    refresh(); const timer = setInterval(refresh, 60000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [active]);
+  const dateText = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", weekday: "long" }).format(now);
   const hour = now.getHours();
-  const greeting =
-    hour < 6
-      ? "Late night"
-      : hour < 11
-        ? "Good morning"
-        : hour < 14
-          ? "Good afternoon"
-          : hour < 18
-            ? "Good afternoon"
-            : "Good evening";
-  const homeSignal =
-    hour < 6
-      ? "Take the night slowly."
-      : hour < 11
-        ? "The light is still on."
-        : hour < 18
-          ? "A place for today, too."
-          : "Welcome back.";
-  const realNotes = [...notes]
-    .filter((note) => note.text.trim().length > 0)
-    .sort((left, right) => {
-      const leftTime = Date.parse(left.createdAt);
-      const rightTime = Date.parse(right.createdAt);
-      return (Number.isFinite(rightTime) ? rightTime : 0) -
-        (Number.isFinite(leftTime) ? leftTime : 0);
-    });
-  const latestNote = realNotes[0];
-  const latestNoteTimestamp = latestNote
-    ? new Intl.DateTimeFormat("en-US", {
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(latestNote.createdAt))
-    : "";
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const note = latestRowanNote(notes), noteDate = note ? new Date(note.createdAt) : null;
+  const nextDate = nextAnniversary(dates, now), target = nextDate ? anniversaryTarget(nextDate, now) : null;
   const pendingTodos = todos.filter(item => !item.done);
-  return (
-    <div className="today-home home-overview home-cards">
-      <section className="welcome">
-        <div className="date-row"><span>{dateText}</span></div>
-        <h1>{greeting}, {userName}</h1>
-        <p className="home-return-signal">{homeSignal}</p>
-      </section>
-      <div className="home-upper-grid">
-        <HomeDesire active={active} apiUrl={apiUrl} headers={appHeaders} onOpen={() => onOpenSection("欲望")} />
-        <section className="home-usage-card"><SubscriptionUsage active={active} socketUrl={codexSocketUrl} weeklyOnly /></section>
-        <section className="home-notes-card">
-          <button className="home-card-label home-notes-heading" onClick={() => onOpenSection("便笺")}>Notes<Icon name="chevron" /></button>
-          <div className="home-note-scroll" tabIndex={0} role="region" aria-label="Latest note preview">
-            <p>{latestNote?.text || "Leave today’s first words here."}</p>
-            {latestNoteTimestamp && <small>{latestNoteTimestamp}</small>}
-          </div>
+  const temperature = typeof environment.temperature === "number" && Number.isFinite(environment.temperature) ? environment.temperature : null;
+  return <div className="today-home home-desktop">
+    <section className="welcome">
+      <div className="desktop-date-row"><span>{dateText}</span><button type="button" className="desktop-weather" onClick={() => onOpenSection("设置")} aria-label="Open location and weather settings"><Icon name="cloud" /><span>{temperature !== null ? `${Math.round(temperature)}° · ${homeWeatherCondition(environment.weatherCode)}` : "Local weather"}</span></button></div>
+      <h1>{greeting}, {userName}</h1>
+    </section>
+    <SubscriptionUsage active={active} socketUrl={codexSocketUrl} weeklyOnly />
+    <button type="button" className="desktop-letter" onClick={() => onOpenSection("便笺")} aria-label="Read Rowan’s latest note">
+      <span className="desktop-letter-signature">from Rowan</span>
+      <strong>哥哥留下的</strong>
+      <p>{note?.text || "这里留给哥哥下一张小纸条。"}</p>
+      {noteDate && Number.isFinite(noteDate.getTime()) && <time dateTime={noteDate.toISOString()}>{noteDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</time>}
+    </button>
+    <div className="desktop-keepsakes">
+      <button type="button" className="desktop-desire" onClick={() => onOpenSection("欲望")} aria-label="Open Desire">
+        <img src={dark ? "/home/desire-dark-coast.jpg" : "/home/desire-coast.jpg"} alt="" />
+        <span>Desire</span><Icon name="chevron" />
+      </button>
+      <div className="desktop-slips">
+        <button type="button" className="desktop-date desktop-slip" onClick={() => onOpenSection("纪念日")} aria-label={nextDate ? `${nextDate.title}, ${homeCountdown(anniversaryDays(nextDate, now))}` : "Dates, add a date"}>
+          {nextDate && target ? <><span className="desktop-month">{target.toLocaleDateString("en-US", { month: "short" })}</span><b>{target.getDate()}</b><hr /><span className="desktop-date-title">{nextDate.title}</span><span>{homeCountdown(anniversaryDays(nextDate, now))}</span></> : <><span className="desktop-month">Dates</span><span>留一个期待的日子</span></>}
+        </button>
+        <section className="desktop-reminders desktop-slip" aria-label="Reminders">
+          <button type="button" className="desktop-reminders-title" onClick={() => onOpenSection("提醒")}>Reminders</button><hr />
+          {pendingTodos.slice(0, 2).map(item => <button type="button" className="desktop-reminder" key={item.id} aria-label={`Complete reminder: ${item.title}`} onClick={() => setTodos(items => items.map(x => x.id === item.id ? { ...x, done: true } : x))}><span className="desktop-round-check" aria-hidden="true" /><span>{item.title}</span></button>)}
+          {!pendingTodos.length && <button type="button" className="desktop-reminder-empty" onClick={() => onOpenSection("提醒")}>今天，慢慢来。</button>}
         </section>
       </div>
-      <div className="home-lower-grid">
-      <section className="home-reminders-card">
-        <button className="home-card-label home-reminders-heading" onClick={() => onOpenSection("提醒")}>Reminders<Icon name="chevron" /></button>
-        {pendingTodos.slice(0, 3).map((item) => (
-          <button className="reminder-row" key={item.id} aria-pressed={item.done} onClick={() => setTodos((items) => items.map((x) => x.id === item.id ? { ...x, done: !x.done } : x))}>
-            <span className={item.done ? "round-check checked" : "round-check"}>{item.done && <Icon name="check" />}</span>
-            <span className={item.done ? "reminder-copy crossed" : "reminder-copy"}>{item.title}<small>{item.done ? "Completed" : item.due || item.tag}</small></span>
-          </button>
-        ))}
-        {!pendingTodos.length && <p className="home-card-empty">Something you want to do today? Leave yourself a reminder.</p>}
-      </section>
-      <section className="home-music-card">
-        <button className="home-panel-heading" onClick={() => onOpenSection("音乐")}><span className="home-card-label">Music</span><span>{playing ? "Now playing" : "Listen together"}<Icon name="chevron" /></span></button>
-        {track ? <div className="home-music-content">
-          <button className="home-track-link" onClick={() => onOpenSection("音乐")}>
-            {track.cover ? <img src={track.cover} alt="" /> : <span className="home-cover-fallback"><Icon name="music" /></span>}
-            <span><strong>{track.title}</strong><small>{track.artist || "Unknown artist"}</small></span>
-          </button>
-          <div className="home-player-controls">
-          <button onClick={onPrevious} aria-label="Previous track"><Icon name="back" /></button>
-          <button className="home-play" onClick={onToggle} aria-label={playing ? "Pause playback" : "Start playback"}><Icon name={playing ? "pause" : "play"} /></button>
-          <button onClick={onNext} aria-label="Next track"><Icon name="forward" /></button>
-          </div>
-        </div> : <button className="home-music-empty" onClick={() => onOpenSection("音乐")}><Icon name="music" /><span>Choose a song to keep you company.</span></button>}
-      </section>
-      </div>
     </div>
-  );
+    <section className="desktop-music" aria-label="Music">
+      <button type="button" className="desktop-track" onClick={() => onOpenSection("音乐")}>
+        {track?.cover ? <img src={track.cover} alt="" /> : <span className="desktop-cover"><Icon name="music" /></span>}
+        <span><strong>{track?.title || "Choose a song"}</strong>{track?.artist && <small>{track.artist}</small>}</span>
+      </button>
+      <div className="desktop-player-controls"><button type="button" disabled={!track} onClick={onPrevious} aria-label="Previous track"><Icon name="back" /></button><button type="button" disabled={!track} className="desktop-play" onClick={onToggle} aria-label={playing ? "Pause playback" : "Start playback"}><Icon name={playing ? "pause" : "play"} /></button><button type="button" disabled={!track} onClick={onNext} aria-label="Next track"><Icon name="forward" /></button></div>
+    </section>
+  </div>;
 }
 
 type ConversationSummary = {
@@ -6211,7 +6183,9 @@ function AppearanceModal({
     ["Light gray", "#a3a39f"],
   ];
   const backgrounds = [
-    ["Default marble", DEFAULT_APP_BACKGROUND],
+    ["Blue marble", DEFAULT_APP_BACKGROUND],
+    ["White", 'url("/backgrounds/vesper-white-20261005.jpg")'],
+    ["Black", 'url("/backgrounds/vesper-black-20261005.jpg")'],
     ["Pale mist blue", "#e1eaf2"],
     ["Paper gray", "#eeeeeb"],
     ["Mist gray", "#e2e2df"],
@@ -6229,14 +6203,14 @@ function AppearanceModal({
   };
   return (
     <div className="modal-layer appearance-layer">
-      <button className="modal-scrim" onClick={onClose} />
-      <section className="appearance-modal">
+      <button className="modal-scrim" aria-label="Dismiss appearance" onClick={onClose} />
+      <section className="appearance-modal" role="dialog" aria-label="Appearance" aria-modal="true">
         <div className="modal-head">
           <div>
             <small>APPEARANCE</small>
             <h2>Appearance</h2>
           </div>
-          <button onClick={onClose}>
+          <button aria-label="Close appearance" onClick={onClose}>
             <Icon name="close" />
           </button>
         </div>
@@ -6268,7 +6242,7 @@ function AppearanceModal({
             {backgrounds.map(([name, value]) => (
               <button
                 key={name}
-                style={{ backgroundColor: value }}
+                style={value.startsWith("url(") ? { backgroundImage: value, backgroundSize: "cover", backgroundPosition: "center" } : { backgroundColor: value }}
                 onClick={() => onBackground(value)}
               >
                 <span>{name}</span>

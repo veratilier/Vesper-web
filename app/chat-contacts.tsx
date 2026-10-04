@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { nextChatWelcome } from '@/lib/home-desktop';
 import { visibleUserContext } from '@/lib/web-chat-context';
 export type ContactConversation = { id: string; title: string; updatedAt: string; preview?: string; messageCount: number };
 type Match = { id: string; conversationId: string; content: string; role: string; title?: string; createdAt: string };
@@ -11,6 +12,13 @@ export function ChatContacts({ active, agentName, avatar, cached, request, onSel
   const [rows, setRows] = useState(cached), [query, setQuery] = useState(''), [matches, setMatches] = useState<Match[]>([]);
   const [error, setError] = useState(''), [searching, setSearching] = useState(false), [more, setMore] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [welcome, setWelcome] = useState('A place for today, too.');
+  useEffect(() => {
+    if (!active) return;
+    const refresh = () => { if (document.visibilityState !== 'hidden') setWelcome(previous => nextChatWelcome(previous)); };
+    refresh(); document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
+  }, [active]);
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>; let loading = false;
@@ -54,6 +62,7 @@ export function ChatContacts({ active, agentName, avatar, cached, request, onSel
       {image}<span className="contact-copy"><span><b>{agentName}</b><time>{stamp(row.updatedAt)}</time></span><small>{row.title && row.title !== agentName ? row.title : 'Conversation'}</small><p>{visibleUserContext(row.preview || '') || 'Open conversation'}</p></span>
     </button>)}</div>
     {!rows.length && !query && <div className="contact-empty"><p>No conversations yet.</p><button onClick={onNew}>Start a conversation</button></div>}
+    {!query.trim() && <p className="contact-welcome">{welcome}</p>}
     {query.trim() && <section className="contact-search-matches"><h2>Messages</h2>{searching && <p role="status">Searching…</p>}{matches.filter(item => visibleUserContext(item.content).trim()).map(item => <button key={`${item.conversationId}:${item.id}`} className="contact-match" onClick={() => onSelect(item.conversationId, item.id)}><b>{item.title || agentName}</b><p>{visibleUserContext(item.content)}</p><small>{stamp(item.createdAt)}</small></button>)}{!searching && !matches.length && <p>No matching messages.</p>}{more && <p>Showing the 60 most recent matches. Narrow your search to find older messages.</p>}</section>}
   </div>;
 }

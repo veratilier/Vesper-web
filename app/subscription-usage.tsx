@@ -53,6 +53,13 @@ export function SubscriptionUsage({ active, socketUrl, weeklyOnly = false }: { a
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval); document.removeEventListener('visibilitychange', poll); current?.close(); };
   }, [active, socketUrl, refresh]);
   const visibleWindows = weeklyOnly ? windows.filter(window => window.label === 'Weekly limit') : windows;
+  if (weeklyOnly) {
+    const remaining = status ? undefined : visibleWindows[0]?.remaining;
+    return <button type="button" className="desktop-weekly" onClick={() => setRefresh(value => value + 1)}
+      aria-label={`Weekly usage: ${remaining === undefined ? status || 'Unavailable' : `${remaining}% remaining`}. Refresh usage.`}>
+      <span>Weekly</span><span className="desktop-usage-track" aria-hidden="true"><span style={{ width: `${remaining ?? 0}%` }} /></span><span>{remaining === undefined ? '—' : `${remaining}%`}</span>
+    </button>;
+  }
   return <section className="subscription-usage" aria-label="Subscription remaining">
     <div className="usage-heading"><span className={weeklyOnly ? "home-card-label" : undefined}>{weeklyOnly ? "Usage" : "Subscription remaining"}</span><button type="button" aria-label="Refresh usage" onClick={() => setRefresh(value => value + 1)}>↻</button></div>
     {!status && weeklyOnly && !visibleWindows.length && <p role="status">Weekly usage unavailable</p>}

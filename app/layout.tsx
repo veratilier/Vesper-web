@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Pinyon_Script } from "next/font/google";
 import "./globals.css";
 import "./chat.css";
 import "./music.css";
@@ -18,12 +17,7 @@ import "./backgrounds.css";
 import "./home-glass.css";
 import "./compact-interface.css";
 import "./chat-capture.css";
-
-const pinyonScript = Pinyon_Script({
-  variable: "--font-pinyon-script",
-  subsets: ["latin"],
-  weight: "400",
-});
+import "./home-desktop.css";
 
 export const metadata: Metadata = {
   title: "Vesper — Your private corner",
@@ -67,7 +61,7 @@ export default function RootLayout({
   return (
     <html lang="en-US">
       <head><link rel="preload" as="image" href="/opening/sky-v5.png" fetchPriority="high" /></head>
-      <body className={`${pinyonScript.variable} antialiased`}>
+      <body className="antialiased">
         {children}
       </body>
     </html>
