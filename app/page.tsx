@@ -1696,7 +1696,7 @@ function HomeContent() {
               </button>
             </div>
             <nav>
-              {nav.filter(item => item.label !== "设置").map(({ label, english, icon }) => (
+              {nav.filter(item => !["设置", "Collection"].includes(item.label)).map(({ label, english, icon }) => (
                 <button
                   key={label}
                   className={active === label ? "nav-row active" : "nav-row"}
