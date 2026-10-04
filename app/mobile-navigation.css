@@ -40,7 +40,7 @@
     height: calc(100% - var(--mobile-nav-height) - var(--safe-bottom) - var(--mobile-nav-gap) * 2);
     padding-bottom: 10px !important;
   }
-  .app-shell > .scroll-view:has(> .codex-chat) { padding-bottom: 0 !important; }
+  .app-shell > .scroll-view:has(> .codex-chat, > .chat-detail-host:not([hidden])) { padding-bottom: 0 !important; }
   .app-shell > .mobile-navigation {
     position: fixed;
     z-index: 4;
@@ -103,25 +103,28 @@
 
 /* Let page content pass beneath the floating dock, with room to reach its end. */
 @media (max-width: 767px) {
-  .app-shell > .scroll-view:not(:has(> .codex-chat)) {
+  .app-shell > .scroll-view:not(:has(> .codex-chat, > .chat-detail-host:not([hidden]))) {
     height: 100%;
     padding-bottom: calc(var(--mobile-nav-height) + var(--safe-bottom) + var(--mobile-nav-gap) * 2) !important;
     scroll-padding-bottom: calc(var(--mobile-nav-height) + var(--safe-bottom) + var(--mobile-nav-gap) * 2);
   }
-  html[data-mobile-keyboard="true"] .app-shell > .scroll-view:not(:has(> .codex-chat)) {
+  html[data-mobile-keyboard="true"] .app-shell > .scroll-view:not(:has(> .codex-chat, > .chat-detail-host:not([hidden]))) {
     padding-bottom: 12px !important;
   }
 }
 
-/* Chat also extends behind the dock instead of ending above it. */
+/* Cover both the retained detail host and the direct chat layout. Hidden
+   detail hosts must not change the contacts page's scrolling or dock spacing. */
 @media (max-width: 767px) {
-  .app-shell > .scroll-view:has(> .codex-chat) {
+  .app-shell > .scroll-view:has(> .codex-chat, > .chat-detail-host:not([hidden])) {
     height: 100%;
   }
-  .app-shell > .scroll-view > .codex-chat:not(.watch-chat) {
+  .app-shell > .scroll-view > .codex-chat:not(.watch-chat),
+  .app-shell > .scroll-view > .chat-detail-host > .codex-chat:not(.watch-chat) {
     --floating-compose-gap: calc(var(--safe-bottom) + var(--mobile-nav-height) + var(--mobile-nav-gap) + 12px);
   }
-  html[data-mobile-keyboard="true"] .app-shell > .scroll-view > .codex-chat:not(.watch-chat) {
+  html[data-mobile-keyboard="true"] .app-shell > .scroll-view > .codex-chat:not(.watch-chat),
+  html[data-mobile-keyboard="true"] .app-shell > .scroll-view > .chat-detail-host > .codex-chat:not(.watch-chat) {
     --floating-compose-gap: 6px;
   }
 }
