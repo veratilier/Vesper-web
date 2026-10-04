@@ -5,10 +5,11 @@ from pathlib import Path
 PATH = Path(os.environ.get('VESPER_WAKE_DB', str(Path.home()/'.vesper/wake.sqlite3')))
 CONVERSATION = 'vesper-autonomous-wake'
 import vesper_wake_sleep as sleep
+import vesper_wake_workflow as workflow
 from vesper_wake_policy import WAKE_PROMPT
 DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
-TOOL_OPTIONS = ['read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
+TOOL_OPTIONS = ['jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
 MESSAGE_OPTIONS = ['text', 'photos', 'files', 'stickers']
 
 
@@ -59,7 +60,7 @@ def db():
         status TEXT NOT NULL DEFAULT 'pending', body TEXT, memory_id TEXT, retry_at REAL, error TEXT);
       CREATE TABLE IF NOT EXISTS calls (job_id TEXT, item_id TEXT, status TEXT NOT NULL,
         result TEXT, PRIMARY KEY(job_id,item_id));''')
-    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL'}}.items():
+    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
         existing={row[1] for row in con.execute('PRAGMA table_info('+table+')')}
         for name,kind in fields.items():
             if name not in existing:con.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+kind)
@@ -139,14 +140,47 @@ def update_prompt(body):
     return status()
 
 
+def workflow_jobs(con, limit=50, offset=0):
+    fields = ['id','source','status','created','started','finished','tools','conversation_id','decision','tokens','notification','silent_reason']
+    rows = con.execute('SELECT * FROM jobs ORDER BY created DESC,id DESC LIMIT ? OFFSET ?', (limit, offset)).fetchall()
+    jobs = [{k: row[k] for k in fields} for row in rows]
+    for job in jobs:
+        calls = []
+        for row in con.execute('SELECT item_id,name,status,started,finished,workflow_json FROM calls WHERE job_id=? ORDER BY rowid', (job['id'],)):
+            call = dict(row)
+            raw = call.pop('workflow_json')
+            try: facts = json.loads(raw) if raw else workflow.step(call['name'], failed=call['status']=='failed', uncertain=call['status']=='started')
+            except (ValueError, TypeError): facts = workflow.step(call['name'], uncertain=True)
+            call.update(facts)
+            # Older rows have no structured receipt: do not retrospectively assert completion.
+            if not raw and call['status']=='done': call.update(completion='unknown', result='旧记录只保存了接口返回状态，具体完成情况未核对。')
+            calls.append(call)
+        job['calls'] = calls
+        job.update(workflow.describe(job, calls))
+    return jobs
+
+
+def workflow_runs(limit=20, offset=0):
+    if type(limit) is not int or not 1 <= limit <= 50 or type(offset) is not int or not 0 <= offset <= 10000:
+        raise ValueError('Invalid workflow page')
+    with db() as con:
+        jobs = workflow_jobs(con, limit+1, offset)
+        return {'jobs': jobs[:limit], 'nextOffset': offset+limit if len(jobs)>limit else None, 'workflowVersion': 1}
+
+
+def workflow_run(ident):
+    if not isinstance(ident, str) or not ident or len(ident)>128: raise ValueError('Invalid workflow ID')
+    with db() as con:
+        # Scope is the authenticated single-owner history service, as for /wake.
+        row=con.execute('SELECT COUNT(*) FROM jobs WHERE created > (SELECT created FROM jobs WHERE id=?) OR (created = (SELECT created FROM jobs WHERE id=?) AND id > ?)', (ident,ident,ident)).fetchone()
+        jobs=workflow_jobs(con, 1, row[0])
+        if not jobs or jobs[0]['id'] != ident: raise ValueError('Workflow unavailable')
+        return {'job': jobs[0], 'workflowVersion': 1}
+
+
 def status():
     with db() as con:
-        fields = ['id','source','status','created','started','finished','tools','conversation_id','decision','tokens','notification']
-        rows = con.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 50').fetchall()
-        jobs = [{k: row[k] for k in fields} for row in rows]
-        for job in jobs:
-            job['calls'] = [dict(row) for row in con.execute(
-                'SELECT item_id,name,status,started,finished FROM calls WHERE job_id=? ORDER BY rowid', (job['id'],))]
+        jobs = workflow_jobs(con)
         config = get(con, 'config', {'enabled': get(con, 'frequency', 'daily') != 'off', 'intervalMinutes': None})
         config = dict(config, sleep=config.get('sleep', dict(sleep.DEFAULT)))
         quiet = sleep.window(config['sleep'], time.time()) if config['enabled'] else None
@@ -157,7 +191,7 @@ def status():
         recovery = get(con, 'recovery', {})
         paused = bool(recovery.get('reason') in {'quota', 'authentication'} or (recovery.get('retryAt') or 0) > time.time())
         recovery = dict(recovery, paused=paused)
-        return {'configVersion': 5, 'permissionVersion': 1, 'sleepVersion': 1,
+        return {'workflowVersion': 1, 'configVersion': 6, 'permissionVersion': 1, 'sleepVersion': 1,
                 'sleep': {'sleeping': bool(quiet), 'until': quiet['end'] if quiet else None, 'lastDream': dict(dream) if dream else None},
                 'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
                 'toolOptions': TOOL_OPTIONS, 'messageOptions': MESSAGE_OPTIONS,

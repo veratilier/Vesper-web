@@ -1,4 +1,9 @@
 export const schemaStatements = [
+  `CREATE TABLE IF NOT EXISTS vesper_jottings (
+    id TEXT NOT NULL, user_id TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_vesper_jottings_created ON vesper_jottings(user_id,created_at DESC,id DESC)`,
   `CREATE TABLE IF NOT EXISTS vesper_bookmarks (
     id TEXT NOT NULL, user_id TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL,
     PRIMARY KEY(user_id,id)
