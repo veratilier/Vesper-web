@@ -59,6 +59,43 @@ try {
   assert.equal((await get('musicControl')).value,null);
   await tool('music_control',{action:'pause'},null);
   assert.equal((await get('musicControl')).value.action,'pause');
+  // Named Vesper playlists persist independently of playback and Apple's library.
+  const apple2={...apple,id:'apple-100',appleMusicId:'100',title:'Another song',source:'appleMusic'};
+  await put('music',[apple,apple2]);
+  const queueBefore=JSON.stringify((await get('musicQueue')).value);
+  const createArgs={name:'Evening',requestId:'playlist-fixture',trackIds:[apple.id,apple.id]};
+  const created=await tool('music_playlist_create',createArgs,null);
+  assert.equal(created.status,200,await created.clone().text());
+  const playlist=(await created.json()).result.playlist;
+  assert.equal(playlist.name,'Evening');assert.equal(playlist.tracks.length,1);
+  assert.equal(JSON.stringify((await get('musicQueue')).value),queueBefore);
+  const retry=await tool('music_playlist_create',createArgs,null);
+  assert.equal((await retry.json()).result.alreadyCreated,true);
+  assert.equal((await (await tool('music_playlist_list',{},null)).json()).result.playlists.length,1);
+  assert.equal((await tool('music_playlist_create',{...createArgs,trackIds:[apple2.id]},null)).status,400);
+  assert.equal((await tool('music_playlist_create',{name:'Broken',requestId:'invalid-fixture',trackIds:['not-a-song']},null)).status,400);
+  assert.equal((await get('musicPlaylists')).value.length,1,'invalid song cannot partially create a playlist');
+  const added=await tool('music_playlist_add',{playlistId:playlist.id,trackId:apple2.id},null);
+  assert.equal((await added.json()).result.playlist.tracks.length,2);
+  const repeated=await tool('music_playlist_add',{playlistId:playlist.id,trackId:apple2.id},null);
+  assert.equal((await repeated.json()).result.alreadyInPlaylist,true);
+  assert.equal((await tool('music_playlist_add',{playlistId:'missing',trackId:apple.id},null)).status,400);
+  const playList=await tool('music_playlist_play',{playlistId:playlist.id},null);
+  const playbackRequest=(await playList.json()).result;
+  assert.equal(playbackRequest.action,'play_requested');
+  assert.deepEqual(playbackRequest.command.queue.map(t=>t.id),[apple.id,apple2.id]);
+  assert.deepEqual((await get('musicQueue')).value.map(t=>t.id),[apple.id,apple2.id]);
+  assert.equal((await get('webMusicQueue')).value[0].id,net.id);
+  await put('musicPlayback',{trackId:apple.id,positionSeconds:10,durationSeconds:180});
+  const seek=await tool('music_seek',{positionSeconds:45},null);
+  assert.equal(seek.status,200);assert.equal((await seek.json()).result.command.trackId,apple.id);
+  assert.equal((await get('musicControl')).value.positionSeconds,45);
+  for(const positionSeconds of [-1,'30',null]) assert.equal((await tool('music_seek',{positionSeconds},null)).status,400);
+  assert.equal((await tool('music_seek',{positionSeconds:30},'web')).status,400);
+  await put('musicPlayback',{});
+  assert.equal((await tool('music_seek',{positionSeconds:30},null)).status,400);
+  assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'music_playlist_list',arguments:{}},false))).status,401);
+  console.log('PASS Vesper playlists: saved create/list/add/play, retry identity, invalid tracks, deduplication, playback isolation, seek validation and authorization');
   // Resolution refreshes expired/missing URLs by exact NetEase ID only.
   let calls=0;
   const source=await modules.playback.resolveWebMusic(net,async payload=>{

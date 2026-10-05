@@ -80,7 +80,7 @@ export const codexToolDefinitions = [
   },
   {
     name: "music_play",
-    description: "Play one uniquely identified Vesper song on the user's current device. Never claims success when no playable audio URL exists.",
+    description: "Switch to and play one real song ID from music_search on the current device. Sends a playback request; report device confirmation only when returned. Apple Music requires device authorization and availability.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -119,12 +119,35 @@ export const codexToolDefinitions = [
     },
   },
   {
+    name: "music_seek",
+    description: "Seek the current song to an absolute position in seconds. Read music_get_status first for the current track, progress and duration; for relative jumps calculate the target. Requests device playback, clamps to duration, and preserves playing/paused state. The device must be connected; never infer playback success from a queued request.",
+    inputSchema: { type: "object", additionalProperties: false, properties: { positionSeconds: { type: "number", minimum: 0 } }, required: ["positionSeconds"] },
+  },
+  {
+    name: "music_playlist_list",
+    description: "List named playlists saved inside Vesper, with their exact playlist IDs and songs. These are Vesper playlists, separate from the playback queue and Apple Music library.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "music_playlist_create",
+    description: "Create a named playlist inside Vesper. Supply real trackIds from music_search or music_playlist_list, or an empty list. Requires a unique requestId for each intended playlist; reuse it unchanged on retries. Saved playlists appear in My Music. Does not modify Apple's playlists or start playback.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      name: { type: "string", minLength: 1, maxLength: 100 }, requestId: { type: "string", minLength: 1, maxLength: 100 },
+      trackIds: { type: "array", items: { type: "string" }, maxItems: 100 }
+    }, required: ["name", "requestId"] },
+  },
+  {
+    name: "music_playlist_play",
+    description: "Replace the device playback queue with a named Vesper playlist and play its first song. Use the exact playlistId returned by music_playlist_list. This requests playback; only device confirmation establishes success.",
+    inputSchema: { type: "object", additionalProperties: false, properties: { playlistId: { type: "string" } }, required: ["playlistId"] },
+  },
+  {
     name: "music_playlist_add",
-    description: "Add a Vesper song to the persistent local music library/playlist; this is separate from the temporary playback queue.",
+    description: "Add a real song to a named Vesper playlist using its exact playlistId from music_playlist_list. Omit playlistId to save in the general Vesper music library. Does not change playback or Apple playlists.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: { trackId: { type: "string" } },
+      properties: { trackId: { type: "string" }, playlistId: { type: "string" } },
       required: ["trackId"],
     },
   },
