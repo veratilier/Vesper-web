@@ -25,6 +25,8 @@ jobs:
       - run: node --experimental-strip-types tools/test-web-chat-context.ts
       - run: node --experimental-strip-types tools/test-chat-terminal-feed.ts
       - run: npm run test:codex
+      - run: node --experimental-strip-types tools/test-apple-music.ts
+      - run: node tools/test-web-music.mjs
       - run: npm run test:memory
       - run: node tools/test-jottings.mjs
       - run: node tools/test-letters.mjs

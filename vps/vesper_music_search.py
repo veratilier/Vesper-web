@@ -23,7 +23,9 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def fetch_catalog(params):
-    request = Request('https://itunes.apple.com/search?' + urlencode(params),
+    params = dict(params)
+    path = 'lookup' if params.pop('_lookup', False) else 'search'
+    request = Request('https://itunes.apple.com/' + path + '?' + urlencode(params),
                       headers={'User-Agent': 'Vesper/1.0', 'Accept': 'application/json'})
     try:
         with build_opener(NoRedirect).open(request, timeout=8) as response:
@@ -56,8 +58,39 @@ class SearchCache:
         self.fetch, self.clock = fetch, clock
         self.lock = threading.Lock()
         self.cache = OrderedDict()
+        self.tracks = OrderedDict()
         self.recent = deque()
         self.blocked_until = 0
+
+    def _request(self, key, params):
+        # Both search and lookup share one upstream rate limit and cooldown.
+        now = self.clock()
+        if self.blocked_until > now:
+            raise SearchUnavailable('Apple Music search is cooling down; try again later', 429)
+        while self.recent and self.recent[0] <= now - 60:
+            self.recent.popleft()
+        if len(self.recent) >= 10:
+            raise SearchUnavailable('Apple Music search rate limited; try again later', 429)
+        self.recent.append(now)
+        try:
+            data = self.fetch(params)
+        except SearchUnavailable as error:
+            self.blocked_until = now + (error.retry_after if error.status == 429 else 30)
+            raise
+        self.cache[key] = (self.clock() + (21600 if data['results'] else 300), data)
+        self.cache.move_to_end(key)
+        while len(self.cache) > 128:
+            self.cache.popitem(last=False)
+        # Search already returned verified metadata. Adding these songs should
+        # not perform another upstream request or consume the rate limit again.
+        for row in data['results']:
+            if row.get('kind') == 'song' and type(row.get('trackId')) is int:
+                track_key = (str(row['trackId']), params['country'])
+                self.tracks[track_key] = (self.clock() + 21600, row)
+                self.tracks.move_to_end(track_key)
+        while len(self.tracks) > 512:
+            self.tracks.popitem(last=False)
+        return dict(data, cached=False)
 
     def search(self, body):
         query, country, limit = body.get('query'), body.get('country', 'tw'), body.get('limit', 8)
@@ -73,23 +106,25 @@ class SearchCache:
             if cached and cached[0] > now:
                 self.cache.move_to_end(key)
                 return dict(cached[1], cached=True)
-            if self.blocked_until > now:
-                raise SearchUnavailable('Apple Music search is cooling down; try again later', 429)
-            while self.recent and self.recent[0] <= now - 60:
-                self.recent.popleft()
-            if len(self.recent) >= 10:
-                raise SearchUnavailable('Apple Music search rate limited; try again later', 429)
-            self.recent.append(now)
-            try:
-                data = self.fetch({'term': query, 'entity': 'song', 'country': country, 'limit': limit})
-            except SearchUnavailable as error:
-                self.blocked_until = now + (error.retry_after if error.status == 429 else 30)
-                raise
-            self.cache[key] = (self.clock() + (21600 if data['results'] else 300), data)
-            self.cache.move_to_end(key)
-            while len(self.cache) > 128:
-                self.cache.popitem(last=False)
-            return dict(data, cached=False)
+            return self._request(key, {'term': query, 'entity': 'song', 'country': country, 'limit': limit})
+
+    def lookup(self, body):
+        track_id, country = body.get('trackId'), body.get('country', 'tw')
+        if (not isinstance(track_id, str) or not track_id.isascii() or not track_id.isdigit()
+                or not 1 <= len(track_id) <= 20 or country not in ('cn', 'tw') or 'query' in body):
+            raise ValueError('Invalid music lookup parameters')
+        key = ('lookup', track_id, country)
+        with self.lock:
+            now = self.clock()
+            track = self.tracks.get((track_id, country))
+            if track and track[0] > now:
+                self.tracks.move_to_end((track_id, country))
+                return {'results': [track[1]], 'resultCount': 1, 'cached': True}
+            cached = self.cache.get(key)
+            if cached and cached[0] > now:
+                self.cache.move_to_end(key)
+                return dict(cached[1], cached=True)
+            return self._request(key, {'id': track_id, 'entity': 'song', 'country': country, '_lookup': True})
 
 
 catalog = SearchCache()

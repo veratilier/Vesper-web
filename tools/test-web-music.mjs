@@ -94,6 +94,29 @@ try {
   assert.equal((await tool('music_seek',{positionSeconds:30},'web')).status,400);
   await put('musicPlayback',{});
   assert.equal((await tool('music_seek',{positionSeconds:30},null)).status,400);
+  // Songs found in the catalog, absent from the device library, must use the
+  // authenticated catalog transport when creating or adding to a playlist.
+  const originalFetch = globalThis.fetch;
+  const catalogCalls = [];
+  const catalogSong = id => ({kind:'song',trackId:Number(id),trackName:'Catalog '+id,artistName:'Artist',
+    artworkUrl100:'https://is1-ssl.mzstatic.com/catalog.jpg',trackViewUrl:'https://music.apple.com/tw/album/song/10?i='+id,trackTimeMillis:180000});
+  globalThis.fetch = async (url, options) => {
+    assert.equal(String(url),'https://codex.r-vera.com/history/music/search','never query Apple directly from the Worker');
+    assert.equal(new Headers(options.headers).get('authorization'),'Bearer fixture-token');
+    const args = JSON.parse(options.body); catalogCalls.push(args);
+    return new Response(JSON.stringify({results:[catalogSong(args.trackId || '501')]}));
+  };
+  try {
+    const searched = await tool('music_search',{query:'Catalog song'},null);
+    assert.equal((await searched.json()).result.matches[0].trackId,'apple-501');
+    const catalogCreated = await tool('music_playlist_create',{name:'Catalog playlist',requestId:'catalog-fixture',trackIds:['apple-501']},null);
+    assert.equal(catalogCreated.status,200,await catalogCreated.clone().text());
+    assert.equal((await catalogCreated.json()).result.playlist.tracks[0].cover,'https://is1-ssl.mzstatic.com/catalog.jpg');
+    const catalogAdded = await tool('music_playlist_add',{playlistId:'catalog-fixture',trackId:'apple-502'},null);
+    assert.equal(catalogAdded.status,200,await catalogAdded.clone().text());
+    assert.equal((await catalogAdded.json()).result.playlist.tracks.length,2);
+    assert.deepEqual(catalogCalls,[{query:'catalog song',country:'tw',limit:8},{trackId:'501',country:'tw'},{trackId:'502',country:'tw'}]);
+  } finally { globalThis.fetch = originalFetch; }
   assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'music_playlist_list',arguments:{}},false))).status,401);
   console.log('PASS Vesper playlists: saved create/list/add/play, retry identity, invalid tracks, deduplication, playback isolation, seek validation and authorization');
   // Resolution refreshes expired/missing URLs by exact NetEase ID only.

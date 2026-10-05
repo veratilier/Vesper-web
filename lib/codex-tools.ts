@@ -94,9 +94,12 @@ async function readVesperPlaylists(): Promise<VesperPlaylist[]> {
 async function playlistTrack(id: string): Promise<MusicTrack> {
   const playlists = await readVesperPlaylists();
   const track = findMusicTrack([...(await readMusicLibrary()), ...playlists.flatMap(item => item.tracks)], id)
-    || await lookupAppleMusic(id.replace(/^apple-/, ""));
+    || await lookupCatalogTrack(id);
   if (!track || !isAppleMusicTrack(track)) throw new Error("Use a real Apple Music trackId from music_search");
   return { ...track, source: "appleMusic" };
+}
+function lookupCatalogTrack(id: string) {
+  return lookupAppleMusic(id.replace(/^apple-/, ""), appleSearchTransport((env as { VESPER_APP_TOKEN?: string }).VESPER_APP_TOKEN || ''));
 }
 function uniquePlaylistTracks(tracks: MusicTrack[]): MusicTrack[] {
   const seen = new Set<string>();
@@ -305,7 +308,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_play") {
     const trackId = String(input.trackId || "");
     const tracks = await readMusicLibrary(musicKeys.queue, musicKeys.library);
-    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupCatalogTrack(trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 使用独立的网易云队列，请在 My Music 选择网易云歌曲；原生 App 队列未改变。");
     if (context.musicSurface !== "web" && ((!track.appleMusicId && !track.url) || track.playable === false)) throw new Error("这首歌没有可播放音源");
@@ -329,7 +332,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_queue_add") {
     const trackId = String(input.trackId || "");
     const position = input.position === "next" ? "next" : "end";
-    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupCatalogTrack(trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 队列只接受网易云歌曲，原生 App 队列未改变。");
     const queue = await readMusicTracks(musicKeys.queue);
@@ -342,7 +345,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "music_send_card") {
     const trackId = String(input.trackId || "");
     if (trackId.startsWith("netease-")) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
-    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track: MusicTrack | null | undefined = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupCatalogTrack(trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (!isAppleMusicTrack(track)) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
     return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId, appleMusicURL: track.appleMusicURL || '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: true, source: "appleMusic", message: typeof input.message === "string" ? input.message : "" } };
@@ -400,7 +403,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
       return { saved: true, alreadyInPlaylist: already, playlist };
     }
     const library = await readMusicTracks(musicKeys.library);
-    const track = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    const track = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupCatalogTrack(trackId);
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
     if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 曲库只接受网易云歌曲。");
     const already = Boolean(findMusicTrack(library, track.id));
