@@ -81,8 +81,8 @@ function createServer(env: Env) {
   const server = new McpServer({ name: "Vesper", version: "1.1.0" });
   const letterID=z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
   const letterTools=[
-    {name:'letter_list',description:'翻阅 Letters，包括原 Sketch 内容；未来来信正文在服务器到时之前不返回。',schema:z.object({limit:z.number().int().min(1).max(50).optional(),before:z.string().optional()})},
-    {name:'letter_create',description:'给 Vera 寄一封信或保存值得留下的想法。id 重试时保持不变；unlockAt 可指定含时区的 ISO 开启时间；replyTo 使用实际已打开的信件 ID。不会发送聊天消息。',schema:z.object({id:letterID,title:z.string().max(120).optional(),text:z.string().min(1).max(12000),unlockAt:z.string().optional(),replyTo:letterID.optional()})},
+    {name:'letter_list',description:'翻阅 Letters 信箱，与 Sketch 随笔分开；未来来信正文在服务器到时之前不返回。',schema:z.object({limit:z.number().int().min(1).max(50).optional(),before:z.string().optional()})},
+    {name:'letter_create',description:'给 Vera 寄一封信。零散随笔存入 Sketch，与信箱分开。id 重试时保持不变；unlockAt 可指定含时区的 ISO 开启时间；replyTo 使用实际已打开的信件 ID。不会发送聊天消息。',schema:z.object({id:letterID,title:z.string().max(120).optional(),text:z.string().min(1).max(12000),unlockAt:z.string().optional(),replyTo:letterID.optional()})},
     {name:'letter_read',description:'拆开 letter_list 返回的信件；未到时间的来信保持封存。',schema:z.object({id:letterID})},
     {name:'letter_keep',description:'为 Rowan 收藏或取消收藏一封信，不修改 Vera 的收藏状态。',schema:z.object({id:letterID,kept:z.boolean()})},
   ];
