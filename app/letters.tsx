@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { Letter } from '../lib/letter-policy';
+import { letterDate } from '../lib/letter-policy';
 import './letters.css';
 
 type Draft = { id: string; title: string; text: string; unlockAt: string; replyTo?: string; attempted: boolean };
@@ -93,6 +94,9 @@ export function Letters({ apiUrl, headers, theme, active }: { apiUrl: (path: str
     if (!draft || !draft.text.trim() || busyRef.current) return;
     const scope = generation.current; busyRef.current = true; setBusy(true);
     try {
+      if (draft.title.length > 120 || draft.text.length > 12000) throw new Error('Use a title under 120 characters and a letter under 12,000 characters.');
+      // Reject invalid dates before sealing the immutable delivery payload.
+      letterDate(draft.unlockAt);
       const sealedDraft = { ...draft, attempted: true }; persist(sealedDraft);
       const result = await request('POST', { id: draft.id, title: draft.title.trim(), text: draft.text.trim(), ...(draft.unlockAt ? { unlockAt: draft.unlockAt } : {}), ...(draft.replyTo ? { replyTo: draft.replyTo } : {}) });
       if (scope !== generation.current) return;
