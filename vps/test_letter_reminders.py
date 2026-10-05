@@ -23,16 +23,17 @@ class LetterRemindersTests(unittest.TestCase):
             for _ in range(2):reminders.poll(self.http,Path('unused'),self.save)
         with store.db() as con:
             self.assertEqual(con.execute('SELECT count(*) FROM jobs').fetchone()[0],1)
-            self.assertEqual(con.execute('SELECT source FROM jobs').fetchone()[0],'automation')
-        self.assertEqual(len(self.messages),1)
-        job,role,content,meta=next(iter(self.messages.values()))
+            self.assertEqual(con.execute('SELECT source FROM jobs').fetchone()[0],'letter-reminder')
+        self.assertEqual(len(self.messages),2)
+        job,role,content,meta=self.messages[reminders.key('Vera', self.feeds['Vera'][0])]
         self.assertEqual(role,'system');self.assertEqual(job['conversation_id'],'real-chat')
         self.assertEqual(meta['letterId'],'from-rowan');self.assertIn('可以拆信',content)
         self.assertEqual(set(self.acks),{('Rowan','from-vera'),('Vera','from-rowan')})
     def test_not_due_and_delivered_covers_are_not_enqueued(self):
         for actor in self.feeds:
             self.feeds[actor]=[{'id':'early','due':False},{'id':'sent','due':True,'deliveredAt':'already'}]
-        reminders.poll(self.http,Path('unused'),self.save)
+        with patch.object(reminders.policy,'history',return_value=[]),patch.object(reminders.policy,'target',return_value=None):
+            reminders.poll(self.http,Path('unused'),self.save)
         self.assertEqual(self.acks,[]);self.assertEqual(self.messages,{})
     def test_missing_target_retains_the_vera_reminder_for_later(self):
         self.feeds['Rowan']=[]
@@ -44,11 +45,29 @@ class LetterRemindersTests(unittest.TestCase):
         def fail(path,body=None):
             if body:raise RuntimeError('Network unavailable')
             return self.http(path,body)
-        with self.assertRaises(RuntimeError):reminders.poll(fail,Path('unused'),self.save)
-        reminders.poll(self.http,Path('unused'),self.save)
+        with patch.object(reminders.policy,'history',return_value=[]),patch.object(reminders.policy,'target',return_value={'conversation_id':'chat'}):
+            with self.assertRaises(RuntimeError):reminders.poll(fail,Path('unused'),self.save)
+            reminders.poll(self.http,Path('unused'),self.save)
         with store.db() as con:self.assertEqual(con.execute('SELECT count(*) FROM jobs').fetchone()[0],1)
     def test_unread_cover_remains_in_context_after_queue_ack(self):
         self.feeds['Rowan'][0]['deliveredAt']='queued'
         self.assertIn('from-vera',reminders.context(self.http))
+    def test_known_pre_model_skip_is_repaired_but_uncertain_turn_is_not(self):
+        self.feeds['Vera']=[]
+        target={'conversation_id':'chat'}
+        with patch.object(reminders.policy,'history',return_value=[]),patch.object(reminders.policy,'target',return_value=target):
+            reminders.poll(self.http,Path('unused'),self.save)
+            ident=reminders.key('Rowan',self.feeds['Rowan'][0])
+            self.feeds['Rowan'][0]['deliveredAt']='acknowledged'
+            with store.db() as con:con.execute("UPDATE jobs SET source='automation',status='silent',decision='recent_user_activity',finished=1 WHERE id=?",(ident,))
+            reminders.poll(self.http,Path('unused'),self.save)
+            with store.db() as con:
+                row=con.execute('SELECT * FROM jobs WHERE id=?',(ident,)).fetchone()
+                self.assertEqual(row['status'],'queued');self.assertEqual(row['source'],'letter-reminder')
+                con.execute("UPDATE jobs SET status='failed',thread_id='uncertain',error='timeout' WHERE id=?",(ident,))
+            reminders.poll(self.http,Path('unused'),self.save)
+            with store.db() as con:self.assertEqual(con.execute('SELECT status FROM jobs WHERE id=?',(ident,)).fetchone()[0],'failed')
+        self.assertEqual(len(self.messages),1)
+        self.assertEqual(next(iter(self.messages.values()))[3]['recipient'],'Rowan')
 
 if __name__ == '__main__':unittest.main()

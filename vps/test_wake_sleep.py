@@ -50,6 +50,26 @@ class SleepTests(unittest.TestCase):
     def observed_night(self):
         self.clock.return_value = at('2026-10-02T02:00:00'); runner.sleep_gate(self.clock.return_value)
         self.clock.return_value = at('2026-10-02T07:00:00')
+    def test_letter_reminder_survives_sleep_and_recent_chat_without_starting_model(self):
+        store.request('letter-wait', source='letter-reminder')
+        self.clock.return_value = at('2026-10-02T01:00:00')
+        with patch.object(runner,'http',side_effect=AssertionError('No night network')),patch.object(runner,'Rpc',side_effect=AssertionError('No model')):
+            runner.tick()
+        with store.db() as con:self.assertEqual(con.execute("SELECT status FROM jobs WHERE id='letter-wait'").fetchone()[0],'queued')
+        self.clock.return_value = at('2026-10-02T08:00:00')
+        with patch.object(runner,'recent_chat',return_value=True),patch.object(runner,'Rpc',side_effect=AssertionError('No active chat model')):
+            runner.execute({'id':'letter-wait','source':'letter-reminder'})
+        with store.db() as con:
+            row=con.execute("SELECT * FROM jobs WHERE id='letter-wait'").fetchone()
+            self.assertEqual(row['status'],'queued');self.assertIsNone(row['thread_id']);self.assertGreater(row['due'],self.clock.return_value)
+    def test_letter_read_permission_is_not_bypassed_by_reminder(self):
+        store.configure({'enabled':True,'intervalMinutes':60,'permissions':{'tools':[],'messages':[]}})
+        store.request('letter-wait',source='letter-reminder')
+        with patch.object(runner,'http',return_value={}),patch.object(runner,'recovery_ready',return_value=True),patch.object(runner,'finish_sleep'),patch.object(runner,'reschedule'),patch.object(runner,'front_busy',return_value=False),patch.object(runner,'current_preferences',return_value={}),patch.object(runner.policy,'history',return_value=[]),patch.object(runner,'execute',side_effect=AssertionError('Permission must block reading')):
+            runner.tick()
+        with store.db() as con:
+            row=con.execute("SELECT * FROM jobs WHERE id='letter-wait'").fetchone()
+            self.assertEqual(row['status'],'queued');self.assertEqual(row['decision'],'letter_read_not_permitted')
     def test_morning_saved_once_even_after_restart(self):
         self.observed_night()
         def save(path,body):

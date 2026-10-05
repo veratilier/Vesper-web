@@ -11,6 +11,13 @@ export function letterKeepers(letter: Letter) {
 export function letterMatchesFilter(letter: Letter, filter: string) {
   return filter === 'All' || (filter === 'Unread' ? letterReceipt(letter).read === false : letterKeepers(letter).length > 0);
 }
+export function letterMatchesMailbox(letter: Letter, mailbox: 'Vera' | 'Rowan', filter: string) {
+  const reader = letter.recipient || (letter.author === 'Vera' ? 'Rowan' : 'Vera');
+  if (reader !== mailbox) return false;
+  if (filter === 'All') return true;
+  if (filter === 'Unread') return letterReceipt(letter).read === false;
+  return letter.marks?.[mailbox]?.kept ?? (mailbox === 'Vera' && Boolean(letter.kept));
+}
 // The recipient never receives the body of a future letter, including through
 // the legacy Sketch endpoints and tool catalog. Client clocks are not authority.
 export function visibleLetter(value: Letter, actor: string, now = Date.now()): Letter {
