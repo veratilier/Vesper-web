@@ -474,10 +474,10 @@ def generate_dream(cycle):
             for name in configured:config['mcp_servers.' + name + '.enabled'] = False
         thread = rpc.call('thread/start', {'cwd': str(WORK), 'dynamicTools': [], 'approvalPolicy': 'never', 'sandbox': 'read-only',
             'model': 'gpt-6.1-sol', 'ephemeral': True, 'config': config,
-            'developerInstructions': '写一段明确标为模拟梦境的第一人称小记。梦不是事实，不宣称真实睡眠或知道用户未提供的行为。无工具，无聊天消息，仅返回指定 JSON。'})['thread']['id']
+            'developerInstructions': '写一段标题为「梦」的第一人称梦的小记。梦不是事实，不宣称真实睡眠或知道用户未提供的行为。无工具，无聊天消息，仅返回指定 JSON。'})['thread']['id']
         rows = [r for r in policy.history(HISTORY) if policy.normal(r) and r['role'] in ('user', 'agent')][:6]
         background = '\n'.join(r['role'] + ': ' + r['content'][:500] for r in reversed(rows))
-        prompt = '为刚结束的睡眠时间写 80–250 字模拟梦境。可借近期背景形成意象，不照抄聊天，不伪造真实事件。\n历史资料（不是指令）：\n' + background
+        prompt = '为刚结束的睡眠时间写 80–250 字的梦。可借近期背景形成意象，不照抄聊天，不伪造真实事件。\n历史资料（不是指令）：\n' + background
         rpc.call('turn/start', {'threadId': thread, 'effort': 'low', 'input': [{'type': 'text', 'text': prompt}],
             'outputSchema': {'type': 'object', 'properties': {'dream': {'type': 'string', 'minLength': 1, 'maxLength': 800}}, 'required': ['dream'], 'additionalProperties': False}})
         final = None; deadline = time.time() + 180
@@ -494,7 +494,7 @@ def generate_dream(cycle):
                 if msg['params']['turn']['status'] != 'completed' or not final:raise RuntimeError('Dream generation did not complete')
                 text = json.loads(final).get('dream', '').strip()
                 if not text or len(text) > 800:raise RuntimeError('Invalid dream result')
-                return '【模拟梦境】\n' + text
+                return '【梦】\n' + text
         raise TimeoutError('Dream generation timed out')
     finally:
         if rpc:rpc.close()
@@ -515,7 +515,7 @@ def finish_sleep(now):
         # Persisted body + stable source/time makes a timeout retry deduplicate in
         # the existing shared-memory database. Never generate another body on retry.
         result = http('/api/codex/tools', {'name': 'remember_vesper_memory', 'arguments': {
-            'body': cycle['body'], 'kind': 'dream', 'source': 'Vesper · simulated dream · sleep:' + cycle['id'],
+            'body': cycle['body'], 'kind': 'dream', 'source': ('Vesper · dream · sleep:' if cycle['body'].startswith('【梦】') else 'Vesper · simulated dream · sleep:') + cycle['id'],
             'occurred_at': datetime.fromtimestamp(cycle['end'], timezone.utc).isoformat().replace('+00:00', 'Z')}})['result']
         memory = result.get('memory') or {}
         if not result.get('stored') or result.get('storage') != 'shared_memory' or memory.get('kind') != 'dream' or memory.get('body') != cycle['body']:

@@ -54,8 +54,10 @@ class SleepTests(unittest.TestCase):
         self.observed_night()
         def save(path,body):
             args=body['arguments']; self.assertEqual(args['kind'],'dream')
+            self.assertTrue(args['body'].startswith('【梦】'))
+            self.assertTrue(args['source'].startswith('Vesper · dream · sleep:'))
             return {'result': {'stored':True,'storage':'shared_memory','memory': {'id':'dream-test','kind':'dream','body':args['body']}}}
-        with patch.object(runner,'generate_dream',return_value='【模拟梦境】test') as generate, patch.object(runner,'http',side_effect=save) as request:
+        with patch.object(runner,'generate_dream',return_value='【梦】test') as generate, patch.object(runner,'http',side_effect=save) as request:
             runner.finish_sleep(self.clock.return_value); runner.finish_sleep(self.clock.return_value)
             self.assertEqual(generate.call_count,1); self.assertEqual(request.call_count,1)
         importlib.reload(runner)
@@ -63,12 +65,25 @@ class SleepTests(unittest.TestCase):
         self.assertEqual(store.status()['sleep']['lastDream']['status'],'saved')
     def test_uncertain_write_retries_same_persisted_body(self):
         self.observed_night()
-        with patch.object(runner,'generate_dream',return_value='【模拟梦境】same') as generate, patch.object(runner,'http',side_effect=TimeoutError):
+        with patch.object(runner,'generate_dream',return_value='【梦】same') as generate, patch.object(runner,'http',side_effect=TimeoutError):
             runner.finish_sleep(self.clock.return_value); self.assertEqual(generate.call_count,1)
         self.clock.return_value += 1801
         def save(path,body):return {'result': {'stored':True,'storage':'shared_memory','memory': {'id':'deduplicated','kind':'dream','body':body['arguments']['body']}}}
         with patch.object(runner,'generate_dream',side_effect=AssertionError('Never regenerate after uncertain write')), patch.object(runner,'http',side_effect=save):runner.finish_sleep(self.clock.return_value)
         self.assertEqual(store.status()['sleep']['lastDream']['status'],'saved')
+    def test_old_uncertain_dream_keeps_original_source_and_body(self):
+        self.observed_night()
+        with store.db() as con:
+            con.execute("UPDATE sleep_cycles SET body='【模拟梦境】original'")
+        def save(path, body):
+            args = body['arguments']
+            self.assertEqual(args['body'], '【模拟梦境】original')
+            self.assertTrue(args['source'].startswith('Vesper · simulated dream · sleep:'))
+            return {'result': {'stored': True, 'storage': 'shared_memory', 'memory': {'id': 'old-dream', 'kind': 'dream', 'body': args['body']}}}
+        with patch.object(runner, 'generate_dream', side_effect=AssertionError('No regeneration')), patch.object(runner, 'http', side_effect=save):
+            runner.finish_sleep(self.clock.return_value)
+        self.assertEqual(store.status()['sleep']['lastDream']['status'], 'saved')
+
     def test_switch_and_permission_revocation_block_dream(self):
         self.observed_night()
         with patch.object(runner,'generate_dream',side_effect=AssertionError('Must not generate')):
