@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const name = String(body.name || "");
     const definition = codexToolDefinitions.find((tool) => tool.name === name);
     if (!definition) return json(request, { error: "Unknown Codex tool" }, 404);
-    const result = await executeCodexTool(name, body.arguments || {}, await memoryScopeFromRequest(request), { conversationId: body.conversationId, turnId: body.turnId, origin: new URL(request.url).origin, musicSurface: body.musicSurface === "web" ? "web" : undefined });
+    const result = await executeCodexTool(name, body.arguments || {}, await memoryScopeFromRequest(request), { conversationId: body.conversationId, threadId: body.threadId, turnId: body.turnId, origin: new URL(request.url).origin, musicSurface: body.musicSurface === "web" ? "web" : undefined });
     const responseResult = name === "read_codex_task_progress" && body.conversationId
       ? { ...result, wakeHistory: await readWakeHistory(body.conversationId, request.headers.get("x-vesper-device-token") || "") }
       : result;

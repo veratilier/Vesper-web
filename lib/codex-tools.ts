@@ -12,7 +12,7 @@ import { executeDesire, type NativeDesireEnv } from './desire/native';
 import { desireTools } from './desire/tools';
 import { memoryScopeFromRequest } from './memory';
 import { listAlbumPhotos, saveAlbumPhoto, getAlbumPhoto } from '@/lib/photo-album';
-import { createChatFile } from '@/lib/codex-artifacts';
+import { deliverChatFiles } from './generated-chat-files';
 import { readExecutions } from '@/lib/codex-events';
 import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
@@ -24,7 +24,7 @@ import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
 type ToolInput = Record<string, unknown>;
 type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string | number; url?: string; playable?: boolean };
 type MusicPlayback = { trackId?: string; playing?: boolean; positionSeconds?: number; durationSeconds?: number; queueLength?: number; updatedAt?: string };
-export type CodexToolContext = { conversationId?: string; turnId?: string; origin?: string; musicSurface?: "web" };
+export type CodexToolContext = { conversationId?: string; threadId?: string; turnId?: string; origin?: string; musicSurface?: "web" };
 
 const sectionToKey: Record<string, string> = {
   today: "todos",
@@ -165,14 +165,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   }
   if (name === "send_chat_file") {
     if (!memoryScope || !context.conversationId || !context.origin) throw new Error("Conversation context required");
-    if (!Array.isArray(input.files) || !input.files.length || input.files.length > 8) throw new Error("Send between 1 and 8 files");
-    if (JSON.stringify(input.files).length > 12 * 1024 * 1024) throw new Error("Attachment batch too large");
-    const attachments = [];
-    for (const file of input.files) {
-      if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error("Invalid file");
-      attachments.push(await createChatFile(file as ToolInput, memoryScope.userId, context.origin));
-    }
-    return { attachments, message: String(input.message || '').slice(0, 2000) };
+    return deliverChatFiles(input, memoryScope.userId, context);
   }
   if (name === "reading_room_read" || name === "reading_room_annotate") {
     const books = await readDocument("readingRoom") as import("@/app/reading-room").ReadingBook[];

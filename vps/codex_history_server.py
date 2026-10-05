@@ -19,6 +19,7 @@ import vesper_terminal as terminal
 import vesper_codex_records as codex_records
 import vesper_music_search as music_search
 import vesper_chat_screenshot as chat_screenshot
+import vesper_generated_images as generated_images
 
 
 DB_PATH = Path(os.environ.get("VESPER_HISTORY_DB", "/home/ubuntu/.vesper/chat-history.sqlite3"))
@@ -221,6 +222,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, chat_screenshot.render(data, self.watch_secret()))
             except chat_screenshot.ScreenshotUnavailable as error:
                 self.send_json(503, {'error': str(error)})
+        elif len(path) == 3 and path[0] == "conversations" and path[2] == "generated-image" and self.command == "POST":
+            body = self.body()
+            try:
+                with db() as connection:
+                    image = generated_images.export_image(connection, path[1], body.get('threadId'), body.get('path'))
+                self.send_json(200, image)
+            except ValueError as error:
+                self.send_json(400, {'error': str(error)})
         elif len(path) >= 3 and path[0] == "conversations" and path[2] == "terminal":
             self.conversation_terminal(path)
         elif path and path[0] == "terminal":
