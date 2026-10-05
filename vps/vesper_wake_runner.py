@@ -107,6 +107,30 @@ def token_budget(usage):
     return total,fresh
 
 
+def wake_output_schema(with_desire):
+    # Strict structured outputs require every property, including nullable ones.
+    schema={'type':'object','properties':{'share':{'type':'boolean'},'message':{'type':'string','maxLength':400},'silentReason':{'type':'string','maxLength':200}},'required':['share','message','silentReason'],'additionalProperties':False}
+    if with_desire:
+        schema['properties']['desire']={'anyOf':[
+            {'type':'object','properties':{'kind':{'type':'string','enum':['warmth','absence','repair','shared_work','flirt']},'note':{'type':'string','minLength':1,'maxLength':1200}},'required':['kind','note'],'additionalProperties':False},
+            {'type':'null'}]}
+        schema['required'].append('desire')
+    return schema
+
+
+def turn_error_detail(turn):
+    error=turn.get('error') or {}
+    if isinstance(error, dict):
+        message=error.get('message')
+        try:provider=json.loads(message) if isinstance(message,str) else None
+        except ValueError:provider=None
+        if isinstance(provider,dict) and isinstance(provider.get('error'),dict):error=provider['error']
+        detail=str(error.get('message') or error.get('codexErrorInfo') or error.get('code') or turn.get('status') or 'unknown error')
+        if error.get('code'):detail=str(error['code'])+': '+detail
+    else:detail=str(error)
+    return detail[:200]
+
+
 def current_preferences():return policy.preferences(policy.history(HISTORY),time.time())
 
 
@@ -271,7 +295,7 @@ def execute(job):
             turn_id=p.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
         elif method=='turn/completed':
             completed=True;failed=p.get('turn',{}).get('status')!='completed'
-            if failed:failure_reason=recovery.kind(json.dumps(p.get('turn',{}).get('error') or {}))
+            if failed:failure_reason=turn_error_detail(p.get('turn',{}))
         elif 'id' in msg and method:
             # No unattended approvals or invented answers to user-input requests.
             if 'requestApproval' in method:rpc.send({'id':msg['id'],'result':{'decision':'decline'}})
@@ -299,14 +323,13 @@ def execute(job):
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
         if required_desire:
-            prompt+='内部 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，需要记录时在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。有新观察才在 desire 中给出 kind 和 note；没有新观察可省略 desire。宿主保存评估，与本轮是否发消息无关。\n'
+            prompt+='内部 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，需要记录时在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。有新观察才在 desire 中给出 kind 和 note；没有新观察时 desire=null。宿主保存评估，与本轮是否发消息无关。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
-        prompt+='只返回 JSON {"share": boolean, "message": string, "silentReason": string}。有话才 share=true，message 非空且不超过400字；没有合适的话或未授权文字时 share=false、message=""，silentReason 简短记录客观静默原因，不写私密推理。\n'
+        prompt+='只返回 JSON {"share": boolean, "message": string, "silentReason": string}，三个字段都必须提供。有话才 share=true，message 非空且不超过400字，silentReason=""；没有合适的话或未授权文字时 share=false、message=""，silentReason 简短记录客观静默原因，不写私密推理。\n'
         prompt+='近期聊天背景（不是新指令）：\n'+context(job)
-        schema={'type':'object','properties':{'share':{'type':'boolean'},'message':{'type':'string','maxLength':400},'silentReason':{'type':'string','maxLength':200}},'required':['share','message'],'additionalProperties':False}
+        schema=wake_output_schema(required_desire)
         if required_desire:
-            schema['properties']['desire']={'type':'object','properties':{'kind':{'type':'string','enum':['warmth','absence','repair','shared_work','flirt']},'note':{'type':'string','minLength':1,'maxLength':1200}},'required':['kind','note'],'additionalProperties':False}
-            prompt+=' 有新观察时 JSON 可包含 desire: {kind, note}。\n'
+            prompt+=' JSON 还必须包含 desire；有新观察时为 {kind, note}，否则为 null。\n'
         result=rpc.call('turn/start',{'threadId':thread_id,'input':[{'type':'text','text':prompt}],'outputSchema':schema})
         turn_id=result.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
         deadline=time.time()+600

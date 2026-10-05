@@ -5,6 +5,14 @@ from unittest.mock import patch
 import vesper_wake_store as store
 import vesper_wake_runner as runner
 
+def assert_strict_output_schema(schema):
+    # Model provider rejects optional object properties before generating tokens.
+    if schema.get('type')=='object':
+        if set(schema.get('required',[])) != set(schema['properties']) or schema.get('additionalProperties') is not False:
+            raise ValueError('invalid_json_schema: every property must be required')
+        for child in schema['properties'].values():assert_strict_output_schema(child)
+    for child in schema.get('anyOf',[]):assert_strict_output_schema(child)
+
 class RequiredDesireTests(unittest.TestCase):
     def setUp(self):
         # Keep unrelated runner tests outside sleep hours; test_wake_sleep covers that gate.
@@ -15,7 +23,7 @@ class RequiredDesireTests(unittest.TestCase):
         store.request('test',source='automation')
         self.job={'id':'test','source':'automation','conversation_id':'chat','user_message_id':'user'}
         self.calls=[];self.messages=[]
-    def execute(self, assessment, fail_write=False, fail_read=False, share=True, message="A real observation."):
+    def execute(self, assessment, fail_write=False, fail_read=False, share=True, message="A real observation.", turn_error=None):
         owner=self
         class RPC:
             handler=None
@@ -23,8 +31,13 @@ class RequiredDesireTests(unittest.TestCase):
                 if method=='account/read':return {'account':{'type':'chatgpt'}}
                 if method=='thread/start':return {'thread':{'id':'thread'}}
                 if method=='turn/start':
-                    self.handler({'method':'item/completed','params':{'item':{'type':'agentMessage','text':json.dumps({'share':share,'message':message,'desire':assessment})}}})
-                    self.handler({'method':'turn/completed','params':{'turn':{'status':'completed'}}})
+                    assert_strict_output_schema(params['outputSchema'])
+                    owner.schema=params['outputSchema']
+                    if turn_error:
+                        self.handler({'method':'turn/completed','params':{'turn':{'status':'failed','error':turn_error}}})
+                    else:
+                        self.handler({'method':'item/completed','params':{'item':{'type':'agentMessage','text':json.dumps({'share':share,'message':message,'silentReason':'' if share else 'Nothing new to share','desire':assessment})}}})
+                        self.handler({'method':'turn/completed','params':{'turn':{'status':'completed'}}})
                     return {'turn':{'id':'turn'}}
                 return {}
             def send(self,p):pass
@@ -48,6 +61,34 @@ class RequiredDesireTests(unittest.TestCase):
         self.assertEqual(args['note'],'A current observation.')
         self.assertTrue(args['request_id'].startswith('wake-'))
         with store.db() as con:self.assertEqual(con.execute("SELECT status FROM jobs WHERE id='test'").fetchone()[0],'completed')
+
+    def test_no_observation_uses_nullable_desire_without_writing(self):
+        self.execute(None,share=False,message='')
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
+        self.assertEqual(self.messages,[])
+        self.assertIn({'type':'null'},self.schema['properties']['desire']['anyOf'])
+        self.assertEqual(store.status()['jobs'][0]['status'],'silent')
+
+    def test_provider_schema_failure_keeps_specific_cause_and_cannot_publish(self):
+        error={'message':json.dumps({'error':{'code':'invalid_json_schema','message':"Missing 'silentReason'."}})}
+        with self.assertRaisesRegex(RuntimeError,"invalid_json_schema: Missing 'silentReason'"):
+            self.execute(None,turn_error=error)
+        self.assertEqual(self.messages,[])
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
+
+    def test_provider_gate_rejects_old_optional_properties(self):
+        for with_desire in [False,True]:
+            schema=runner.wake_output_schema(with_desire)
+            assert_strict_output_schema(schema)
+            schema['required'].remove('silentReason')
+            with self.assertRaisesRegex(ValueError,'invalid_json_schema'):assert_strict_output_schema(schema)
+        schema=runner.wake_output_schema(True)
+        schema['required'].remove('desire')
+        with self.assertRaisesRegex(ValueError,'invalid_json_schema'):assert_strict_output_schema(schema)
+
+    def test_specific_turn_errors_still_use_existing_quota_and_login_gates(self):
+        for message,reason in [('Usage limit reached','quota'),('401 unauthorized','authentication')]:
+            self.assertEqual(runner.recovery.kind(runner.turn_error_detail({'error':{'message':message}})),reason)
     def test_failed_internal_read_does_not_block_chat_or_claim_success(self):
         self.execute(None,fail_read=True)
         self.assertEqual([c['name'] for c in self.calls],['desire_status'])
