@@ -18,6 +18,7 @@ import "./home-glass.css";
 import "./compact-interface.css";
 import "./chat-capture.css";
 import "./home-desktop.css";
+import "./control-glass.css";
 
 export const metadata: Metadata = {
   title: "Vesper — Your private corner",

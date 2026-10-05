@@ -1,12 +1,12 @@
 @font-face { font-family: Ballet; src: url('/fonts/Ballet.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
 :root { --font-pinyon-script: Ballet; }
 /* The same saved appearance updates paper, photographs and type together. */
-.stage { --desktop-slip: rgba(255,255,255,.40); --desktop-paper-opacity: .86; --desktop-paper-tint: transparent; }
+.stage { --desktop-slip: rgba(255,255,255,.40); --desktop-paper-opacity: .64; --desktop-paper-tint: transparent; }
 .stage[data-home-theme="black"] {
   color-scheme: dark;
   --ui-canvas: #111; --ui-surface: #252525; --ui-surface-muted: #303030; --ui-surface-strong: #444;
   --ui-ink: #f0f0f0; --ui-ink-secondary: #cecece; --ui-muted: #bababa; --ui-line: #414141; --ui-line-strong: #666;
-  --desktop-slip: rgba(31,31,31,.47); --desktop-paper-opacity: .82; --desktop-paper-tint: rgba(0,0,0,.84);
+  --desktop-slip: rgba(31,31,31,.47); --desktop-paper-opacity: .65; --desktop-paper-tint: rgba(0,0,0,.84);
   --home-glass-fill: rgba(35,35,35,.65); --home-glass-edge: rgba(255,255,255,.20);
 }
 .stage[data-home-theme="black"] .app-shell { --home-glass-fill: rgba(35,35,35,.65); --home-glass-edge: rgba(255,255,255,.20); --home-glass-shadow: none; }

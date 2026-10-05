@@ -1627,7 +1627,7 @@ function HomeContent() {
           ) : section === "Collection" ? (
             <div className="desktop-collection" aria-label="Collection">
               {nav.filter(item => !["今日", "聊天", "Collection", "Letters", "设置"].includes(item.label)).map(item => (
-                <button key={item.label} type="button" onClick={() => navigateTo(item.label)}><Icon name={item.icon} /><span>{item.english}</span></button>
+                <button key={item.label} type="button" onClick={() => navigateTo(item.label)}><i className="collection-icon-glass"><Icon name={item.icon} /></i><span>{item.english}</span></button>
               ))}
             </div>
           ) : section === "聊天" ? (
@@ -5315,7 +5315,7 @@ function SettingsPage({
   };
   return (
     <div className={`${selected ? "page-body settings-page detail-active" : "page-body settings-page"}${detailClosing ? " detail-closing" : ""}`}>
-      <PageIntro eyebrow="PREFERENCES" title="Settings" text="Make Vesper feel like you." />
+      <PageIntro eyebrow="PREFERENCES" title="Settings" text="" />
       <div className="surface settings-usage-card"><SubscriptionUsage active={active && !selected} socketUrl={codexSocketUrl} /></div>
       <div className="settings-category-list settings-accordion">
         <section className="surface settings-accordion-item"><SettingRow icon="sparkles" title="Autonomous Wake" sub="Schedule, controls and recent activity" onClick={() => setSelected("Autonomous Wake")} /></section>
@@ -6416,7 +6416,6 @@ function SettingRow({
       </span>
       <span>
         <b>{title}</b>
-        <small>{sub}</small>
       </span>
       {status ? (
         <i className="connection-dot" />
@@ -7029,14 +7028,15 @@ function MusicPlayerUI({
         <span>{togetherTimeLabel(together, totalTogetherSeconds)}</span>
       </button>
       {track ? <>
-        <section className="listening-disc-stage" aria-label={`Now playing: ${track.title}`}>
+        <div className="listening-track-stage"><section className="listening-disc-stage" aria-label={`Now playing: ${track.title}`}>
           <div className={state.playing ? "sound-halo is-playing" : "sound-halo"}>
             <div className="listening-disc">{track.cover ? <img src={track.cover} alt={`${track.title} cover`} /> : <span>V</span>}</div>
           </div>
         </section>
-        <section className="listening-track-copy"><h2>{track.title}</h2><p>{track.artist || "Unknown artist"}{track.album ? ` · ${track.album}` : ""}</p></section>
+        <section className="listening-track-copy"><h2>{track.title}</h2><p>{track.artist || "Unknown artist"}{track.album ? ` · ${track.album}` : ""}</p></section></div>
+        <div className="listening-playback-dock">
         <section className="listening-progress" aria-label="Playback progress"><input aria-label="Playback progress" type="range" min="0" max={Math.max(state.duration, 1)} step="0.1" disabled={!canSeek} value={Math.min(displayedTime, Math.max(state.duration, 1))} onChange={(event) => setScrubValue(Number(event.target.value))} onPointerUp={commitSeek} onKeyUp={commitSeek} /><div><span>{canSeek ? formatPlaybackTime(displayedTime) : "--:--"}</span><span>{canSeek ? formatPlaybackTime(state.duration) : "--:--"}</span></div></section>
-        <section className="listening-controls"><button className="listening-mode" aria-label={modeLabels[playMode]} title={modeLabels[playMode]} onClick={onCycleMode}><Icon name={modeIcons[playMode]} /></button><button aria-label="Previous track" onClick={adapter.previous}><Icon name="back" /></button><button className="listening-play" aria-label={state.loading ? "Cancel loading" : state.playing ? "Pause" : "Play"} onClick={adapter.toggle}><Icon name={state.playing || state.loading ? "pause" : "play"} /></button><button aria-label="Next track" onClick={adapter.next}><Icon name="forward" /></button><button className="listening-queue-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}><Icon name="queue" /><em>{queue.length}</em></button></section>
+        <section className="listening-controls"><button className="listening-mode" aria-label={modeLabels[playMode]} title={modeLabels[playMode]} onClick={onCycleMode}><Icon name={modeIcons[playMode]} /></button><button aria-label="Previous track" onClick={adapter.previous}><Icon name="back" /></button><button className="listening-play" aria-label={state.loading ? "Cancel loading" : state.playing ? "Pause" : "Play"} onClick={adapter.toggle}><Icon name={state.playing || state.loading ? "pause" : "play"} /></button><button aria-label="Next track" onClick={adapter.next}><Icon name="forward" /></button><button className="listening-queue-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}><Icon name="queue" /><em>{queue.length}</em></button></section></div>
       </> : <section className="listening-empty"><Icon name="music" /><h2>No playback queue yet</h2><p>Web 使用独立的网易云队列。请在 My Music 选择歌单或搜索歌曲；原生 App 的播放队列保持不变。</p><button onClick={() => setLibraryOpen(true)}>Open My Music</button></section>}
     </section>
     {toast && <div className="music-toast" role="status">{toast}</div>}
