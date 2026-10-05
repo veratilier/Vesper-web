@@ -1,15 +1,6 @@
-/* Product controls share the floating dock's material in every saved theme. */
-.stage .app-shell :is(.icon-button, .chat-header-actions button, .modal-head > button,
-  .primary-action, .save-profile, .history-new, .message-action,
-  .chat-contacts-actions button, .chat-compose-tools > button, .attach-action,
-  .mcp-card-actions button, .mcp-editor-actions button, .mcp-auth-choice button,
-  .appearance-modal button, .profile-modal button, .functional-settings-modal button,
-  .listening-controls button, .listening-library-bar button, .queue-sync-action,
-  .music-queue-sheet header button, .netease-shortcuts button, .netease-library-head button,
-  .netease-library-tabs button, .netease-connect-form button, .netease-search button,
-  .desktop-player-controls button, .letter-primary, .letters-more, .letters-heading > button,
-  .letter-read-actions > button, .letter-pages > button, .chat-status-popover button,
-  .wake-card button, .collection-icon-glass, .settings-accordion) {
+/* Only the expressly named icon, navigation and contact backings use dock glass. */
+.stage .app-shell :is(.collection-icon-glass, .settings-accordion,
+  .chat-contact-row, .chat-contact-search, .contact-match) {
   background: var(--home-glass-fill) !important;
   border: 1px solid var(--home-glass-edge) !important;
   box-shadow: var(--home-glass-shadow) !important;
@@ -22,10 +13,6 @@
   border-radius: 16px; font-style: normal;
 }
 .stage .app-shell .desktop-collection button { background: transparent; }
-.stage .app-shell .desktop-player-controls button { border-radius: 50%; }
-.stage .app-shell :is(.mcp-auth-choice button.selected, .appearance-modal button[aria-pressed="true"], .netease-library-tabs button.active) {
-  background: color-mix(in srgb, var(--home-glass-fill) 85%, var(--ui-muted) 15%) !important;
-}
 .stage .app-shell .settings-accordion {
   display: flex; flex-direction: column; gap: 0;
   border-radius: 24px; overflow: hidden;
@@ -56,50 +43,9 @@
 .listening-track-stage .listening-disc-stage { min-height: 0; }
 .listening-playback-dock { flex-shrink: 0; padding-top: 10px; }
 .stage .app-shell :is(.listening-track-copy, .listening-progress, .listening-controls) { top: 0; }
+.stage .app-shell .chat-contact-search input { background: transparent !important; border: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 @media (prefers-reduced-transparency: reduce) {
-  .stage .app-shell :is(.collection-icon-glass, .settings-accordion, .listening-controls button) {
+  .stage .app-shell :is(.collection-icon-glass, .settings-accordion, .chat-contact-row, .chat-contact-search, .contact-match) {
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
   }
 }
-/* All product surfaces use the same dock glass, including secondary pages. */
-.stage .app-shell :is(
-  button:not(.modal-scrim):not(.scrim):not(.setting-row):not(.sticker-choice):not(.sticker-item),
-  summary, input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select,
-  .surface, .chat-compose, .compose-add-options, .drawer, .history-modal,
-  .connection-modal, .appearance-modal, .profile-modal, .functional-settings-modal,
-  .sticker-picker, .sticker-editor, .sticker-picker-controls label,
-  .music-message-card, .location-message-card, .chat-file-card,
-  .mcp-server-card, .wake-card, .memory-card, .memory-search,
-  .library-card, .book-card, .bookmark-card, .note-card, .todo-list,
-  .netease-library-sheet, .netease-playlist-card, .music-queue-sheet,
-  .desktop-note, .desktop-letter, .desktop-slip, .desktop-countdown, .chat-contact-search
-) {
-  background: var(--home-glass-fill) !important;
-  border-color: var(--home-glass-edge) !important;
-  box-shadow: var(--home-glass-shadow) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(125%) !important;
-  backdrop-filter: blur(18px) saturate(125%) !important;
-  color: var(--ui-ink) !important;
-}
-/* Composite rows have one glass backing, with their content sitting directly on it. */
-.stage .app-shell :is(.mobile-navigation button, .desktop-collection > button,
-  .settings-accordion-item, .settings-accordion .setting-row,
-  .sticker-grid button, .sticker-picker-grid button, .photo-tile button) {
-  background: transparent !important; box-shadow: none !important;
-  border: 0 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-}
-.stage .app-shell :is(button[aria-pressed="true"], .sticker-picker-tabs button.active,
-  .history-drawer-title button.active) {
-  outline: 1px solid var(--ui-muted); outline-offset: -2px;
-}
-@media (prefers-reduced-transparency: reduce) {
-  .stage .app-shell :is(button, summary, input, textarea, select, .surface,
-    .chat-compose, .drawer, .connection-modal, .history-modal, .mcp-server-card, .memory-card) {
-    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
-  }
-}
-
-.stage .app-shell .chat-contact-search input { background: transparent !important; border: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-.stage .app-shell .desktop-letter::before { background: transparent !important; opacity: 0 !important; }
-
-.stage .app-shell .mobile-navigation button[aria-current="page"] { background: var(--home-glass-blue) !important; outline: none !important; }
