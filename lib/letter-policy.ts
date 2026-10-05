@@ -1,4 +1,16 @@
-export type Letter = { id: string; title: string; text?: string; author: string; recipient?: string; createdAt: string; unlockAt?: string; replyTo?: string; locked?: boolean; read?: boolean; kept?: boolean };
+export type LetterMark = { read: boolean; kept: boolean; readAt: string | null };
+export type Letter = { id: string; title: string; text?: string; author: string; recipient?: string; createdAt: string; unlockAt?: string; replyTo?: string; locked?: boolean; read?: boolean; kept?: boolean; marks?: Partial<Record<'Vera' | 'Rowan', LetterMark>> };
+export function letterReceipt(letter: Letter) {
+  const reader = letter.recipient || (letter.author === 'Vera' ? 'Rowan' : 'Vera');
+  const read = reader === 'Rowan' ? letter.marks?.Rowan?.read : letter.marks?.Vera?.read ?? Boolean(letter.read);
+  return { read, label: (reader === 'Rowan' ? 'Rowan ' : '你') + (read === undefined ? '等待回执' : read ? '已读' : '未读') };
+}
+export function letterKeepers(letter: Letter) {
+  return (['Vera', 'Rowan'] as const).filter(actor => letter.marks?.[actor]?.kept || (actor === 'Vera' && letter.kept));
+}
+export function letterMatchesFilter(letter: Letter, filter: string) {
+  return filter === 'All' || (filter === 'Unread' ? letterReceipt(letter).read === false : letterKeepers(letter).length > 0);
+}
 // The recipient never receives the body of a future letter, including through
 // the legacy Sketch endpoints and tool catalog. Client clocks are not authority.
 export function visibleLetter(value: Letter, actor: string, now = Date.now()): Letter {
