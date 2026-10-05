@@ -1,12 +1,13 @@
 import { ensureSchema, getDb } from './db';
 import { visibleLetter, letterDate, type Letter } from './letter-policy';
+import { isLetter, letterKindSql } from './writing-kind';
 type Row = { id: string; value: string; created_at: string; vera_read_at?: string; vera_kept?: number; rowan_read_at?: string; rowan_kept?: number };
 const validID = /^[A-Za-z0-9_-]{1,128}$/;
 function id(value: unknown) { if (typeof value !== 'string' || !validID.test(value)) throw new Error('Invalid letter id'); return value; }
 function field(value: unknown, max: number, required = false) { if (value === undefined && !required) return ''; if (typeof value !== 'string' || value.length > max || (required && !value.trim())) throw new Error('Invalid letter content'); return value.trim(); }
 const select = `SELECT j.*,v.read_at AS vera_read_at,v.kept AS vera_kept,r.read_at AS rowan_read_at,r.kept AS rowan_kept FROM vesper_jottings j
  LEFT JOIN vesper_letter_marks v ON v.user_id=j.user_id AND v.letter_id=j.id AND v.actor='Vera'
- LEFT JOIN vesper_letter_marks r ON r.user_id=j.user_id AND r.letter_id=j.id AND r.actor='Rowan' WHERE j.user_id=?`;
+ LEFT JOIN vesper_letter_marks r ON r.user_id=j.user_id AND r.letter_id=j.id AND r.actor='Rowan' WHERE j.user_id=? AND ${letterKindSql('j.value')}=1`;
 function view(row: Row, actor: string) {
   const marks = { Vera: {read:Boolean(row.vera_read_at),kept:Boolean(row.vera_kept),readAt:row.vera_read_at || null},
     Rowan: {read:Boolean(row.rowan_read_at),kept:Boolean(row.rowan_kept),readAt:row.rowan_read_at || null} };
@@ -35,12 +36,12 @@ export async function createLetter(owner: string, input: Record<string, unknown>
   const recipient = actor === 'Vera' ? 'Rowan' : 'Vera';
   const unlockAt = letterDate(input.unlockAt), replyTo = input.replyTo ? id(input.replyTo) : undefined;
   if (replyTo) { const parent = (await getLetter(owner,replyTo,actor)).letter; if (parent.locked) throw new Error('Open the original letter before replying'); }
-  const value: Letter = { id:letterID, title, text:body, author:actor, recipient, createdAt:new Date().toISOString(), ...(unlockAt ? { unlockAt } : {}), ...(replyTo ? { replyTo } : {}) };
+  const value: Letter = { id:letterID, kind:'letter', title, text:body, author:actor, recipient, createdAt:new Date().toISOString(), ...(unlockAt ? { unlockAt } : {}), ...(replyTo ? { replyTo } : {}) };
   await getDb().prepare('INSERT INTO vesper_jottings(id,user_id,value,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,id) DO NOTHING').bind(letterID,owner,JSON.stringify(value),value.createdAt).run();
   const row = await getDb().prepare('SELECT value FROM vesper_jottings WHERE user_id=? AND id=?').bind(owner,letterID).first<Row>();
   if (!row) throw new Error('Letter delivery was not confirmed');
   const saved = JSON.parse(row.value) as Letter;
-  if (saved.author !== actor || saved.text !== body || saved.title !== title || saved.unlockAt !== unlockAt || saved.replyTo !== replyTo) throw new Error('This id belongs to a different letter');
+  if (!isLetter(saved) || saved.author !== actor || saved.text !== body || saved.title !== title || saved.unlockAt !== unlockAt || saved.replyTo !== replyTo) throw new Error('This id belongs to a different letter');
   return getLetter(owner,letterID,actor);
 }
 export async function markLetter(owner: string, input: Record<string, unknown>, actor = 'Vera') {
@@ -63,7 +64,7 @@ export async function letterReminders(owner: string, actor = 'Vera') {
   const rows = await getDb().prepare(`SELECT j.id,j.value,r.delivered_at FROM vesper_jottings j
     LEFT JOIN vesper_letter_marks m ON m.user_id=j.user_id AND m.letter_id=j.id AND m.actor=?
     LEFT JOIN vesper_letter_reminders r ON r.user_id=j.user_id AND r.letter_id=j.id AND r.recipient=?
-    WHERE j.user_id=? AND json_extract(j.value,'$.unlockAt') IS NOT NULL
+    WHERE j.user_id=? AND ${letterKindSql('j.value')}=1 AND json_extract(j.value,'$.unlockAt') IS NOT NULL
       AND json_extract(j.value,'$.author')!=? AND m.read_at IS NULL
     ORDER BY json_extract(j.value,'$.unlockAt'),j.id`).bind(actor,actor,owner,actor)
     .all<Row & {delivered_at?: string}>();
@@ -77,7 +78,7 @@ export async function letterReminders(owner: string, actor = 'Vera') {
   });
   const unread = await getDb().prepare(`SELECT j.id,j.value FROM vesper_jottings j
     LEFT JOIN vesper_letter_marks m ON m.user_id=j.user_id AND m.letter_id=j.id AND m.actor=?
-    WHERE j.user_id=? AND json_extract(j.value,'$.author')!=? AND m.read_at IS NULL
+    WHERE j.user_id=? AND ${letterKindSql('j.value')}=1 AND json_extract(j.value,'$.author')!=? AND m.read_at IS NULL
     ORDER BY j.created_at DESC,j.id DESC`).bind(actor,owner,actor).all<Row>();
   const inbox = unread.results.map(row => {
     const letter = JSON.parse(row.value) as Letter;

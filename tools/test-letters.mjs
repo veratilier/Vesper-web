@@ -24,8 +24,10 @@ try{
  const get=async id=>(await (await modules.route.GET(request('GET','/api/letters?id='+id))).json()).letter;
  assert.equal((await get(incoming.id)).locked,true);assert.equal((await get(incoming.id)).text,undefined);
  const list=await (await modules.route.GET(request('GET','/api/letters'))).json();
- assert.equal(list.letters.find(x=>x.id===old.id).text,old.text);assert.equal(list.letters.find(x=>x.id===incoming.id).text,undefined);
- const legacy=await (await modules.legacy.GET(request('GET','/api/jottings?id='+incoming.id))).json();assert.equal(legacy.jotting.text,undefined);
+ assert.equal(list.letters.find(x=>x.id===old.id),undefined,'Sketch entries are not Letters');assert.equal(list.letters.find(x=>x.id===incoming.id).text,undefined);
+ assert.equal((await modules.legacy.GET(request('GET','/api/jottings?id='+incoming.id))).status,400);
+ assert.equal((await modules.legacy.DELETE(request('DELETE','/api/jottings?id='+incoming.id))).status,400);
+ assert.equal((await get(incoming.id)).id,incoming.id,'Sketch delete cannot remove a letter');
  assert.equal((await modules.legacy.POST(request('POST','/api/jottings',incoming))).status,400);
  assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:incoming.id,action:'read'}))).status,400);
  assert.equal((await modules.route.POST(request('POST','/api/letters',{id:'invalid-reply',text:'Reply',replyTo:incoming.id}))).status,400);
@@ -35,12 +37,18 @@ try{
  const outgoing={id:'vera-letter',title:'From Vera',text:'A fictional reply.',unlockAt};
  assert.equal((await modules.route.POST(request('POST','/api/letters',outgoing))).status,200);
  assert.equal((await get(outgoing.id)).text,outgoing.text);assert.equal((await call('letter_read',{id:outgoing.id})).letter.text,undefined);
- assert.equal((await call('jotting_list',{})).jottings.find(x=>x.id===outgoing.id).text,undefined);
+ assert.equal((await call('jotting_list',{})).jottings.find(x=>x.id===outgoing.id),undefined);
  const owner=sqlite.prepare('SELECT user_id FROM vesper_jottings LIMIT 1').get().user_id;
  assert.deepEqual((await modules.store.listLetters('another-owner')).letters,[]);await assert.rejects(modules.store.getLetter('another-owner',old.id));
- assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:old.id,action:'keep',kept:true}))).status,200);
- assert.equal((await get(old.id)).kept,true);assert.equal((await call('letter_read',{id:old.id})).letter.kept,false);
- assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:old.id,action:'read'}))).status,200);assert.equal((await get(old.id)).read,true);
+ for(const target of [old.id,incoming.id]) { const row=sqlite.prepare('SELECT value FROM vesper_jottings WHERE user_id=? AND id=?').get(owner,target);const legacyValue=JSON.parse(row.value);delete legacyValue.kind;sqlite.prepare('UPDATE vesper_jottings SET value=? WHERE user_id=? AND id=?').run(JSON.stringify(legacyValue),owner,target); }
+ assert.equal((await get(incoming.id)).locked,true,'Historical letters without kind retain their unlock rules');
+ assert.equal((await (await modules.legacy.GET(request('GET','/api/jottings?id='+old.id))).json()).jotting.text,old.text,'Historical plain Sketch is retained');
+ assert.equal((await modules.route.POST(request('POST','/api/letters',old))).status,400,'A letter retry cannot repurpose an existing Sketch ID');
+ assert.equal((await modules.legacy.POST(request('POST','/api/jottings',incoming))).status,400,'A Sketch retry cannot repurpose an existing letter ID');
+ await call('letter_create',{id:'independent-letter',title:'Independent marks',text:'Synthetic letter.'});
+ assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:'independent-letter',action:'keep',kept:true}))).status,200);
+ assert.equal((await get('independent-letter')).kept,true);assert.equal((await call('letter_read',{id:'independent-letter'})).letter.kept,false);
+ assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:'independent-letter',action:'read'}))).status,200);assert.equal((await get('independent-letter')).read,true);
  const receiptLetter={id:'receipt-outgoing',title:'Receipt test',text:'Synthetic receipt body.'};
  assert.equal((await modules.route.POST(request('POST','/api/letters',receiptLetter))).status,200);
  assert.equal(modules.policy.letterReceipt(await get(receiptLetter.id)).read,false);
@@ -95,8 +103,15 @@ try{
  await modules.store.markLetter(owner,{id:incoming.id,action:'read'});
  assert.equal((await feed('Vera')).reminders.some(r=>r.id===incoming.id),false,'Read letters do not alert');
  assert.equal((await feed('Vera')).inbox.some(r=>r.id===incoming.id),false,'Read letters leave the badge feed');
+ for(let i=0;i<3;i++){const entry={id:'new-sketch-'+i,author:'Rowan',title:'A thought',text:'Synthetic sketch',createdAt:'2099-01-01T00:00:00Z'};sqlite.prepare('INSERT INTO vesper_jottings(id,user_id,value,created_at) VALUES(?,?,?,?)').run(entry.id,owner,JSON.stringify(entry),entry.createdAt);}
  const first=await (await modules.route.GET(request('GET','/api/letters?limit=1'))).json();const second=await (await modules.route.GET(request('GET','/api/letters?limit=1&before='+encodeURIComponent(first.before)))).json();assert.notEqual(first.letters[0].id,second.letters[0].id);
+ assert.ok(first.letters.every(l=>!l.id.includes('sketch')) && second.letters.every(l=>!l.id.includes('sketch')),'Type filtering precedes letter pagination');
+ const sketchPages=[];let sketchCursor='';do{const page=await (await modules.legacy.GET(request('GET','/api/jottings?limit=1'+(sketchCursor?'&before='+encodeURIComponent(sketchCursor):'')))).json();sketchPages.push(...page.jottings.map(l=>l.id));sketchCursor=page.before;}while(sketchCursor);
+ assert.equal(sketchPages.length,4);assert.ok(sketchPages.every(id=>id.includes('sketch')),'Sketch pagination contains neither sealed nor opened letters');
+ assert.equal((await call('letter_list',{})).letters.some(l=>l.id.includes('sketch')),false,'Model tools obey the same separation');
  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_documents WHERE key IN (\'notes\',\'diary\')').get().n,0);
- assert.equal((await modules.store.getLetter(owner,old.id)).letter.text,old.text);
- console.log('PASS Letters: old Sketch retention, scoped persistence/retry, server time locks and legacy redaction, reply validation, independent read/keep, pagination and auth.');
+ await assert.rejects(modules.store.getLetter(owner,old.id));
+ assert.equal((await (await modules.legacy.GET(request('GET','/api/jottings?id='+old.id))).json()).jotting.text,old.text);
+ assert.equal((await feed('Vera')).inbox.some(r=>r.id===old.id),false,'Sketch cannot light letter badges');
+ console.log('PASS Letters: Sketch separation/retention, scoped persistence/retry, server time locks and legacy redaction, reply validation, independent read/keep, pagination and auth.');
 }finally{sqlite.close();await rm(dir,{recursive:true,force:true});}

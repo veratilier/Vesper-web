@@ -1,5 +1,5 @@
 export type LetterMark = { read: boolean; kept: boolean; readAt: string | null };
-export type Letter = { id: string; title: string; text?: string; author: string; recipient?: string; createdAt: string; unlockAt?: string; replyTo?: string; locked?: boolean; read?: boolean; kept?: boolean; marks?: Partial<Record<'Vera' | 'Rowan', LetterMark>> };
+export type Letter = { id: string; kind?: 'letter'; title: string; text?: string; author: string; recipient?: string; createdAt: string; unlockAt?: string; replyTo?: string; locked?: boolean; read?: boolean; kept?: boolean; marks?: Partial<Record<'Vera' | 'Rowan', LetterMark>> };
 export function letterReceipt(letter: Letter) {
   const reader = letter.recipient || (letter.author === 'Vera' ? 'Rowan' : 'Vera');
   const read = reader === 'Rowan' ? letter.marks?.Rowan?.read : letter.marks?.Vera?.read ?? Boolean(letter.read);
