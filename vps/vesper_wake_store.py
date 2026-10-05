@@ -81,7 +81,7 @@ def request(request_id=None, source='manual', delay=0):
         old=con.execute('SELECT id FROM jobs WHERE id=?',(ident,)).fetchone()
         if old:return old[0]
         # Repeated taps/devices join the pending work, rather than spawning it twice.
-        old=con.execute("SELECT id FROM jobs WHERE status IN ('queued','running') ORDER BY created LIMIT 1").fetchone()
+        old=con.execute("SELECT id FROM jobs WHERE status IN ('queued','running') AND source!='letter-reminder' ORDER BY created LIMIT 1").fetchone()
         if old:return old[0]
         con.execute('INSERT INTO jobs(id,source,due,status,created) VALUES(?,?,?,?,?)',(ident,source,now+delay,'queued',now))
     return ident

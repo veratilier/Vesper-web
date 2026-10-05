@@ -56,6 +56,13 @@ try{
  assert.equal(modules.policy.letterMatchesFilter(receipt,'Unread'),false);
  const listed=(await (await modules.route.GET(request('GET','/api/letters'))).json()).letters.find(x=>x.id===receipt.id);
  assert.deepEqual(listed.marks,receipt.marks,'List and exact-letter views expose the same receipts');
+ assert.equal(modules.policy.letterMatchesMailbox(receipt,'Rowan','All'),true);
+ assert.equal(modules.policy.letterMatchesMailbox(receipt,'Rowan','Kept'),true);
+ assert.equal(modules.policy.letterMatchesMailbox(receipt,'Rowan','Unread'),false);
+ assert.equal(modules.policy.letterMatchesMailbox(receipt,'Vera','All'),false);
+ const onlyAuthorKept={...receipt,kept:true,marks:{Vera:{read:true,kept:true},Rowan:{read:false,kept:false}}};
+ assert.equal(modules.policy.letterMatchesMailbox(onlyAuthorKept,'Rowan','Kept'),false);
+ assert.equal(modules.policy.letterMatchesMailbox(onlyAuthorKept,'Rowan','Unread'),true);
  assert.equal((await get(incoming.id)).text,undefined,'Receipts must not expose sealed text');
  assert.equal(modules.policy.letterReceipt({id:'legacy',author:'Vera',read:true}).read,undefined,'Author reading is not a recipient receipt');
  const now=Date.now(),value={id:'boundary',title:'',author:'Rowan',createdAt:new Date(now).toISOString(),unlockAt:new Date(now).toISOString(),text:'boundary body'};

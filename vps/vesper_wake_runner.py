@@ -192,8 +192,12 @@ def update(ident,**fields):
 def execute(job):
     ident=job['id'];rpc=None;completed=False;failed=False;final=[];tool_count=0;turn_id='';thread_id='';created=iso();external_tools={};failure_reason=''
     if sleep_gate(time.time()):
+        if job['source']=='letter-reminder':
+            update(ident,status='queued',due=time.time()+60,started=None,decision='sleep_time');return
         update(ident,status='silent',finished=time.time(),decision='sleep_time');return
     if recent_chat():
+        if job['source']=='letter-reminder':
+            update(ident,status='queued',due=time.time()+60,started=None,decision='recent_user_activity');return
         update(ident,status='silent',finished=time.time(),decision='recent_user_activity');return
     allowed=permissions.allowed_tools(store.access(), READ_ONLY if job['source']=='verification' else ALLOWED)
     tools=[t for t in http('/api/codex/tools')['tools'] if t['name'] in allowed]
@@ -570,12 +574,16 @@ def tick():
         try:deliver(pending['id'],pending['notification'])
         except Exception:pass
     if frequency!='off' and next_at is not None and now>=next_at:store.request('auto-'+str(int(next_at)),source='automation')
+    letter_read_allowed = 'letter_read' in store.access()['tools']
     with store.db() as con:
         con.execute('BEGIN IMMEDIATE')
         row=con.execute("SELECT * FROM jobs WHERE status='queued' AND due<=? ORDER BY due LIMIT 1",(now,)).fetchone()
         if not row:return
         selected=policy.target(policy.history(HISTORY))
         job=dict(row)
+        if job['source']=='letter-reminder' and (frequency=='off' or not letter_read_allowed):
+            con.execute("UPDATE jobs SET due=?,decision=? WHERE id=?",(now+60,'disabled' if frequency=='off' else 'letter_read_not_permitted',job['id']))
+            return
         if not store.get(con, 'config', {'enabled': frequency != 'off'})['enabled'] and job['source'] == 'automation':
             con.execute("UPDATE jobs SET status='cancelled',finished=?,decision='disabled' WHERE id=?", (now, job['id']))
             return
@@ -583,15 +591,19 @@ def tick():
             job.update(selected)
             con.execute("UPDATE jobs SET status='running',started=?,conversation_id=?,user_message_id=?,user_turn_id=? WHERE id=?",
                 (now,selected['conversation_id'],selected['user_message_id'],selected['user_turn_id'],row['id']))
+        elif job['source']=='letter-reminder':
+            con.execute("UPDATE jobs SET due=?,decision='no_eligible_target' WHERE id=?",(now+60,row['id']))
         else:con.execute("UPDATE jobs SET status='skipped',finished=?,decision='no_eligible_target' WHERE id=?",(now,row['id']))
     try:
         if selected:execute(job)
     except Exception as error:
         update(job['id'],status='failed',finished=time.time(),error=str(error)[:220])
     finally:
-        record_outcome(job['id'])
-        with store.db() as con:paused = recovery.blocked(store.get(con, 'recovery', {}), time.time())
-        if not paused:reschedule(job['id'])
+        with store.db() as con:deferred=con.execute("SELECT status FROM jobs WHERE id=?",(job['id'],)).fetchone()['status']=='queued'
+        if not deferred:
+            record_outcome(job['id'])
+            with store.db() as con:paused = recovery.blocked(store.get(con, 'recovery', {}), time.time())
+            if not paused:reschedule(job['id'])
     print(json.dumps({'job':job['id'],'status':store.status()['lastJob']['status']}),flush=True)
 
 def main():

@@ -1,4 +1,4 @@
-.vesper-letters{--lp:#f6f2e9;--ls:#cfc4af;--li:#393731;--ll:#b7b0a1;--lm:linear-gradient(105deg,#aaa7a0,#f8f5ed 27%,#d1cbc0 52%,#fffef8 70%,#9b978e);max-width:450px;margin:0 auto;padding:20px 24px 36px!important;color:var(--li);font-family:Georgia,'Times New Roman',serif}
+.vesper-letters{--lp:#fafafa;--ls:#d1d1d1;--li:#171717;--ll:#b8b8b8;--lm:linear-gradient(105deg,#ababab,#fafafa 27%,#d6d6d6 52%,#fff 70%,#979797);max-width:450px;margin:0 auto;padding:20px 24px 36px!important;color:var(--li);font-family:Georgia,'Times New Roman',serif}
 .vesper-letters[data-letter-theme=black]{--lp:#292827;--ls:#171719;--li:#e2e0da;--ll:#777671;--lm:linear-gradient(105deg,#222226,#747477 27%,#333338 52%,#777779 70%,#1c1c20)}
 .vesper-letters[data-letter-theme=blue]{--lp:#e4eff1;--ls:#a0bdc8;--li:#314c57;--ll:#8fa9b0;--lm:linear-gradient(105deg,#7693a1,#ecf5f6 27%,#adc6cf 52%,#f4fafb 70%,#71909e)}
 .vesper-letters button,.vesper-letters input,.vesper-letters textarea{font-family:inherit;color:inherit;font-size:inherit}.vesper-letters button{cursor:pointer;border:0;background:transparent}.vesper-letters button:disabled{opacity:.5;cursor:default}.vesper-letters button:focus-visible,.vesper-letters input:focus-visible,.vesper-letters textarea:focus-visible{outline:2px solid var(--li);outline-offset:3px}
@@ -13,3 +13,5 @@
 @media(prefers-reduced-motion:reduce){.vesper-letters *{transition:none!important;animation:none!important}}@media(min-width:800px){.vesper-letters{padding-top:30px!important}}@media(max-width:350px){.vesper-letters{padding:16px!important}.letters-heading{grid-template-columns:60px 1fr 70px}.letters-heading h1{font-size:20px}}
 
 .letter-receipt{display:flex;flex-wrap:wrap;gap:6px 12px;margin:10px 0;font-size:12px;color:var(--li)}.letter-selected .letter-receipt{justify-content:center}.letter-file-receipt{position:absolute;bottom:8px;left:8px;font-size:10px;padding:5px 8px;border:1px solid var(--ll);border-radius:20px;background:var(--lp);color:var(--li)}
+
+.letter-mailbox-switch{position:relative;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:color-mix(in srgb,var(--lp) 80%,transparent);border:1px solid var(--ll);font-size:22px}.letter-mailbox-switch select{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}.letter-mailbox-switch:focus-within{outline:2px solid var(--li);outline-offset:3px}
