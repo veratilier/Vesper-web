@@ -1,6 +1,6 @@
-/* Only the expressly named icon, navigation and contact backings use dock glass. */
+/* Only the expressly named icon, navigation, contact and home-note backings use dock glass. */
 .stage .app-shell :is(.collection-icon-glass, .settings-accordion,
-  .chat-contact-row, .chat-contact-search, .contact-match) {
+  .chat-contact-row, .chat-contact-search, .contact-match, .desktop-letter) {
   background: var(--home-glass-fill) !important;
   border: 1px solid var(--home-glass-edge) !important;
   box-shadow: var(--home-glass-shadow) !important;
@@ -8,6 +8,7 @@
   backdrop-filter: blur(18px) saturate(125%) !important;
   color: var(--ui-ink) !important;
 }
+.stage .app-shell .home-desktop .desktop-letter::before { background: transparent; opacity: 0; }
 .stage .app-shell .desktop-collection .collection-icon-glass {
   display: grid; place-items: center; width: 56px; height: 56px;
   border-radius: 16px; font-style: normal;
@@ -45,7 +46,7 @@
 .stage .app-shell :is(.listening-track-copy, .listening-progress, .listening-controls) { top: 0; }
 .stage .app-shell .chat-contact-search input { background: transparent !important; border: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 @media (prefers-reduced-transparency: reduce) {
-  .stage .app-shell :is(.collection-icon-glass, .settings-accordion, .chat-contact-row, .chat-contact-search, .contact-match) {
+  .stage .app-shell :is(.collection-icon-glass, .settings-accordion, .chat-contact-row, .chat-contact-search, .contact-match, .desktop-letter) {
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
   }
 }
