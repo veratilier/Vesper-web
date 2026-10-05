@@ -61,3 +61,45 @@
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
   }
 }
+/* All product surfaces use the same dock glass, including secondary pages. */
+.stage .app-shell :is(
+  button:not(.modal-scrim):not(.scrim):not(.setting-row):not(.sticker-choice):not(.sticker-item),
+  summary, input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select,
+  .surface, .chat-compose, .compose-add-options, .drawer, .history-modal,
+  .connection-modal, .appearance-modal, .profile-modal, .functional-settings-modal,
+  .sticker-picker, .sticker-editor, .sticker-picker-controls label,
+  .music-message-card, .location-message-card, .chat-file-card,
+  .mcp-server-card, .wake-card, .memory-card, .memory-search,
+  .library-card, .book-card, .bookmark-card, .note-card, .todo-list,
+  .netease-library-sheet, .netease-playlist-card, .music-queue-sheet,
+  .desktop-note, .desktop-letter, .desktop-slip, .desktop-countdown, .chat-contact-search
+) {
+  background: var(--home-glass-fill) !important;
+  border-color: var(--home-glass-edge) !important;
+  box-shadow: var(--home-glass-shadow) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(125%) !important;
+  backdrop-filter: blur(18px) saturate(125%) !important;
+  color: var(--ui-ink) !important;
+}
+/* Composite rows have one glass backing, with their content sitting directly on it. */
+.stage .app-shell :is(.mobile-navigation button, .desktop-collection > button,
+  .settings-accordion-item, .settings-accordion .setting-row,
+  .sticker-grid button, .sticker-picker-grid button, .photo-tile button) {
+  background: transparent !important; box-shadow: none !important;
+  border: 0 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+}
+.stage .app-shell :is(button[aria-pressed="true"], .sticker-picker-tabs button.active,
+  .history-drawer-title button.active) {
+  outline: 1px solid var(--ui-muted); outline-offset: -2px;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .stage .app-shell :is(button, summary, input, textarea, select, .surface,
+    .chat-compose, .drawer, .connection-modal, .history-modal, .mcp-server-card, .memory-card) {
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+}
+
+.stage .app-shell .chat-contact-search input { background: transparent !important; border: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.stage .app-shell .desktop-letter::before { background: transparent !important; opacity: 0 !important; }
+
+.stage .app-shell .mobile-navigation button[aria-current="page"] { background: var(--home-glass-blue) !important; outline: none !important; }
