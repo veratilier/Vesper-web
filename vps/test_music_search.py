@@ -47,6 +47,28 @@ class SearchTests(unittest.TestCase):
         self.cache.search(self.query)
         self.assertEqual(self.fetch.call_count, 2)
 
+    def test_lookup_reuses_search_metadata_even_during_cooldown(self):
+        self.fetch.return_value = {'results': [{'kind': 'song', 'trackId': 123, 'trackName': 'Song'}], 'resultCount': 1}
+        self.cache.search(self.query)
+        self.cache.blocked_until = 300
+        result = self.cache.lookup({'trackId': '123', 'country': 'tw'})
+        self.assertTrue(result['cached'])
+        self.assertEqual(result['results'][0]['trackName'], 'Song')
+        self.assertEqual(self.fetch.call_count, 1)
+        self.now = 21601
+        self.assertFalse(self.cache.lookup({'trackId': '123', 'country': 'tw'})['cached'])
+        self.assertEqual(self.fetch.call_count, 2)
+
+    def test_lookup_misses_share_rate_budget_and_validate_ids(self):
+        for invalid in ['', 'https://example.com', '1,2', '１２３', '1'*21, 123]:
+            with self.assertRaises(ValueError): self.cache.lookup({'trackId': invalid})
+        self.fetch.assert_not_called()
+        for n in range(10): self.cache.search(dict(self.query, query=str(n)))
+        with self.assertRaises(SearchUnavailable): self.cache.lookup({'trackId': '999'})
+        self.now = 61
+        self.cache.lookup({'trackId': '999'})
+        self.fetch.assert_called_with({'id': '999', 'entity': 'song', 'country': 'tw', '_lookup': True})
+
     def test_cache_is_bounded(self):
         for n in range(130):
             self.now = n * 61
@@ -81,6 +103,8 @@ class SearchTests(unittest.TestCase):
                     self.assertEqual(method.exception.code, 405)
                     method.exception.close()
                     with urlopen(Request(url, data=json.dumps(self.query).encode(), headers=headers), timeout=2) as response:
+                        self.assertEqual(json.load(response)['resultCount'], 1)
+                    with urlopen(Request(url, data=json.dumps({'trackId': '123', 'country': 'tw'}).encode(), headers=headers), timeout=2) as response:
                         self.assertEqual(json.load(response)['resultCount'], 1)
                 finally:
                     http.shutdown(); http.server_close(); worker.join()

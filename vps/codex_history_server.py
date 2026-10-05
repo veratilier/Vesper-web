@@ -262,7 +262,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(405, {"error": "Method not allowed"})
             else:
                 try:
-                    self.send_json(200, music_search.catalog.search(self.body()))
+                    body = self.body()
+                    self.send_json(200, music_search.catalog.lookup(body) if 'trackId' in body else music_search.catalog.search(body))
                 except music_search.SearchUnavailable as error:
                     self.send_json(error.status, {"error": str(error)})
         elif path == ["wake"] and self.command == "GET":

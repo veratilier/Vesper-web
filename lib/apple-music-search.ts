@@ -10,10 +10,10 @@ export function appleTrack(value: Record<string, unknown>): AppleTrack | null {
     duration: Number(value.trackTimeMillis || 0) / 1000, playable: true };
 }
 export async function searchAppleMusic(query: string, limit: number, request: typeof fetch = fetch) {
-  // Mainland China has Apple Music but no iTunes music storefront. Public
-  // metadata can be absent there; query Taiwan next without claiming that a
-  // catalog song is available in the device's storefront. MusicKit checks that.
-  for (const country of ['cn', 'tw']) {
+  // Mainland China has Apple Music but no iTunes music storefront. Start with
+  // Taiwan's public metadata to avoid an empty request for every song. This
+  // does not establish device-storefront availability; MusicKit checks that.
+  for (const country of ['tw', 'cn']) {
     const url = new URL('https://itunes.apple.com/search');
     url.search = new URLSearchParams({ term: query, entity: 'song', country, limit: String(limit) }).toString();
     const response = await request(url, { signal: AbortSignal.timeout(10000) });
@@ -27,7 +27,7 @@ export async function searchAppleMusic(query: string, limit: number, request: ty
 }
 export async function lookupAppleMusic(id: string, request: typeof fetch = fetch) {
   if (!/^\d+$/.test(id)) return null;
-  for (const country of ['cn', 'tw']) {
+  for (const country of ['tw', 'cn']) {
     const url = new URL('https://itunes.apple.com/lookup');
     url.search = new URLSearchParams({ id, entity: 'song', country }).toString();
     const response = await request(url, { signal: AbortSignal.timeout(10000) });
