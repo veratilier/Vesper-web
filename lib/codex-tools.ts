@@ -86,6 +86,22 @@ async function mergeMusicLibrary(incoming: MusicTrack[], libraryKey = "music") {
   await writeDocument(libraryKey, merged);
   return incoming;
 }
+type VesperPlaylist = { id: string; name: string; tracks: MusicTrack[]; createdAt: string; updatedAt: string; creationTrackIds?: string[] };
+async function readVesperPlaylists(): Promise<VesperPlaylist[]> {
+  const value = await readDocument("musicPlaylists");
+  return Array.isArray(value) ? value.filter((item): item is VesperPlaylist => Boolean(item && typeof item.id === "string" && typeof item.name === "string" && Array.isArray(item.tracks))) : [];
+}
+async function playlistTrack(id: string): Promise<MusicTrack> {
+  const playlists = await readVesperPlaylists();
+  const track = findMusicTrack([...(await readMusicLibrary()), ...playlists.flatMap(item => item.tracks)], id)
+    || await lookupAppleMusic(id.replace(/^apple-/, ""));
+  if (!track || !isAppleMusicTrack(track)) throw new Error("Use a real Apple Music trackId from music_search");
+  return { ...track, source: "appleMusic" };
+}
+function uniquePlaylistTracks(tracks: MusicTrack[]): MusicTrack[] {
+  const seen = new Set<string>();
+  return tracks.filter(track => { const id = track.appleMusicId || track.id; if (seen.has(id)) return false; seen.add(id); return true; });
+}
 function publicTrack(track?: MusicTrack) {
   if (!track) return null;
   return { trackId: track.id, title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: Boolean(track.appleMusicId || (track.url && track.playable !== false)), source: track.appleMusicId ? "appleMusic" : track.neteaseId ? "netease" : "vesper", appleMusicId: track.appleMusicId || "", appleMusicURL: track.appleMusicURL || "" };
@@ -297,9 +313,9 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const replaceQueue = input.replaceQueue === true;
     const nextQueue = replaceQueue ? [track] : queue.some((item) => item.id === track.id || (item.neteaseId && item.neteaseId === track.neteaseId)) ? queue : [...queue, track];
     await writeDocument(musicKeys.queue, nextQueue);
-    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, track, replaceQueue, createdAt: new Date().toISOString() };
+    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, track, queue: nextQueue, replaceQueue, createdAt: new Date().toISOString() };
     await writeDocument(musicKeys.control, command);
-    return { ok: true, action: context.musicSurface === "web" ? "play_requested" : "playing", track: { trackId: track.id, title: track.title, artist: track.artist }, queueLength: nextQueue.length };
+    return { ok: true, action: "play_requested", command, track: { trackId: track.id, title: track.title, artist: track.artist }, queueLength: nextQueue.length };
   }
   if (name === "music_control") {
     const action = String(input.action || "");
@@ -331,13 +347,63 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!isAppleMusicTrack(track)) throw new Error("Only Apple Music cards are supported. Use music_search for an Apple Music trackId.");
     return { ok: true, musicCard: { id: track.id, trackId: track.id, appleMusicId: track.appleMusicId, appleMusicURL: track.appleMusicURL || '', title: track.title, artist: track.artist, album: track.album || "", cover: track.cover || track.artwork || "", duration: track.duration || "", playable: true, source: "appleMusic", message: typeof input.message === "string" ? input.message : "" } };
   }
+  if (name === "music_seek") {
+    if (context.musicSurface === "web") throw new Error("Seeking through chat requires the native Vesper player.");
+    const target = input.positionSeconds;
+    if (typeof target !== "number" || !Number.isFinite(target) || target < 0) throw new Error("positionSeconds must be a finite, non-negative number");
+    const status = await readMusicStatus(musicKeys);
+    if (!status.playback.track) throw new Error("No current song; play a song first");
+    const command = { id: crypto.randomUUID(), action: "seek", trackId: status.playback.track.trackId, positionSeconds: target, createdAt: new Date().toISOString() };
+    await writeDocument(musicKeys.control, command);
+    return { ok: true, action: "seek_requested", command };
+  }
+  if (name === "music_playlist_list") return { playlists: await readVesperPlaylists() };
+  if (name === "music_playlist_create") {
+    const title = typeof input.name === "string" ? input.name.trim() : "";
+    const requestId = typeof input.requestId === "string" ? input.requestId : "";
+    if (!title || title.length > 100 || !/^[A-Za-z0-9_-]{1,100}$/.test(requestId)) throw new Error("Provide a short playlist name and unique requestId");
+    if (input.trackIds !== undefined && (!Array.isArray(input.trackIds) || input.trackIds.length > 100 || input.trackIds.some(id => typeof id !== "string" || !id))) throw new Error("trackIds must contain up to 100 real song IDs");
+    const playlists = await readVesperPlaylists();
+    const existing = playlists.find(item => item.id === requestId);
+    if (existing) {
+      if (existing.name !== title || JSON.stringify(existing.creationTrackIds || []) !== JSON.stringify(input.trackIds || [])) throw new Error("This requestId already belongs to a different playlist request");
+      return { saved: true, alreadyCreated: true, playlist: existing };
+    }
+    const tracks: MusicTrack[] = [];
+    for (const id of (input.trackIds || []) as string[]) tracks.push(await playlistTrack(id));
+    const now = new Date().toISOString();
+    const playlist: VesperPlaylist = { id: requestId, name: title, tracks: uniquePlaylistTracks(tracks), createdAt: now, updatedAt: now, creationTrackIds: (input.trackIds || []) as string[] };
+    await writeDocument("musicPlaylists", [...playlists, playlist]);
+    return { saved: true, playlist };
+  }
+  if (name === "music_playlist_play") {
+    if (context.musicSurface === "web") throw new Error("Play Vesper playlists in the native app.");
+    const playlist = (await readVesperPlaylists()).find(item => item.id === input.playlistId);
+    if (!playlist || !playlist.tracks.length) throw new Error("Playlist missing or empty; list Vesper playlists first");
+    const queue = uniquePlaylistTracks(playlist.tracks);
+    if (queue.some(track => !isAppleMusicTrack(track))) throw new Error("This playlist contains an unavailable song");
+    const track = queue[0];
+    await writeDocument("musicQueue", queue);
+    const command = { id: crypto.randomUUID(), action: "play_track", trackId: track.id, track, queue, replaceQueue: true, createdAt: new Date().toISOString() };
+    await writeDocument("musicControl", command);
+    return { ok: true, action: "play_requested", command, playlistId: playlist.id };
+  }
   if (name === "music_playlist_add") {
     const trackId = String(input.trackId || "");
-    const tracks = await readMusicLibrary(musicKeys.queue, musicKeys.library);
-    const track: MusicTrack | null | undefined = findMusicTrack(tracks, trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
+    if (input.playlistId !== undefined) {
+      const playlists = await readVesperPlaylists();
+      const playlist = playlists.find(item => item.id === input.playlistId);
+      if (!playlist) throw new Error("Unknown Vesper playlistId; list playlists first");
+      const track = await playlistTrack(trackId);
+      const already = playlist.tracks.some(item => item.appleMusicId === track.appleMusicId);
+      if (!already) { playlist.tracks.push(track); playlist.updatedAt = new Date().toISOString(); await writeDocument("musicPlaylists", playlists); }
+      return { saved: true, alreadyInPlaylist: already, playlist };
+    }
+    const library = await readMusicTracks(musicKeys.library);
+    const track = findMusicTrack(await readMusicLibrary(musicKeys.queue, musicKeys.library), trackId) || await lookupAppleMusic(trackId.replace(/^apple-/, ""));
     if (!track) throw new Error("找不到指定歌曲，请先使用 music_search");
-    const already = Boolean(findMusicTrack(tracks, track.id));
     if (context.musicSurface === "web" && !neteaseTrackId(track)) throw new Error("Web 曲库只接受网易云歌曲。");
+    const already = Boolean(findMusicTrack(library, track.id));
     if (!already) await mergeMusicLibrary([track], musicKeys.library);
     return { ok: true, alreadyInPlaylist: already, trackId: track.id, playlist: "Vesper music" };
   }

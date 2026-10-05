@@ -235,6 +235,7 @@ export const allowedDocumentKeys = new Set([
   "environment",
   "music",
   "musicQueue",
+  "musicPlaylists",
   "webMusic",
   "webMusicQueue",
   "webMusicControl",
