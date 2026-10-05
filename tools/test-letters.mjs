@@ -11,7 +11,7 @@ globalThis.__letterFixture={DB:db,VESPER_APP_TOKEN:'fixture-token'};
 const dir=await mkdtemp(join(tmpdir(),'vesper-letters-'));
 try{
  const modules={};
- for(const [name,entry] of Object.entries({route:'app/api/letters/route.ts',legacy:'app/api/jottings/route.ts',tools:'app/api/codex/tools/route.ts',store:'lib/letters.ts',policy:'lib/letter-policy.ts'})){
+ for(const [name,entry] of Object.entries({reminders:'app/api/letters/reminders/route.ts',route:'app/api/letters/route.ts',legacy:'app/api/jottings/route.ts',tools:'app/api/codex/tools/route.ts',store:'lib/letters.ts',policy:'lib/letter-policy.ts'})){
   const outfile=join(dir,name+'.mjs');await build({entryPoints:[entry],outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'fixture',setup(b){b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export function waitUntil(p){return p;} export const env=globalThis.__letterFixture;',loader:'js'}));}}]});modules[name]=await import(pathToFileURL(outfile));
  }
  const request=(method,path,body,auth=true)=>new Request('https://vesper.test'+path,{method,headers:{'content-type':'application/json',...(auth?{'x-vesper-device-token':'fixture-token'}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -47,6 +47,29 @@ try{
  assert.equal((await get(released.id)).text,released.text);
  assert.equal((await modules.route.POST(request('POST','/api/letters',{id:'reply',title:'Re',text:'My reply',replyTo:released.id}))).status,200);
  for(const invalid of [{id:'bad',text:''},{id:'../bad',text:'x'},{id:'bad',text:'x',unlockAt:'2026-10-29T09:00'},{id:'bad',text:'x'.repeat(12001)}])assert.equal((await modules.route.POST(request('POST','/api/letters',invalid))).status,400);
+ const feed=async actor=>(await (await modules.reminders.GET(request('GET','/api/letters/reminders?actor='+actor))).json());
+ assert.equal((await modules.reminders.GET(request('GET','/api/letters/reminders',null,false))).status,401);
+ assert.equal((await modules.reminders.GET(request('GET','/api/letters/reminders?actor=invalid'))).status,400);
+ let reminders=await feed('Vera');
+ assert.ok(reminders.inbox.some(r=>r.id===old.id),'Ordinary incoming letters appear in the badge feed');
+ assert.equal(reminders.inbox.some(r=>r.id===outgoing.id),false,'Own outgoing letters never light the dot');
+ assert.equal(reminders.inbox.some(r=>r.text!==undefined),false,'Badge feed contains no letter bodies');
+ const cover=reminders.reminders.find(r=>r.id===incoming.id);assert.equal(cover.due,false);assert.equal(cover.text,undefined);
+ assert.equal(reminders.reminders.some(r=>r.id===outgoing.id),false);
+ assert.equal((await feed('Rowan')).reminders.find(r=>r.id===outgoing.id).due,false);
+ assert.equal((await modules.reminders.POST(request('POST','/api/letters/reminders',{id:incoming.id}))).status,400,'No early reminders');
+ assert.deepEqual((await modules.store.letterReminders('another-owner')).reminders,[]);
+ await assert.rejects(modules.store.acknowledgeLetterReminder('another-owner',incoming.id));
+ const due={...incoming,unlockAt:new Date(Date.now()-1000).toISOString(),author:'Rowan',recipient:'Vera',createdAt:new Date().toISOString()};
+ sqlite.prepare('UPDATE vesper_jottings SET value=? WHERE user_id=? AND id=?').run(JSON.stringify(due),owner,incoming.id);
+ reminders=await feed('Vera');assert.equal(reminders.reminders.find(r=>r.id===incoming.id).due,true);
+ assert.equal(reminders.reminders.find(r=>r.id===incoming.id).text,undefined,'Even due reminders never contain the body');
+ for(let retry=0;retry<2;retry++) assert.equal((await modules.reminders.POST(request('POST','/api/letters/reminders',{id:incoming.id}))).status,200);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_letter_reminders WHERE letter_id=?').get(incoming.id).n,1);
+ assert.ok((await feed('Vera')).reminders.find(r=>r.id===incoming.id).deliveredAt);
+ await modules.store.markLetter(owner,{id:incoming.id,action:'read'});
+ assert.equal((await feed('Vera')).reminders.some(r=>r.id===incoming.id),false,'Read letters do not alert');
+ assert.equal((await feed('Vera')).inbox.some(r=>r.id===incoming.id),false,'Read letters leave the badge feed');
  const first=await (await modules.route.GET(request('GET','/api/letters?limit=1'))).json();const second=await (await modules.route.GET(request('GET','/api/letters?limit=1&before='+encodeURIComponent(first.before)))).json();assert.notEqual(first.letters[0].id,second.letters[0].id);
  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_documents WHERE key IN (\'notes\',\'diary\')').get().n,0);
  assert.equal((await modules.store.getLetter(owner,old.id)).letter.text,old.text);

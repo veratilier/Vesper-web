@@ -78,7 +78,7 @@ export function Letters({ apiUrl, headers, theme, active }: { apiUrl: (path: str
     if (!draft || draft.attempted) return;
     try { persist({ ...draft, ...change }); setStatus(''); } catch { setStatus('Could not save your draft. Check browser storage and try again.'); }
   }
-  function replace(letter: Letter) { revision.current++; setLetters(previous => previous.some(l => l.id === letter.id) ? previous.map(l => l.id === letter.id ? letter : l) : [letter, ...previous]); }
+  function replace(letter: Letter) { window.dispatchEvent(new Event("vesper-letters-changed")); revision.current++; setLetters(previous => previous.some(l => l.id === letter.id) ? previous.map(l => l.id === letter.id ? letter : l) : [letter, ...previous]); }
   async function mark(letter: Letter, action: 'read' | 'keep') {
     if (busyRef.current) return;
     const scope = generation.current; busyRef.current = true; setBusy(true);
