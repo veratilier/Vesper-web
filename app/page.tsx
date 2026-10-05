@@ -1062,6 +1062,48 @@ function HomeContent() {
     const timer = window.setInterval(publish, 10_000);
     return () => window.clearInterval(timer);
   }, [activeTracks.length, currentTrack?.id, playbackDuration, playing, audioRunning, setMusicPlayback]);
+  const [chatBadge, setChatBadge] = useState(false);
+  useEffect(() => {
+    let cancelled = false, storageKey = '', accountToken = '';
+    let incoming: {conversationId:string;messageId:string;itemId?:string}[] = [];
+    let seen = new Set<string>();
+    const displayed = new Map<string, Set<string>>();
+    const key = (chat:string,id:string) => chat + '\n' + id;
+    const update = () => {
+      for (const [chat, ids] of displayed) {
+        ids.forEach(id => seen.add(key(chat,id)));
+        incoming.filter(cover => cover.conversationId === chat).forEach(cover => {
+          if (ids.has(cover.messageId) || cover.itemId && ids.has(cover.itemId)) seen.add(key(chat,cover.messageId));
+        });
+      }
+      if (storageKey) browserStorage.setItem(storageKey,JSON.stringify([...seen]));
+      if (!cancelled) setChatBadge(incoming.some(cover => !seen.has(key(cover.conversationId,cover.messageId))));
+    };
+    const mark = (event:Event) => {
+      const detail = (event as CustomEvent<{conversationId:string;messageIds:string[];token:string}>).detail;
+      if (!detail || detail.token !== deviceToken()) return;
+      displayed.set(detail.conversationId,new Set(detail.messageIds));update();
+    };
+    const refresh = async () => {
+      if (document.hidden) return;
+      const token = deviceToken();
+      if (!token) { setChatBadge(false); return; }
+      if (accountToken && accountToken !== token) { displayed.clear();incoming=[];seen.clear();setChatBadge(false); }
+      accountToken = token;
+      const hash = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(codexHistoryUrl('/inbox') + '\n' + token));
+      storageKey = 'vesper-chat-seen-' + Array.from(new Uint8Array(hash)).map(v=>v.toString(16).padStart(2,'0')).join('');
+      try { seen = new Set(JSON.parse(browserStorage.getItem(storageKey) || '[]')); } catch { seen = new Set(); }
+      try {
+        const response = await fetch(codexHistoryUrl('/inbox'),{headers:codexHistoryHeaders(),cache:'no-store'});
+        if (!response.ok || cancelled || token !== deviceToken()) return;
+        const value = await response.json() as {incoming:typeof incoming};incoming=value.incoming;update();
+      } catch { /* Retry while retaining the last known unread state. */ }
+    };
+    const changed = () => { void refresh(); };
+    window.addEventListener('vesper-chat-displayed',mark);document.addEventListener('visibilitychange',changed);
+    void refresh();const timer=window.setInterval(changed,15000);
+    return () => { cancelled=true;clearInterval(timer);window.removeEventListener('vesper-chat-displayed',mark);document.removeEventListener('visibilitychange',changed); };
+  }, []);
   const [letterBadge, setLetterBadge] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -1704,7 +1746,7 @@ function HomeContent() {
             <button key={label} type="button" aria-current={active === label ? "page" : undefined}
               onClick={() => navigateTo(label)}>
               <span style={{position:'relative',display:'inline-flex'}}><NavIcon name={icon} />
-                {label === 'Letters' && letterBadge && <i aria-label="New letters" style={{position:'absolute',right:-4,top:-2,width:8,height:8,borderRadius:'50%',background:'#ef4444'}}/>}
+                {((label === 'Letters' && letterBadge) || (label === '聊天' && chatBadge)) && <i aria-label={label === 'Letters' ? "New letters" : "New messages"} style={{position:'absolute',right:-4,top:-2,width:8,height:8,borderRadius:'50%',background:'#ef4444'}}/>}
               </span>
               <span>{label === "今日" ? "Home" : label === "聊天" ? "Chat" : label === "设置" ? "Setting" : english}</span>
             </button>
@@ -4643,6 +4685,12 @@ function ConnectedChat({
     return () => {window.clearInterval(timer); void fetch(codexHistoryUrl('/wake'), {method:'POST',headers:codexHistoryHeaders(true),
       body:JSON.stringify({action:'presence',deviceId,busy:false}),keepalive:true}).catch(() => {});};
   }, [busy, conversationId]);
+  useEffect(() => {
+    if (!chatVisible || !historyReady || document.hidden || chatCaptureRequest()) return;
+    const incoming = messages.filter(item => item.role === 'agent' || item.metadata?.blockType === 'letterReminder');
+    const messageIds = incoming.flatMap(item => [item.id,item.metadata?.itemId,codexBubbleIdentity(item)?.parentId]).filter((id):id is string => Boolean(id));
+    window.dispatchEvent(new CustomEvent('vesper-chat-displayed',{detail:{conversationId,messageIds,token:deviceToken()}}));
+  }, [messages,chatVisible,historyReady,conversationId]);
   useEffect(() => {
     if (!conversationId || !historyReady || busy || chatCaptureRequest()) return;
     let stopped=false;

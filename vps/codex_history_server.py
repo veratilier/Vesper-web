@@ -296,6 +296,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True})
         elif path == ["search"] and self.command == "GET":
             self.search_messages()
+        elif path == ["inbox"] and self.command == "GET":
+            self.inbox()
         elif path == ["conversations"] and self.command == "GET":
             self.list_conversations()
         elif len(path) == 2 and path[0] == "conversations":
@@ -356,6 +358,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, dict(result, conversationId=path[1], codexThreadId=thread_id))
         except terminal.TerminalUnavailable as error:
             self.send_json(503, {"error": str(error)})
+
+    def inbox(self) -> None:
+        # Read-only message identities; user sends, tool activity and draft/title
+        # updates cannot light an incoming-message badge. No transcript body.
+        with db() as connection:
+            rows = connection.execute("""SELECT m.* FROM messages m JOIN conversations c
+              ON c.vesper_conversation_id=m.vesper_conversation_id
+              WHERE c.archived_at IS NULL AND m.role IN ('agent','system')
+                AND m.status IN ('completed','delivered')
+              ORDER BY m.created_at DESC,m.rowid DESC""").fetchall()
+        incoming = {}
+        for row in rows:
+            chat = row['vesper_conversation_id']
+            if chat in incoming:continue
+            try: meta = json.loads(row['metadata_json'] or '{}')
+            except (ValueError,TypeError):continue
+            if not isinstance(meta,dict):continue
+            block = meta.get('blockType','')
+            if row['role']=='system' and block!='letterReminder':continue
+            if row['role']=='agent' and (meta.get('phase')=='commentary' or meta.get('execution') or
+                block not in ('','agentMessage','assistantMessage','outputMessage','text','message','sticker','musicCard')):continue
+            if is_internal_context(row['content']):continue
+            if not row['content'].strip() and not any(meta.get(k) for k in ('attachments','sticker','musicCard','call')):continue
+            incoming[chat]={'conversationId':chat,'messageId':row['id'],'itemId':row['item_id'], 'createdAt':row['created_at']}
+        self.send_json(200, {'incoming':list(incoming.values())})
 
     def list_conversations(self) -> None:
         with db() as connection:
