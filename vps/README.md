@@ -90,3 +90,21 @@ wake label, tool-result labels and conversation title were also repaired after
 a SQLite backup. The corrected replies matched the history HTTP response. One
 corrective push (`<original-job-id>-utf8-fix`) was sent from the saved original
 reply, with 6/6 provider acceptances. No model/tool rerun or extra wake job occurred.
+
+### Timed letter reminders
+
+The existing minute timer polls the authenticated, account-scoped cover-only
+`/api/letters/reminders` feed before normal wake scheduling. Previous timed letters
+are included. Each opening creates one stable Rowan wake request or one system
+reminder in Vera's latest eligible chat. Server acknowledgement and stable IDs
+make interrupted/repeated polling safe. No reminder contains the letter body.
+Rowan's pending unread covers are supplied to normal wakes, which still obey
+quiet hours, presence, enabled state and tool permissions. Reading uses the
+existing server-enforced `letter_read` tool; a reminder does not mark a letter read.
+
+Native iOS schedules local notifications for synced incoming timed letters, and
+routes notification/chat reminder taps to the server-checked reader. Remote APNs
+is not configured: an incoming letter never synced to the phone cannot alert a
+closed native app. Native and Web Letters tabs show an arrival/unread-opening dot:
+viewing a future cover clears its arrival indicator, unlocking lights it again,
+and only reading clears an available letter. Server time controls unlocking.

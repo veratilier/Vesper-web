@@ -1062,6 +1062,41 @@ function HomeContent() {
     const timer = window.setInterval(publish, 10_000);
     return () => window.clearInterval(timer);
   }, [activeTracks.length, currentTrack?.id, playbackDuration, playing, audioRunning, setMusicPlayback]);
+  const [letterBadge, setLetterBadge] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    let incoming: {id:string;unlockAt?:string}[] = [], seen = new Set<string>(), offset = 0, storageKey = '';
+    const badge = () => {
+      const now = Date.now() + offset;
+      if (!cancelled) setLetterBadge(incoming.some(letter => !seen.has(letter.id) || !letter.unlockAt || Date.parse(letter.unlockAt) <= now));
+    };
+    const visit = () => {
+      if (active === 'Letters' && storageKey) {
+        incoming.forEach(letter => seen.add(letter.id));
+        browserStorage.setItem(storageKey, JSON.stringify([...seen]));
+      }
+    };
+    const refresh = async () => {
+      if (document.hidden) return;
+      const token = deviceToken();
+      if (!token) { setLetterBadge(false); return; }
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(apiUrl('/api/letters/reminders') + '\n' + token));
+      storageKey = 'vesper-letter-seen-' + Array.from(new Uint8Array(hash)).map(v=>v.toString(16).padStart(2,'0')).join('');
+      try { seen = new Set(JSON.parse(browserStorage.getItem(storageKey) || '[]')); } catch { seen = new Set(); }
+      try {
+        const response = await fetch(apiUrl('/api/letters/reminders'), {headers:appHeaders(),cache:'no-store'});
+        if (!response.ok || cancelled || token !== deviceToken()) return;
+        const value = await response.json() as {inbox:{id:string;unlockAt?:string}[];serverTime:string};
+        incoming = value.inbox; offset = Date.parse(value.serverTime) - Date.now();
+        visit(); badge();
+      } catch { /* Keep the last known state during temporary connection failures. */ }
+    };
+    const changed = () => { void refresh(); };
+    void refresh();
+    const timer = window.setInterval(changed, 60000), clock = window.setInterval(badge, 1000);
+    window.addEventListener('vesper-letters-changed', changed);document.addEventListener('visibilitychange', changed);
+    return () => { cancelled = true; clearInterval(timer);clearInterval(clock);window.removeEventListener('vesper-letters-changed',changed);document.removeEventListener('visibilitychange',changed); };
+  }, [active]);
   const [wakeRequest, setWakeRequest] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1668,7 +1703,9 @@ function HomeContent() {
           {nav.filter(({ label }) => ["今日", "聊天", "Collection", "Letters", "设置"].includes(label)).map(({ label, english, icon }) => (
             <button key={label} type="button" aria-current={active === label ? "page" : undefined}
               onClick={() => navigateTo(label)}>
-              <NavIcon name={icon} />
+              <span style={{position:'relative',display:'inline-flex'}}><NavIcon name={icon} />
+                {label === 'Letters' && letterBadge && <i aria-label="New letters" style={{position:'absolute',right:-4,top:-2,width:8,height:8,borderRadius:'50%',background:'#ef4444'}}/>}
+              </span>
               <span>{label === "今日" ? "Home" : label === "聊天" ? "Chat" : label === "设置" ? "Setting" : english}</span>
             </button>
           ))}
@@ -2560,6 +2597,7 @@ type BridgeChatMessage = {
     turnStatus?: "thinking" | "tool" | "completed" | "error";
     showTurnStatus?: boolean;
     blockType?: string;
+    letterId?: string;
     musicCard?: MusicCardData;
     sticker?: StickerMessageData;
     timeSource?: "message" | "turn" | "thread" | "unknown";
@@ -3594,6 +3632,7 @@ function CodexChatMessage({
   onAddMusicToPlaylist: (card: MusicPlaylistIntent) => void;
   onSaveAttachmentAsSticker?: (attachment: ChatAttachment, item: BridgeChatMessage) => void;
 }) {
+  if (item.role === 'system' && item.metadata?.blockType === 'letterReminder') return <button type="button" className="surface" style={{padding:'14px',fontSize:'14px',opacity:0.8}} onClick={() => window.dispatchEvent(new CustomEvent('vesper-navigate',{detail:{section:'Letters'}}))}><span aria-hidden="true">✉ </span>{item.content}</button>;
   if (item.metadata?.execution) return <ExecutionCard execution={item.metadata.execution} live={turnInProgress} />;
   const attachmentOnly = item.role === "agent" && item.id.startsWith("files:") &&
     !!item.metadata?.attachments?.length && (!item.content?.trim() || item.content.trim() === "文件");

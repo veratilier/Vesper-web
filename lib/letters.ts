@@ -47,3 +47,43 @@ export async function markLetter(owner: string, input: Record<string, unknown>, 
   await getDb().prepare(sql).bind(owner,letterID,actor,input.action === 'read' ? new Date().toISOString() : input.kept ? 1 : 0).run();
   return getLetter(owner,letterID,actor);
 }
+
+// Covers only: this feed can schedule reminders without fetching sealed bodies.
+// Query the existing letters as well, so previously sent timed letters participate.
+export async function letterReminders(owner: string, actor = 'Vera') {
+  await ensureSchema();
+  const now = new Date().toISOString();
+  const rows = await getDb().prepare(`SELECT j.id,j.value,r.delivered_at FROM vesper_jottings j
+    LEFT JOIN vesper_letter_marks m ON m.user_id=j.user_id AND m.letter_id=j.id AND m.actor=?
+    LEFT JOIN vesper_letter_reminders r ON r.user_id=j.user_id AND r.letter_id=j.id AND r.recipient=?
+    WHERE j.user_id=? AND json_extract(j.value,'$.unlockAt') IS NOT NULL
+      AND json_extract(j.value,'$.author')!=? AND m.read_at IS NULL
+    ORDER BY json_extract(j.value,'$.unlockAt'),j.id`).bind(actor,actor,owner,actor)
+    .all<Row & {delivered_at?: string}>();
+  const covers = rows.results.flatMap(row => {
+    const letter = JSON.parse(row.value) as Letter;
+    const opening = Date.parse(letter.unlockAt || '');
+    if (!Number.isFinite(opening)) return [];
+    return [{id:letter.id,title:letter.title,author:letter.author,recipient:actor,
+      createdAt:letter.createdAt,unlockAt:letter.unlockAt!,due:opening<=Date.parse(now),
+      deliveredAt:row.delivered_at || null}];
+  });
+  const unread = await getDb().prepare(`SELECT j.id,j.value FROM vesper_jottings j
+    LEFT JOIN vesper_letter_marks m ON m.user_id=j.user_id AND m.letter_id=j.id AND m.actor=?
+    WHERE j.user_id=? AND json_extract(j.value,'$.author')!=? AND m.read_at IS NULL
+    ORDER BY j.created_at DESC,j.id DESC`).bind(actor,owner,actor).all<Row>();
+  const inbox = unread.results.map(row => {
+    const letter = JSON.parse(row.value) as Letter;
+    return {id:letter.id,title:letter.title,author:letter.author,createdAt:letter.createdAt,
+      ...(letter.unlockAt ? {unlockAt:letter.unlockAt} : {})};
+  });
+  return {reminders:covers,inbox,serverTime:now};
+}
+export async function acknowledgeLetterReminder(owner: string, letterID: string, actor = 'Vera') {
+  const letter = (await getLetter(owner,letterID,actor)).letter;
+  if (letter.author === actor || !letter.unlockAt || Date.parse(letter.unlockAt)>Date.now()) throw new Error('This letter is not ready for a reminder');
+  await getDb().prepare(`INSERT INTO vesper_letter_reminders(user_id,letter_id,recipient,delivered_at)
+    VALUES(?,?,?,?) ON CONFLICT(user_id,letter_id,recipient) DO NOTHING`)
+    .bind(owner,id(letterID),actor,new Date().toISOString()).run();
+  return {ok:true};
+}
