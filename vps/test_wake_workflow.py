@@ -40,6 +40,16 @@ class WorkflowTests(unittest.TestCase):
         b=permissions.tool_input('jotting_create',{'id':'another','text':'x'},'job','item',{})
         self.assertEqual(a['id'],b['id'])
         self.assertNotIn('jotting_create',permissions.allowed_tools({'tools':[],'messages':[]},runner.ALLOWED))
+    def test_letters_have_stable_retry_ids_and_private_receipts(self):
+        a=permissions.tool_input('letter_create',{'id':'first','text':'private letter'},'job','item',{})
+        b=permissions.tool_input('letter_create',{'id':'retry','text':'private letter'},'job','item',{})
+        self.assertEqual(a['id'],b['id'])
+        saved=workflow.step('letter_create',a,{'letter':{'id':a['id'],'title':'Evening','text':'private letter'}})
+        self.assertEqual(saved['completion'],'completed')
+        self.assertEqual(saved['references'],[{'kind':'letters','id':a['id']}])
+        self.assertNotIn('private letter',json.dumps(saved))
+        self.assertNotIn('letter_create',permissions.allowed_tools({'tools':[],'messages':[]},runner.ALLOWED))
+        self.assertIn('letter_create',permissions.allowed_tools({'tools':['letter_create'],'messages':[]},runner.ALLOWED))
     def test_context_has_times_one_previous_wake_and_reply_state(self):
         with store.db() as con:
             for ident,at in [('old',10),('latest',20)]:

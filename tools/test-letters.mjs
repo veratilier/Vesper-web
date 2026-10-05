@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtemp,rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const sqlite=new DatabaseSync(':memory:');
+const db={prepare(sql){const stmt=(args=[])=>({bind:(...v)=>stmt(v),first:async()=>sqlite.prepare(sql).get(...args)??null,all:async()=>({results:sqlite.prepare(sql).all(...args)}),run:async()=>sqlite.prepare(sql).run(...args)});return stmt();},async batch(statements){for(const s of statements)await s.run();}};
+globalThis.__letterFixture={DB:db,VESPER_APP_TOKEN:'fixture-token'};
+const dir=await mkdtemp(join(tmpdir(),'vesper-letters-'));
+try{
+ const modules={};
+ for(const [name,entry] of Object.entries({route:'app/api/letters/route.ts',legacy:'app/api/jottings/route.ts',tools:'app/api/codex/tools/route.ts',store:'lib/letters.ts',policy:'lib/letter-policy.ts'})){
+  const outfile=join(dir,name+'.mjs');await build({entryPoints:[entry],outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'fixture',setup(b){b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export function waitUntil(p){return p;} export const env=globalThis.__letterFixture;',loader:'js'}));}}]});modules[name]=await import(pathToFileURL(outfile));
+ }
+ const request=(method,path,body,auth=true)=>new Request('https://vesper.test'+path,{method,headers:{'content-type':'application/json',...(auth?{'x-vesper-device-token':'fixture-token'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+ const call=async(name,args)=>{const r=await modules.tools.POST(request('POST','/api/codex/tools',{name,arguments:args}));assert.equal(r.status,200,await r.clone().text());return (await r.json()).result;};
+ assert.equal((await modules.route.GET(request('GET','/api/letters',null,false))).status,401);
+ const old={id:'old-sketch',title:'A thought',text:'A fictional former Sketch entry.'};
+ await call('jotting_create',old);
+ const unlockAt=new Date(Date.now()+86400000).toISOString(),incoming={id:'future-letter',title:'For later',text:'Synthetic sealed letter body.',unlockAt};
+ assert.equal((await call('letter_create',incoming)).letter.text,incoming.text);
+ const get=async id=>(await (await modules.route.GET(request('GET','/api/letters?id='+id))).json()).letter;
+ assert.equal((await get(incoming.id)).locked,true);assert.equal((await get(incoming.id)).text,undefined);
+ const list=await (await modules.route.GET(request('GET','/api/letters'))).json();
+ assert.equal(list.letters.find(x=>x.id===old.id).text,old.text);assert.equal(list.letters.find(x=>x.id===incoming.id).text,undefined);
+ const legacy=await (await modules.legacy.GET(request('GET','/api/jottings?id='+incoming.id))).json();assert.equal(legacy.jotting.text,undefined);
+ assert.equal((await modules.legacy.POST(request('POST','/api/jottings',incoming))).status,400);
+ assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:incoming.id,action:'read'}))).status,400);
+ assert.equal((await modules.route.POST(request('POST','/api/letters',{id:'invalid-reply',text:'Reply',replyTo:incoming.id}))).status,400);
+ assert.equal((await call('letter_create',incoming)).letter.id,incoming.id);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_jottings WHERE id=?').get(incoming.id).n,1);
+ assert.equal((await modules.route.POST(request('POST','/api/letters',incoming))).status,400);
+ const outgoing={id:'vera-letter',title:'From Vera',text:'A fictional reply.',unlockAt};
+ assert.equal((await modules.route.POST(request('POST','/api/letters',outgoing))).status,200);
+ assert.equal((await get(outgoing.id)).text,outgoing.text);assert.equal((await call('letter_read',{id:outgoing.id})).letter.text,undefined);
+ assert.equal((await call('jotting_list',{})).jottings.find(x=>x.id===outgoing.id).text,undefined);
+ const owner=sqlite.prepare('SELECT user_id FROM vesper_jottings LIMIT 1').get().user_id;
+ assert.deepEqual((await modules.store.listLetters('another-owner')).letters,[]);await assert.rejects(modules.store.getLetter('another-owner',old.id));
+ assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:old.id,action:'keep',kept:true}))).status,200);
+ assert.equal((await get(old.id)).kept,true);assert.equal((await call('letter_read',{id:old.id})).letter.kept,false);
+ assert.equal((await modules.route.PATCH(request('PATCH','/api/letters',{id:old.id,action:'read'}))).status,200);assert.equal((await get(old.id)).read,true);
+ const now=Date.now(),value={id:'boundary',title:'',author:'Rowan',createdAt:new Date(now).toISOString(),unlockAt:new Date(now).toISOString(),text:'boundary body'};
+ assert.equal(modules.policy.visibleLetter(value,'Vera',now-1).text,undefined);assert.equal(modules.policy.visibleLetter(value,'Vera',now).text,value.text);
+ const released={id:'released',title:'Available',text:'An opened letter.',unlockAt:new Date(Date.now()-1000).toISOString()};await call('letter_create',released);
+ assert.equal((await get(released.id)).text,released.text);
+ assert.equal((await modules.route.POST(request('POST','/api/letters',{id:'reply',title:'Re',text:'My reply',replyTo:released.id}))).status,200);
+ for(const invalid of [{id:'bad',text:''},{id:'../bad',text:'x'},{id:'bad',text:'x',unlockAt:'2026-10-29T09:00'},{id:'bad',text:'x'.repeat(12001)}])assert.equal((await modules.route.POST(request('POST','/api/letters',invalid))).status,400);
+ const first=await (await modules.route.GET(request('GET','/api/letters?limit=1'))).json();const second=await (await modules.route.GET(request('GET','/api/letters?limit=1&before='+encodeURIComponent(first.before)))).json();assert.notEqual(first.letters[0].id,second.letters[0].id);
+ assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_documents WHERE key IN (\'notes\',\'diary\')').get().n,0);
+ assert.equal((await modules.store.getLetter(owner,old.id)).letter.text,old.text);
+ console.log('PASS Letters: old Sketch retention, scoped persistence/retry, server time locks and legacy redaction, reply validation, independent read/keep, pagination and auth.');
+}finally{sqlite.close();await rm(dir,{recursive:true,force:true});}

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { createMemory, listMemories, memoryScopeFromRequest, MEMORY_CONFIG } from "../../lib/memory";
 import { mergeAgentDiary, isCalendarDate } from "./diary";
 import { pinnedMemoryOwner } from "./memory-owner";
+import { createLetter, getLetter, listLetters, markLetter } from '../../lib/letters';
 
 type Env = OAuthEnv & NativeDesireEnv & {
   DB: D1Database;
@@ -78,6 +79,23 @@ async function writeDoc(db: D1Database, key: string, value: unknown) {
 
 function createServer(env: Env) {
   const server = new McpServer({ name: "Vesper", version: "1.1.0" });
+  const letterID=z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+  const letterTools=[
+    {name:'letter_list',description:'翻阅 Letters，包括原 Sketch 内容；未来来信正文在服务器到时之前不返回。',schema:z.object({limit:z.number().int().min(1).max(50).optional(),before:z.string().optional()})},
+    {name:'letter_create',description:'给 Vera 寄一封信或保存值得留下的想法。id 重试时保持不变；unlockAt 可指定含时区的 ISO 开启时间；replyTo 使用实际已打开的信件 ID。不会发送聊天消息。',schema:z.object({id:letterID,title:z.string().max(120).optional(),text:z.string().min(1).max(12000),unlockAt:z.string().optional(),replyTo:letterID.optional()})},
+    {name:'letter_read',description:'拆开 letter_list 返回的信件；未到时间的来信保持封存。',schema:z.object({id:letterID})},
+    {name:'letter_keep',description:'为 Rowan 收藏或取消收藏一封信，不修改 Vera 的收藏状态。',schema:z.object({id:letterID,kept:z.boolean()})},
+  ];
+  for(const tool of letterTools) server.registerTool(tool.name,{description:tool.description,inputSchema:tool.schema},async (args: Record<string, unknown>)=>{
+    try{
+      const owner=(await ownerMemoryScope(env)).userId,input=args as Record<string,unknown>;
+      if(tool.name==='letter_create')return text(await createLetter(owner,input,'Rowan'));
+      if(tool.name==='letter_list')return text(await listLetters(owner,Number(input.limit||30),String(input.before||''),'Rowan'));
+      if(tool.name==='letter_keep')return text(await markLetter(owner,{...input,action:'keep'},'Rowan'));
+      const result=await getLetter(owner,String(input.id),'Rowan');
+      return text(result.letter.locked?result:await markLetter(owner,{id:input.id,action:'read'},'Rowan'));
+    }catch(error){return {...text({error:error instanceof Error?error.message:'Letter request failed'}),isError:true};}
+  });
 
   for (const tool of desireTools) {
     server.registerTool(tool.name, { description: tool.description, inputSchema: tool.schema }, async input => {

@@ -5,6 +5,7 @@ import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-m
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
 import { createJotting, listJottings } from './jottings';
+import { createLetter, getLetter, listLetters, markLetter } from './letters';
 import { legacyDesireRead } from './desire/routing.js';
 import { env } from 'cloudflare:workers';
 import { executeDesire, type NativeDesireEnv } from './desire/native';
@@ -197,9 +198,18 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!result.meta.changes) throw new Error("Reading room changed. Read again and retry with the same noteId.");
     return { note, replayed: false };
   }
+  if (name === 'letter_create' || name === 'letter_list' || name === 'letter_read' || name === 'letter_keep') {
+    if (!memoryScope) throw new Error('Letter scope is unavailable');
+    const owner = memoryScope.userId;
+    if (name === 'letter_create') return createLetter(owner,input,'Rowan');
+    if (name === 'letter_list') return listLetters(owner,Number(input.limit || 30),String(input.before || ''),'Rowan');
+    if (name === 'letter_keep') return markLetter(owner,{...input,action:'keep'},'Rowan');
+    const result = await getLetter(owner,String(input.id || ''),'Rowan');
+    return result.letter.locked ? result : markLetter(owner,{id:input.id,action:'read'},'Rowan');
+  }
   if (name === 'jotting_create' || name === 'jotting_list') {
     if (!memoryScope) throw new Error('Jotting scope is unavailable');
-    return name === 'jotting_create' ? createJotting(memoryScope.userId, input) : listJottings(memoryScope.userId, Number(input.limit || 30), String(input.before || ''));
+    return name === 'jotting_create' ? createJotting(memoryScope.userId, input) : listJottings(memoryScope.userId, Number(input.limit || 30), String(input.before || ''),'Rowan');
   }
   if (name === "read_vesper_state") {
     const section = String(input.section || "notes").toLowerCase();
