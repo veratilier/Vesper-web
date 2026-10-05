@@ -27,6 +27,7 @@ jobs:
       - run: npm run test:codex
       - run: npm run test:memory
       - run: node tools/test-jottings.mjs
+      - run: node tools/test-letters.mjs
       - run: node tools/test-chat-keeps.mjs
       - run: node tools/test-reconcile.mjs
       - run: node --test tests/service-worker.test.mjs tests/browser-storage.test.mjs

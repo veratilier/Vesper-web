@@ -1,4 +1,8 @@
 export const schemaStatements = [
+  `CREATE TABLE IF NOT EXISTS vesper_letter_marks (
+    user_id TEXT NOT NULL, letter_id TEXT NOT NULL, actor TEXT NOT NULL,
+    read_at TEXT, kept INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,letter_id,actor)
+  )`,
   `CREATE TABLE IF NOT EXISTS vesper_jottings (
     id TEXT NOT NULL, user_id TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL,
     PRIMARY KEY(user_id,id)

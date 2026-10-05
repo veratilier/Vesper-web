@@ -31,6 +31,7 @@ import { executionEvent, savedExecution, workspaceOptions, type Execution } from
 import { ChatActivity, type TurnActivity } from './chat-activity';
 import { ExecutionCard } from './execution-card';
 import { PhotoAlbum } from './photo-album';
+import { Letters } from './letters';
 import { AttachmentGallery } from './attachment-gallery';
 import './activity-glass.css';
 import {
@@ -287,6 +288,7 @@ function Anniversaries() {
 }
 
 const iconPaths: Record<string, string[]> = {
+  envelope: ["M3 5h18v14H3z", "m3 5 9 8 9-8"],
   palette: ["M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.5-3.3 2 2 0 0 1 1.5-3.3H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.4Z", "M7 9h.01M10 6h.01M15 6h.01M18 9h.01"],
   archive: ["M3 5h18v5H3z", "M5 10v10h14V10", "M10 14h4"],
   box: ["M3 8l9-5 9 5v8l-9 5-9-5z", "m3 8 9 5 9-5", "M12 13v8"],
@@ -538,6 +540,7 @@ const nav = [
   { label: "今日", english: "Today", icon: "home" },
   { label: "聊天", english: "Chat", icon: "chat" },
   { label: "Collection", english: "Collection", icon: "grid" },
+  { label: "Letters", english: "Letters", icon: "envelope" },
   { label: "欲望", english: "Desire", icon: "heart" },
   { label: "日记", english: "Journal", icon: "diary" },
   { label: "便笺", english: "Notes", icon: "note" },
@@ -1546,7 +1549,7 @@ function HomeContent() {
             />
           ) : section === "Collection" ? (
             <div className="desktop-collection" aria-label="Collection">
-              {nav.filter(item => !["今日", "聊天", "Collection", "日记", "设置"].includes(item.label)).map(item => (
+              {nav.filter(item => !["今日", "聊天", "Collection", "Letters", "设置"].includes(item.label)).map(item => (
                 <button key={item.label} type="button" onClick={() => navigateTo(item.label)}><Icon name={item.icon} /><span>{item.english}</span></button>
               ))}
             </div>
@@ -1579,6 +1582,8 @@ function HomeContent() {
                 }}
               />}</div>}
             </>
+          ) : section === "Letters" ? (
+            <Letters apiUrl={apiUrl} headers={appHeaders} active={active === "Letters"} theme={darkHome ? "black" : customBackground.includes("white-") ? "white" : "blue"} />
           ) : section === "日记" ? (
             <Diary />
           ) : section === "便笺" ? (
@@ -1660,7 +1665,7 @@ function HomeContent() {
         </div>
         ))}
         <nav className="mobile-navigation" aria-label="Navigation">
-          {nav.filter(({ label }) => ["今日", "聊天", "Collection", "日记", "设置"].includes(label)).map(({ label, english, icon }) => (
+          {nav.filter(({ label }) => ["今日", "聊天", "Collection", "Letters", "设置"].includes(label)).map(({ label, english, icon }) => (
             <button key={label} type="button" aria-current={active === label ? "page" : undefined}
               onClick={() => navigateTo(label)}>
               <NavIcon name={icon} />
