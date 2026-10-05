@@ -52,6 +52,10 @@ class LetterRemindersTests(unittest.TestCase):
     def test_unread_cover_remains_in_context_after_queue_ack(self):
         self.feeds['Rowan'][0]['deliveredAt']='queued'
         self.assertIn('from-vera',reminders.context(self.http))
+    def test_waiting_letter_does_not_absorb_normal_wakes(self):
+        store.request('letter-wait',source='letter-reminder',delay=60)
+        self.assertEqual(store.request('normal-wake',source='automation'),'normal-wake')
+        self.assertEqual(store.request('another-tap',source='manual'),'normal-wake')
     def test_known_pre_model_skip_is_repaired_but_uncertain_turn_is_not(self):
         self.feeds['Vera']=[]
         target={'conversation_id':'chat'}
