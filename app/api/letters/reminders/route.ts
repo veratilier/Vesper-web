@@ -11,7 +11,7 @@ async function handle(request: Request) {
     const actor = new URL(request.url).searchParams.get('actor') || 'Vera';
     if (!['Vera','Rowan'].includes(actor)) throw new Error('Invalid recipient');
     const result = request.method === 'GET' ? await letterReminders(userId,actor)
-      : await acknowledgeLetterReminder(userId,String((await request.json()).id || ''),actor);
+      : await acknowledgeLetterReminder(userId,String(((await request.json()) as {id?:unknown}).id || ''),actor);
     return Response.json(result,{headers});
   } catch (error) { return Response.json({error:error instanceof Error ? error.message : 'Reminder request failed'},{status:400,headers}); }
 }

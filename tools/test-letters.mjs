@@ -47,11 +47,12 @@ try{
  assert.equal((await get(released.id)).text,released.text);
  assert.equal((await modules.route.POST(request('POST','/api/letters',{id:'reply',title:'Re',text:'My reply',replyTo:released.id}))).status,200);
  for(const invalid of [{id:'bad',text:''},{id:'../bad',text:'x'},{id:'bad',text:'x',unlockAt:'2026-10-29T09:00'},{id:'bad',text:'x'.repeat(12001)}])assert.equal((await modules.route.POST(request('POST','/api/letters',invalid))).status,400);
+ await call('letter_create',{id:'ordinary-incoming',title:'A new letter',text:'Synthetic untimed body.'});
  const feed=async actor=>(await (await modules.reminders.GET(request('GET','/api/letters/reminders?actor='+actor))).json());
  assert.equal((await modules.reminders.GET(request('GET','/api/letters/reminders',null,false))).status,401);
  assert.equal((await modules.reminders.GET(request('GET','/api/letters/reminders?actor=invalid'))).status,400);
  let reminders=await feed('Vera');
- assert.ok(reminders.inbox.some(r=>r.id===old.id),'Ordinary incoming letters appear in the badge feed');
+ assert.ok(reminders.inbox.some(r=>r.id==='ordinary-incoming'),'Ordinary incoming letters appear in the badge feed');
  assert.equal(reminders.inbox.some(r=>r.id===outgoing.id),false,'Own outgoing letters never light the dot');
  assert.equal(reminders.inbox.some(r=>r.text!==undefined),false,'Badge feed contains no letter bodies');
  const cover=reminders.reminders.find(r=>r.id===incoming.id);assert.equal(cover.due,false);assert.equal(cover.text,undefined);
