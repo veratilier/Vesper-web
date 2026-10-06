@@ -9,8 +9,8 @@ export function ChatStatusPopover({ visible, online, busy, warning, fallback = f
   if (!anchor) return fallback ? <div className="chat-status-stack">{children}</div> : null;
   return createPortal(<details className="chat-connection-popover">
     <summary aria-label="Chat connection status" title={online ? warning ? 'Connected · details available' : 'Connected' : 'Disconnected · click to reconnect'}>
-      <span className={`chat-connection-dot${busy && online ? ' spinning' : ''}${!online || warning ? ' attention' : ''}`} />
+      <span className={`chat-connection-dot${busy && online && !warning ? ' spinning' : ''}${!online || warning ? ' attention' : ''}`}>{!online || warning ? "!" : ""}</span>
     </summary>
-    <div className="chat-connection-details"><b>{online ? 'Connected' : 'Disconnected'}</b>{children}</div>
+    <div className="chat-connection-details"><b>{online ? 'Connected' : 'Disconnected'}</b>{children}<button className="status-dismiss" onClick={event => event.currentTarget.closest("details")?.removeAttribute("open")}>Dismiss</button></div>
   </details>, anchor);
 }
