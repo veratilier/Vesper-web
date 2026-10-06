@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { ChatHeatmap } from './diary-book';
 import { nextChatWelcome } from '@/lib/home-desktop';
 import { visibleUserContext } from '@/lib/web-chat-context';
 export type ContactConversation = { id: string; title: string; updatedAt: string; preview?: string; messageCount: number };
@@ -63,6 +64,7 @@ export function ChatContacts({ active, agentName, avatar, cached, request, onSel
     </button>)}</div>
     {!rows.length && !query && <div className="contact-empty"><p>No conversations yet.</p><button onClick={onNew}>Start a conversation</button></div>}
     {!query.trim() && <p className="contact-welcome">{welcome}</p>}
+    {!query.trim() && <ChatHeatmap active={active} request={request} />}
     {query.trim() && <section className="contact-search-matches"><h2>Messages</h2>{searching && <p role="status">Searching…</p>}{matches.filter(item => visibleUserContext(item.content).trim()).map(item => <button key={`${item.conversationId}:${item.id}`} className="contact-match" onClick={() => onSelect(item.conversationId, item.id)}><b>{item.title || agentName}</b><p>{visibleUserContext(item.content)}</p><small>{stamp(item.createdAt)}</small></button>)}{!searching && !matches.length && <p>No matching messages.</p>}{more && <p>Showing the 60 most recent matches. Narrow your search to find older messages.</p>}</section>}
   </div>;
 }
