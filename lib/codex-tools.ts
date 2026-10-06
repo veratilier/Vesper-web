@@ -20,7 +20,7 @@ import { callConfiguredMcpTool, configuredMcpTools } from "@/lib/mcp-connections
 import { type MemoryScope } from "@/lib/memory";
 import { recallSharedMemory, sharedMemoryTool } from "@/lib/shared-memory-tools";
 import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
-import { journalForRead } from './journal-moods';
+import { journalForRead, saveAgentJournalMoods } from './journal-moods';
 
 type ToolInput = Record<string, unknown>;
 type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string | number; url?: string; playable?: boolean };
@@ -251,6 +251,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     }
     return { matches: matches.filter((item, index, list) => list.findIndex((candidate) => candidate.section === item.section) === index) };
   }
+  if (name === "journal_set_moods") return await saveAgentJournalMoods(getDb(), input.date, input.moodIds);
   if (name === "write_vesper_state") {
     const kind = String(input.kind || "").toLowerCase();
     const now = new Date().toISOString();
