@@ -3704,6 +3704,17 @@ function CodexChatMessage({
     { label: "删除", run: () => void onDelete(item).catch(() => {}) },
   ];
   const quote = (value?: ChatQuote) => value && <button className="bubble-quote" onClick={() => { const element = document.querySelector(`[data-message-id="${CSS.escape(value.messageId)}"]`); element?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}><b>{value.role === 'user' ? userName : agentName}</b><span>{value.text}</span></button>;
+  // Screenshot exports verify the exact stored original, including whitespace.
+  // Keep that read-only transcript layout independent of interactive bubble splitting.
+  if (chatCaptureRequest()) return <div data-message-id={item.id} className={assistant ? 'agent-turn' : 'sent-turn'}>
+    <div className={assistant ? 'message assistant' : 'message mine sent-message'}>
+      <div className={assistant ? 'assistant-message-content' : undefined}><p>{item.content}</p></div>
+    </div>
+    {sticker && <div className="standalone-sticker"><StickerImage sticker={sticker} /></div>}
+    {metadata.musicCard && <MusicMessageCard card={metadata.musicCard} onPlay={onPlayMusic} onQueue={onQueueMusic} onOpen={onOpenMusic} onAddToPlaylist={onAddMusicToPlaylist} />}
+    <MessageAttachments items={metadata.attachments || []} />
+    <time className="capture-message-time" dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined}>{Number.isFinite(timestamp) ? new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp)) : "Unknown time"}</time>
+  </div>;
   return <div data-message-id={item.id} className={`${assistant ? 'agent-turn' : 'sent-turn'} bubble-turn${favorite ? ' is-favorite' : ''}`}>
     {assistant && activity && <ChatActivity {...activity} expanded={activityExpanded} onExpandedChange={onActivityExpandedChange} timestamp={statusLabel} dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined} status={turnInProgress ? 'Thinking…' : ''} />}
     {assistant && !activity && !metadata.turnId && metadata.showTurnStatus !== false && <ChatActivity busy={false} online={true} executions={[]} summary={metadata.thoughtSummary || ''} timestamp={statusLabel} dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined} />}
