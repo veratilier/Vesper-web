@@ -1,4 +1,5 @@
 import { desireToolDefinitions } from './desire/tools';
+import { journalMoodLabels } from './journal-moods';
 // Pure shared schema: safe to import from the browser; contains no server credentials.
 export const codexToolDefinitions = [
   ...desireToolDefinitions,
@@ -21,7 +22,7 @@ export const codexToolDefinitions = [
   { name: "read_codex_task_progress", description: "Read saved execution events and autonomous wake history for this Vesper conversation, including silent wakes with no message, tool activity, status and timestamps. Check wakeHistory.available before concluding whether wake records exist. These are observations, not a live health check; running records may be stale. Does not grant shell or filesystem permissions.", inputSchema: { type: "object", additionalProperties: false, properties: {} } },
   {
     name: "read_vesper_state",
-    description: "Read one Vesper document or section. Use section=journal for diary text and saved mood tags by date: user is Vera, agent is Rowan; moods holds IDs and moodLabels gives Chinese names. Tags belong to that date and author, not necessarily their current mood. Empty tags mean no saved tags were returned. Read-only; never changes data.",
+    description: "Read one Vesper document or section. Use section=journal for diary text and saved mood tags by date: user is Vera, agent is Rowan; moods holds IDs and moodLabels gives Chinese names. Tags belong to that date and author, not necessarily their current mood. Empty tags mean no saved tags were returned. To set Rowan’s own tags, use journal_set_moods. Read-only; never changes data.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -46,8 +47,16 @@ export const codexToolDefinitions = [
     },
   },
   {
+    name: "journal_set_moods",
+    description: "Save Rowan's own mood tags for an exact Beijing journal date (YYYY-MM-DD). First read section=journal. moodIds replaces only Rowan's agent tags; [] clears them. Preserve Vera's tags and both diary texts. Use the 24-word vocabulary: " + JSON.stringify(journalMoodLabels) + ". Choose feelings grounded in Rowan's diary, never label Vera by inference. Returns saved=true and verified=true only after a server read confirms persistence; report failure honestly. This is not a chat message.",
+    inputSchema: { type: "object", additionalProperties: false,
+      properties: { date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+        moodIds: { type: "array", items: { type: "string", enum: Object.keys(journalMoodLabels) }, maxItems: 24 } },
+      required: ["date", "moodIds"] },
+  },
+  {
     name: "write_vesper_state",
-    description: "Create a Vesper note, reminder, anniversary, or agent journal entry.",
+    description: "Create a Vesper note, reminder, anniversary, or agent journal entry. For Rowan’s diary mood tags use journal_set_moods; this tool writes text only and preserves tags.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

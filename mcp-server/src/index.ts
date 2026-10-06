@@ -9,7 +9,7 @@ import { sendPushBatch, type PushSubscriptionData } from "@mmmike/web-push/send"
 import { z } from "zod";
 import { createMemory, listMemories, memoryScopeFromRequest, MEMORY_CONFIG } from "../../lib/memory";
 import { mergeAgentDiary, isCalendarDate } from "./diary";
-import { journalEntryForRead } from '../../lib/journal-moods';
+import { journalEntryForRead, journalMoodLabels, saveAgentJournalMoods } from '../../lib/journal-moods';
 import { pinnedMemoryOwner } from "./memory-owner";
 import { createLetter, getLetter, listLetters, markLetter } from '../../lib/letters';
 
@@ -193,6 +193,10 @@ function createServer(env: Env) {
     description: "读取指定日期的 Vesper 日记，包含正文、moods 和中文 moodLabels。user 是 Vera，agent 是 Rowan；标签属于该日期与作者，未保存时标签为空。",
     inputSchema: { date: diaryDate },
   }, async ({ date }) => text(journalEntryForRead((await readDoc<Record<string, unknown>>(env.DB, "diary", {}))[date] || null)));
+  server.registerTool("set_agent_diary_moods", {
+    description: "按北京时间日期给 Rowan 自己的私人日记设置情绪标签。先读日记，moodIds 只替换 agent 标签，空数组清除；保留 Vera 的标签和双方正文。词库：" + JSON.stringify(journalMoodLabels) + "。只表达 Rowan 有依据的感受，不推断 Vera 的情绪。返回 saved/verified=true 才代表写入并回读确认。",
+    inputSchema: { date: diaryDate, moodIds: z.array(z.enum(Object.keys(journalMoodLabels) as [string, ...string[]])).max(24) },
+  }, async ({ date, moodIds }) => text(await saveAgentJournalMoods(env.DB, date, moodIds)));
   server.registerTool("write_agent_diary", {
     description: "在 Vesper 私人日记的 Agent 栏追加内容，保留用户日记和已有 Agent 内容。只有用户明确要求替换时才传 mode=replace。",
     inputSchema: { date: diaryDate, content: z.string().trim().min(1).max(20000), mode: z.enum(["append", "replace"]).default("append"), source: z.enum(["chatgpt", "automation"]).default("chatgpt") },
