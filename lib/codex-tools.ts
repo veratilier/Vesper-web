@@ -20,6 +20,7 @@ import { callConfiguredMcpTool, configuredMcpTools } from "@/lib/mcp-connections
 import { type MemoryScope } from "@/lib/memory";
 import { recallSharedMemory, sharedMemoryTool } from "@/lib/shared-memory-tools";
 import { claimAgentSticker, listStickers, stickerForUse } from "@/lib/stickers";
+import { journalForRead } from './journal-moods';
 
 type ToolInput = Record<string, unknown>;
 type MusicTrack = { id: string; source?: string; appleMusicId?: string; appleMusicURL?: string; artwork?: string; neteaseId?: string; title: string; artist: string; album?: string; cover?: string; duration?: string | number; url?: string; playable?: boolean };
@@ -232,14 +233,16 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const key = sectionToKey[section];
     if (!key) throw new Error(`Unknown Vesper section: ${section}`);
     if (section === "music") return { section, value: await readMusicStatus() };
-    return { section, value: await readDocument(key) };
+    const value = await readDocument(key);
+    return { section, value: key === 'diary' ? journalForRead(value) : value };
   }
   if (name === "search_vesper_state") {
     const query = String(input.query || "").trim().toLowerCase();
     if (!query) return { matches: [] };
     const matches: Array<{ section: string; value: unknown }> = [];
     for (const [section, key] of Object.entries(sectionToKey)) {
-      const value = await readDocument(key);
+      const document = await readDocument(key);
+      const value = key === 'diary' ? journalForRead(document) : document;
       if (JSON.stringify(value).toLowerCase().includes(query)) matches.push({ section, value });
     }
     if (memoryScope) {

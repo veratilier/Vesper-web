@@ -21,7 +21,7 @@ export const codexToolDefinitions = [
   { name: "read_codex_task_progress", description: "Read saved execution events and autonomous wake history for this Vesper conversation, including silent wakes with no message, tool activity, status and timestamps. Check wakeHistory.available before concluding whether wake records exist. These are observations, not a live health check; running records may be stale. Does not grant shell or filesystem permissions.", inputSchema: { type: "object", additionalProperties: false, properties: {} } },
   {
     name: "read_vesper_state",
-    description: "Read one Vesper document or section. Read-only; never changes data.",
+    description: "Read one Vesper document or section. Use section=journal for diary text and saved mood tags by date: user is Vera, agent is Rowan; moods holds IDs and moodLabels gives Chinese names. Tags belong to that date and author, not necessarily their current mood. Empty tags mean no saved tags were returned. Read-only; never changes data.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

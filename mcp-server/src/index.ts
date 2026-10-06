@@ -9,6 +9,7 @@ import { sendPushBatch, type PushSubscriptionData } from "@mmmike/web-push/send"
 import { z } from "zod";
 import { createMemory, listMemories, memoryScopeFromRequest, MEMORY_CONFIG } from "../../lib/memory";
 import { mergeAgentDiary, isCalendarDate } from "./diary";
+import { journalEntryForRead } from '../../lib/journal-moods';
 import { pinnedMemoryOwner } from "./memory-owner";
 import { createLetter, getLetter, listLetters, markLetter } from '../../lib/letters';
 
@@ -180,18 +181,18 @@ function createServer(env: Env) {
   });
 
   server.registerTool("list_diaries", {
-    description: "列出 Vesper 私人日记，按日期倒序。可指定日期区间；不发布到社区。",
+    description: "列出 Vesper 私人日记，按日期倒序，包含正文、情绪标签 moods 和中文 moodLabels（user 是 Vera，agent 是 Rowan）。标签仅属于对应日期与作者，不代表实时情绪。可指定日期区间；不发布到社区。",
     inputSchema: { from: diaryDate.optional(), to: diaryDate.optional(), limit: z.number().int().min(1).max(100).default(20) },
   }, async ({ from, to, limit }) => {
     if (from && to && from > to) throw new Error("开始日期不能晚于结束日期");
     const diary = await readDoc<Record<string, DiaryEntry>>(env.DB, "diary", {});
     return text(Object.entries(diary).filter(([date]) => (!from || date >= from) && (!to || date <= to))
-      .sort(([a], [b]) => b.localeCompare(a)).slice(0, limit).map(([date, entry]) => ({ date, ...entry })));
+      .sort(([a], [b]) => b.localeCompare(a)).slice(0, limit).map(([date, entry]) => ({ date, ...journalEntryForRead(entry) as Record<string, unknown> })));
   });
   server.registerTool("get_diary", {
-    description: "读取指定日期的 Vesper 日记。",
+    description: "读取指定日期的 Vesper 日记，包含正文、moods 和中文 moodLabels。user 是 Vera，agent 是 Rowan；标签属于该日期与作者，未保存时标签为空。",
     inputSchema: { date: diaryDate },
-  }, async ({ date }) => text((await readDoc<Record<string, unknown>>(env.DB, "diary", {}))[date] || null));
+  }, async ({ date }) => text(journalEntryForRead((await readDoc<Record<string, unknown>>(env.DB, "diary", {}))[date] || null)));
   server.registerTool("write_agent_diary", {
     description: "在 Vesper 私人日记的 Agent 栏追加内容，保留用户日记和已有 Agent 内容。只有用户明确要求替换时才传 mode=replace。",
     inputSchema: { date: diaryDate, content: z.string().trim().min(1).max(20000), mode: z.enum(["append", "replace"]).default("append"), source: z.enum(["chatgpt", "automation"]).default("chatgpt") },
