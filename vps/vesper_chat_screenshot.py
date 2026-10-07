@@ -35,7 +35,7 @@ def select_messages(connection, conversation_id, ids):
             raise ValueError('Select visible text or photo messages; control messages and rich cards cannot be captured')
         if row['role'] not in ('user', 'agent') or metadata.get('blockType', '') not in ('', 'agentMessage', 'assistantMessage', 'userMessage', 'text') or metadata.get('hidden') or metadata.get('internal'):
             raise ValueError('Only visible original chat messages can be captured')
-        messages.append({'id': row['id'], 'role': row['role'], 'content': row['content'], 'createdAt': row['created_at'], 'attachments': metadata.get('attachments', [])})
+        messages.append({'id': row['id'], 'role': row['role'], 'content': row['content'], 'createdAt': row['created_at'], 'attachments': metadata.get('attachments', []), 'metadata': {key: metadata[key] for key in ('bubbles', 'replyTo', 'turnId', 'showTurnStatus') if key in metadata}})
     if sum(len(m['content']) for m in messages) > 16000:
         raise ValueError('Choose a shorter excerpt; original text will not be truncated')
     return {'title': conversation['title'], 'conversationId': conversation_id, 'messages': messages, 'messageIds': ids}
@@ -116,7 +116,7 @@ def capture_history(data):
     return {
         'conversation': {'id': data['conversationId'], 'title': data['title']},
         'messages': [dict(m, conversationId=data['conversationId'], status='delivered',
-                          metadata={'attachments': m.get('attachments', [])}) for m in data['messages']],
+                          metadata={**m.get('metadata', {}), 'attachments': m.get('attachments', [])}) for m in data['messages']],
         'tombstones': [], 'hasMore': False,
     }
 
@@ -224,30 +224,25 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
         phase('original text verification')
         # Verify that the real UI rendered precisely the selected original text.
-        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:Array.from(row.querySelectorAll('[data-capture-text]')).map(p => p.textContent).join('')}))")
+        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.dataset.sourceContent}))")
         if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
-            raise ValueError('Rendered webpage messages do not match the selected originals')
+            raise ValueError('Webpage messages do not match the selected originals')
+        # The live component splits and trims bubble boundaries; verify every
+        # visible non-whitespace character against its original source as well.
+        visible = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => Array.from(row.querySelectorAll('[data-message-text]')).map(p => p.textContent).join(''))")
+        if [re.sub(r'\s+', '', text) for text in visible] != [re.sub(r'\s+', '', m['content']) for m in data['messages']]:
+            raise ValueError('Visible chat text does not match the original records')
         if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
-            if (row.dataset.captureLayout !== 'bubbles-v2') return false;
-            if (!Array.from(row.querySelectorAll('.capture-whitespace')).every(el => !el.textContent.trim())) return false;
-            const r = row.getBoundingClientRect(), own = row.classList.contains('agent-turn');
+            if (row.dataset.captureLayout !== 'live-chat-v3') return false;
+            const r = row.getBoundingClientRect(), own = row.dataset.messageRole === 'agent';
+            const stamp = row.querySelector('.chat-activity-inline > summary');
+            if (own && stamp && Math.abs(stamp.getBoundingClientRect().right - r.right) >= 4) return false;
             return Array.from(row.querySelectorAll('.text-bubble-target')).every(bubble => {
                 const b = bubble.getBoundingClientRect();
                 return own ? Math.abs(b.right - r.right) < 4 : Math.abs(b.left - r.left) < 4;
             });
         })"""):
-            raise ValueError('Webpage capture layout is outdated or has the wrong perspective')
-        # Both the text and its actual timestamp must follow the chosen side.
-        if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
-            const stamp = row.querySelector('.capture-message-time');
-            const text = row.querySelector('p[data-capture-text]');
-            if (!stamp || getComputedStyle(stamp).opacity !== "1" || getComputedStyle(stamp).animationName !== "none") return false;
-            const r = row.getBoundingClientRect(), t = stamp.getBoundingClientRect();
-            const own = row.classList.contains('agent-turn');
-            return (!text || getComputedStyle(text).fontSize === '17px') &&
-                (own ? Math.abs(t.right - r.right) < 4 : Math.abs(t.left - r.left) < 4);
-        })"""):
-            raise ValueError('Capture timestamp alignment or phone text sizing was not applied')
+            raise ValueError('Webpage capture must use live chat components in Rowan’s perspective')
         phase('fonts and images')
         page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
         page.wait_for_function(VISIBLE_IMAGES_READY, timeout=10000)
@@ -258,10 +253,27 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             const image = new Image(); image.onload=resolve; image.onerror=reject; image.src=match[1];
           }))), new Promise((_,reject)=>setTimeout(()=>reject(new Error('Background did not load')),10000))]);
         }""")
+        # Expand only the browser viewport when the selected excerpt is long.
+        # Header, composer, fonts, glass and message layout remain the live UI.
         target = page.locator('.chat-capture > .app-shell')
-        height = target.evaluate('el => Math.ceil(el.scrollHeight)')
-        if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
-        page.set_viewport_size({'width': PHONE_WIDTH, 'height': max(PHONE_HEIGHT, height)})
+        height = PHONE_HEIGHT
+        for _ in range(4):
+            page.locator('.chat-stream').evaluate('el => { el.scrollTop = 0; }')
+            page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+            extra = page.evaluate("""() => {
+                const stream = document.querySelector('.chat-stream');
+                const composer = document.querySelector('.chat-compose').getBoundingClientRect();
+                const rows = [...document.querySelectorAll('[data-message-id]')];
+                const bottom = Math.max(...rows.map(row => row.getBoundingClientRect().bottom));
+                return Math.ceil(Math.max(0, stream.scrollHeight - stream.clientHeight, bottom + 20 - composer.top));
+            }""")
+            if extra <= 1: break
+            height += extra
+            if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
+            page.set_viewport_size({'width': PHONE_WIDTH, 'height': height})
+        else: raise ValueError('The selected messages do not fit without clipping')
+        if not page.locator('.chat-compose').is_visible() or not page.locator('.app-header.chat-mode').is_visible():
+            raise ValueError('The real chat header and composer must remain visible')
         phase('screenshot')
         picture = target.screenshot(type='jpeg', quality=82)
         browser.close()

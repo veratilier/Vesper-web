@@ -1,93 +1,11 @@
-/* Capture the actual chat DOM. Only alignment and viewport chrome change. */
+/* The screenshot browser uses the live chat components and their normal styles.
+   Keep the page read-only and freeze transient send animations for a still image.
+   Rowan's perspective is represented by the ordinary incoming/outgoing classes. */
 .chat-capture { pointer-events: none; }
-.chat-capture .codex-chat .agent-turn .message { justify-content: flex-end; }
-.chat-capture .codex-chat .sent-turn .message { justify-content: flex-start; }
-.chat-capture .app-shell .codex-chat .sent-turn .message.mine > div:not(.sticker-bubble) { width: fit-content; margin-left: 0; margin-right: auto; }
-.chat-capture .app-shell .codex-chat .sent-turn .message.mine > div > p { text-align: left; }
-.chat-capture .app-shell .codex-chat .agent-turn .message > div > p { text-align: right; }
-.chat-capture .codex-chat .agent-turn :is(.turn-status,.message-actions,.message-attachments) { align-self: flex-end; }
-.chat-capture .codex-chat .sent-turn :is(.message-actions,.message-attachments) { align-self: flex-start; }
-.chat-capture :is(.chat-compose,.chat-scroll-to-bottom,.chat-status-stack,.bridge-presence,.codex-connection-pill,.chat-header-actions,.app-header>.icon-button,.mobile-navigation) { display: none !important; }
-.chat-capture .message-action { display: none !important; }
-.chat-capture #web-chat-status-anchor { display: none !important; }
-.chat-capture .codex-chat { display: block; height: auto !important; }
-.chat-capture .chat-stream { height: auto !important; max-height: none !important; overflow: visible !important; padding-bottom: 20px !important; }
-.chat-capture .app-shell { height: auto !important; overflow: visible !important; }
-.chat-capture .scroll-view:not([hidden]) { position: relative !important; height: auto !important; overflow: visible !important; padding-bottom: 0 !important; }
-.chat-capture .scroll-view[hidden] { display: none !important; }
-
-/* A phone-width transcript in Rowan's perspective, using the real chat DOM. */
-.chat-capture .app-shell {
-  --text-chat: 17px;
-  width: 100% !important;
-  max-width: 393px !important;
-  min-height: 852px !important;
-  margin: 0 auto !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-.chat-capture .app-shell .app-header.chat-mode {
-  height: 76px;
-  min-height: 76px;
-  padding: 12px 20px;
-  background: transparent;
-}
-.chat-capture .app-header > .icon-button {
-  display: grid !important;
-  width: 32px;
-  height: 40px;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.chat-capture .app-header > .icon-button svg { width: 26px; height: 26px; }
-.chat-capture .chat-identity { gap: 5px; }
-.chat-capture .chat-identity .identity-avatar,
-.chat-capture .chat-identity .identity-avatar :is(img, .avatar-mark) {
-  width: 40px !important;
-  height: 40px !important;
-}
-.chat-capture .app-shell .codex-chat {
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", sans-serif;
-}
-.chat-capture .app-shell .codex-chat .chat-stream { padding: 18px 20px 30px !important; gap: 24px; }
-.chat-capture .app-shell .codex-chat .message > div {
-  max-width: calc(100% - 42px);
-  padding: 0 !important;
-}
-.chat-capture .app-shell .codex-chat .message p {
-  font-size: 17px !important;
-  line-height: 1.6 !important;
-}
-.chat-capture .app-shell .codex-chat .agent-turn .message p { font-weight: 600; }
-.chat-capture .app-shell .codex-chat .chat-date-divider { font-family: inherit; font-size: 12px; margin: 4px 0; }
-.codex-chat .capture-message-time { display: none; }
-.chat-capture .codex-chat .capture-message-time {
-  display: block;
-  margin-top: 8px;
-  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Noto Sans CJK SC", sans-serif;
-  color: #52636d !important;
-  opacity: 1 !important;
-  animation: none !important;
-}
-.chat-capture .codex-chat .agent-turn > .capture-message-time { align-self: flex-end; }
-.chat-capture .codex-chat .sent-turn > .capture-message-time { align-self: flex-start; }
-.chat-capture .codex-chat :is(.turn-status, .message-actions) { display: none !important; }
-
-.chat-capture .codex-chat .sent-turn > time:not(.capture-message-time) { display: none !important; }
-
-/* Current Web glass bubbles, viewed from Rowan's side. */
-.chat-capture .codex-chat .bubble-turn.agent-turn { align-items: flex-end; }
-.chat-capture .codex-chat .bubble-turn.sent-turn { align-items: flex-start; }
-.chat-capture .app-shell .bubble-turn .text-bubble-target { max-width: 88%; }
-.chat-capture .app-shell .bubble-turn .message { display: block; padding: 12px 15px; }
-.chat-capture .app-shell .bubble-turn .message p { text-align: left; font-weight: 400; }
-.chat-capture .app-shell .bubble-turn.agent-turn .message { border-radius: 20px 20px 5px 20px; }
-.chat-capture .app-shell .bubble-turn.sent-turn .message { border-radius: 20px 20px 20px 5px; }
-
-.chat-capture .capture-whitespace { display: block; height: 0; font-size: 0; line-height: 0; white-space: normal; }
-.chat-capture .app-shell .codex-chat .bubble-turn.agent-turn .message p { font-weight: 400; }
-/* A still image must capture the final state, never an in-flight send animation. */
 .chat-capture .chat-stream * { animation: none !important; transition: none !important; }
 .chat-capture .sent-message { opacity: 1 !important; transform: none !important; }
+/* Rowan's timestamp follows his outgoing bubbles in the same right-hand column. */
+.chat-capture .app-shell .codex-chat .sent-turn .chat-activity-inline > summary {
+  margin-left: auto;
+  margin-right: 0;
+}

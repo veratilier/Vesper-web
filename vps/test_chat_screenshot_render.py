@@ -62,6 +62,13 @@ class ScreenshotRenderTests(unittest.TestCase):
                 self.assertEqual(width, screenshot.PHONE_WIDTH * 2)
                 self.assertGreaterEqual(height, screenshot.PHONE_HEIGHT * 2)
                 Path('screenshot-fixture.jpg').write_bytes(picture)
+                # Longer originals should expand the browser without hiding the
+                # composer, clipping rows, or switching to export-only bubbles.
+                data['messages'][1]['content'] = ('这是长聊天截图，文字应当完整显示。' * 30 + '\n\n') * 3
+                result = screenshot.render_child(data, 'fixture-only-token', asset_proxy='http://127.0.0.1:5173', fixtures={'history': history, 'app': app})
+                long_picture = base64.b64decode(result['base64'])
+                self.assertGreater(Image.open(BytesIO(long_picture)).height, height)
+                Path('screenshot-long-fixture.jpg').write_bytes(long_picture)
             except Exception:
                 print(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
                 raise

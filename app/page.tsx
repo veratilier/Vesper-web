@@ -8,7 +8,7 @@ import { PlaybackIcon } from "./playback-icon";
 import { MusicLyrics } from "./music-lyrics";
 import { WebAppearanceToggle, WebAppearanceControls } from "./web-appearance";
 import { MessagePopover, VoiceMessageBar, type MessageAction } from "./message-popover";
-import { splitCaptureBubbles, splitChatBubbles, verifiedChatQuote, webBubbleTool, webVoiceTool, type ChatQuote, type ChatBubble } from "@/lib/chat-presentation";
+import { splitChatBubbles, verifiedChatQuote, webBubbleTool, webVoiceTool, type ChatQuote, type ChatBubble } from "@/lib/chat-presentation";
 import { DiaryBook, type DiaryDocument } from "./diary-book";
 import { ChatContacts } from "./chat-contacts";
 import { ChatLiveTerminal } from "./chat-live-terminal";
@@ -3708,28 +3708,13 @@ function CodexChatMessage({
     { label: "删除", run: () => void onDelete(item).catch(() => {}) },
   ];
   const quote = (value?: ChatQuote) => value && <button className="bubble-quote" onClick={() => { const element = document.querySelector(`[data-message-id="${CSS.escape(value.messageId)}"]`); element?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}><b>{value.role === 'user' ? userName : agentName}</b><span>{value.text}</span></button>;
-  // Read-only exports use the current glass bubbles and retain exact original text.
-  if (chatCaptureRequest()) return <div data-message-id={item.id} data-capture-layout="bubbles-v2" className={`${assistant ? 'agent-turn' : 'sent-turn'} bubble-turn`}>
-    {(assistant ? splitCaptureBubbles(item.content) : item.content ? [item.content] : []).map((text, index) => {
-      const leading = text.match(/^\s*/)?.[0] || "";
-      const rest = text.slice(leading.length);
-      const trailing = rest.match(/\s*$/)?.[0] || "";
-      const body = rest.slice(0, rest.length - trailing.length);
-      return <div className="message-popover-target text-bubble-target" key={index}>
-        <span className="capture-whitespace" data-capture-text>{leading}</span>
-        <div className={assistant ? 'message assistant' : 'message mine sent-message'}><p data-capture-text>{body}</p></div>
-        <span className="capture-whitespace" data-capture-text>{trailing}</span>
-      </div>;
-    })}
-    {sticker && <div className="standalone-sticker"><StickerImage sticker={sticker} /></div>}
-    {metadata.musicCard && <MusicMessageCard card={metadata.musicCard} onPlay={onPlayMusic} onQueue={onQueueMusic} onOpen={onOpenMusic} onAddToPlaylist={onAddMusicToPlaylist} />}
-    <MessageAttachments items={metadata.attachments || []} />
-    <time className="capture-message-time" dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined}>{Number.isFinite(timestamp) ? new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp)) : "Unknown time"}</time>
-  </div>;
-  return <div data-message-id={item.id} className={`${assistant ? 'agent-turn' : 'sent-turn'} bubble-turn${favorite ? ' is-favorite' : ''}`}>
+  // Captures use this same live message tree. Only the viewer's side changes.
+  const capture = chatCaptureRequest();
+  const outgoing = capture ? assistant : !assistant;
+  return <div data-message-id={item.id} data-capture-layout={capture ? "live-chat-v3" : undefined} data-source-content={capture ? item.content : undefined} data-message-role={item.role} className={`${outgoing ? 'sent-turn' : 'agent-turn'} bubble-turn${favorite ? ' is-favorite' : ''}`}>
     {assistant && activity && <ChatActivity {...activity} expanded={activityExpanded} onExpandedChange={onActivityExpandedChange} timestamp={statusLabel} dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined} status={turnInProgress ? 'Thinking…' : ''} />}
     {assistant && !activity && !metadata.turnId && metadata.showTurnStatus !== false && <ChatActivity busy={false} online={true} executions={[]} summary={metadata.thoughtSummary || ''} timestamp={statusLabel} dateTime={Number.isFinite(timestamp) ? item.createdAt : undefined} />}
-    {bubbles.map((bubble, index) => <MessagePopover key={index} actions={actions(bubble.text, index)} className="text-bubble-target"><div className={assistant ? 'message assistant' : 'message mine sent-message'}>{quote(bubble.replyTo)}<p>{bubble.text}</p></div></MessagePopover>)}
+    {bubbles.map((bubble, index) => <MessagePopover key={index} actions={actions(bubble.text, index)} className="text-bubble-target"><div className={outgoing ? 'message mine sent-message' : 'message assistant'}>{quote(bubble.replyTo)}<p data-message-text>{bubble.text}</p></div></MessagePopover>)}
     {sticker && <MessagePopover actions={actions(sticker.alt || 'Sticker')}><div className="standalone-sticker"><StickerImage sticker={sticker} /></div></MessagePopover>}
     {metadata.musicCard && <MessagePopover actions={actions(metadata.musicCard.title)}><MusicMessageCard card={metadata.musicCard} onPlay={onPlayMusic} onQueue={onQueueMusic} onOpen={onOpenMusic} onAddToPlaylist={onAddMusicToPlaylist} /></MessagePopover>}
     {metadata.call && <MessagePopover actions={actions('Voice call')}><div className="voice-call-card">♧ {item.content || "Voice call"}</div></MessagePopover>}
