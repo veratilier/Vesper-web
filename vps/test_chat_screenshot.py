@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+import subprocess
 from io import BytesIO
 from unittest.mock import patch, Mock
 import vesper_chat_screenshot as screenshot
@@ -55,6 +56,16 @@ class OriginalScreenshotTests(unittest.TestCase):
         self.assertEqual(request.full_url, screenshot.API_ORIGIN + '/api/state')
         self.assertEqual(request.get_header('X-vesper-device-token'), 'fixture-token')
         self.assertIsNone(factory.call_args.args[0].redirect_request(None, None, 302, '', {}, 'https://other.test'))
+
+    def test_timeout_cleans_up_browser_process_group(self):
+        process = Mock(pid=12345)
+        process.communicate.side_effect = subprocess.TimeoutExpired('renderer', 40)
+        with patch.object(screenshot.subprocess, 'Popen', return_value=process) as launch, patch.object(screenshot.os, 'killpg') as kill:
+            with self.assertRaises(screenshot.ScreenshotUnavailable):
+                screenshot._render({'messageIds': ['u']}, 'fixture-token')
+        self.assertTrue(launch.call_args.kwargs['start_new_session'])
+        kill.assert_called_once_with(12345, screenshot.signal.SIGKILL)
+        process.wait.assert_called_once()
 
     def test_archived_and_deleted_conversation(self):
         self.db.execute('UPDATE conversations SET archived_at="now" WHERE vesper_conversation_id="one"')

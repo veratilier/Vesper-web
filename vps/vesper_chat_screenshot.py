@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 import threading
+import os
+import signal
 from urllib.parse import urlencode, urlparse, parse_qs, quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -48,13 +50,24 @@ def render(data, token):
 
 
 def _render(data, token):
+    process = None
     try:
-        result = subprocess.run([sys.executable, __file__, '--render'], input=json.dumps({'data': data, 'token': token}, ensure_ascii=False), capture_output=True, text=True, timeout=40)
+        process = subprocess.Popen([sys.executable, __file__, '--render'], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   start_new_session=True)
+        stdout, _ = process.communicate(json.dumps({'data': data, 'token': token}, ensure_ascii=False), timeout=40)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ScreenshotUnavailable('Screenshot renderer timed out or is unavailable') from exc
-    if result.returncode:
+    finally:
+        # Chrome and the Playwright driver are grandchildren. Killing just the
+        # Python process leaves them consuming memory after a timeout.
+        if process is not None:
+            try: os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            process.wait()
+    if process.returncode:
         raise ScreenshotUnavailable('Screenshot renderer unavailable. Install Playwright, Google Chrome and CJK fonts; deploy the matching Vesper Web capture view. No screenshot was created.')
-    output = json.loads(result.stdout)
+    output = json.loads(stdout)
     output.update(messageIds=data['messageIds'])
     return output
 
@@ -140,6 +153,10 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             if route.request.method == 'OPTIONS' and request_policy(route.request.url, 'GET', data) in ('history', 'app', 'media'):
                 route.fulfill(status=204, headers={'access-control-allow-origin': WEB_ORIGIN, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'authorization,content-type,x-vesper-device-token'}); return
             kind = request_policy(route.request.url, route.request.method, data)
+            if kind == 'asset' and urlparse(route.request.url).path.startswith('/opening/'):
+                # The capture has no opening animation; avoid decoding its large
+                # initial SSR images before the client switches to chat mode.
+                route.abort(); return
             if kind is None or route.request.redirected_from is not None:
                 route.abort(); return
             if kind == 'history':
