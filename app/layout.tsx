@@ -20,6 +20,7 @@ import "./chat-capture.css";
 import "./home-desktop.css";
 import "./control-glass.css";
 import "./ios-parity.css";
+import "./web-proportions.css";
 
 export const metadata: Metadata = {
   title: "Vesper — Your private corner",

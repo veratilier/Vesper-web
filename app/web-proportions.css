@@ -1,0 +1,199 @@
+/* Web viewport composition. Keep typography readable; remove accumulated
+   nested padding and reserve one consistent amount of space for the docks. */
+.stage:not(.chat-capture) .app-shell .contact-welcome {
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 20px 8px 12px;
+  font-size: 14px !important;
+}
+.stage:not(.chat-capture) .chat-heatmap {
+  margin-top: 8px;
+  padding: 18px 16px;
+}
+.stage:not(.chat-capture) .chat-heatmap header {
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.stage:not(.chat-capture) .chat-heatmap h2 {
+  font-size: 22px;
+  white-space: nowrap;
+}
+.stage:not(.chat-capture) .chat-heatmap header span {
+  font-size: 14px;
+  white-space: nowrap;
+}
+.stage:not(.chat-capture) .chat-heatmap header button {
+  flex: 0 0 32px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 22px;
+}
+.stage:not(.chat-capture) .letters-heading {
+  grid-template-columns: 44px minmax(0, 1fr) 52px;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.stage:not(.chat-capture) .letters-heading h1 {
+  font-size: clamp(18px, 5vw, 22px);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.stage:not(.chat-capture) .settings-page:not(.detail-active) > .page-intro {
+  margin-bottom: 16px;
+  padding-bottom: 0;
+}
+.stage:not(.chat-capture) .settings-page > .page-intro > span {
+  display: none;
+}
+.stage:not(.chat-capture) .settings-page > .page-intro h1 {
+  margin: 0;
+  font-size: 24px !important;
+}
+
+@media (max-width: 767px) {
+  .stage:not(.chat-capture) .app-shell {
+    --mobile-nav-height: 58px;
+    --mobile-nav-gap: 10px;
+    --web-player-height: 48px;
+    --web-dock-gap: 8px;
+    --web-dock-space: calc(var(--safe-bottom) + var(--mobile-nav-gap) + var(--mobile-nav-height) + 16px);
+  }
+  .stage:not(.chat-capture) .app-shell:has(> .web-music-dock):not(:has(> .scroll-view:not([hidden]) .settings-page.detail-active)) {
+    --web-dock-space: calc(var(--safe-bottom) + var(--mobile-nav-gap) + var(--mobile-nav-height) + var(--web-dock-gap) + var(--web-player-height) + 16px);
+  }
+  .stage:not(.chat-capture) .app-shell > .scroll-view:not(:has(> .codex-chat, > .chat-detail-host:not([hidden]))):not([data-section="日记"]) {
+    padding-inline: 0;
+    padding-bottom: var(--web-dock-space) !important;
+    scroll-padding-bottom: var(--web-dock-space);
+  }
+  .stage:not(.chat-capture) .app-shell > .mobile-navigation {
+    inset-inline: max(20px, env(safe-area-inset-left)) max(20px, env(safe-area-inset-right));
+    padding: 4px;
+  }
+  .stage:not(.chat-capture) .mobile-navigation button {
+    gap: 2px;
+  }
+  .stage:not(.chat-capture) .mobile-navigation button > span {
+    font-size: 10px !important;
+    line-height: 1.3 !important;
+  }
+  .stage:not(.chat-capture) .mobile-navigation .nav-icon {
+    width: 21px;
+    height: 21px;
+  }
+  .stage:not(.chat-capture) .web-music-dock {
+    bottom: calc(var(--safe-bottom) + var(--mobile-nav-gap) + var(--mobile-nav-height) + var(--web-dock-gap));
+    left: max(20px, env(safe-area-inset-left));
+    right: max(20px, env(safe-area-inset-right));
+    height: var(--web-player-height);
+    padding: 2px 12px 2px 14px;
+    gap: 2px;
+  }
+  .stage:not(.chat-capture) .web-music-dock > button:not(.dock-track) {
+    flex: 0 0 40px;
+    width: 40px;
+    min-height: 44px;
+  }
+  .stage:not(.chat-capture) .dock-track img {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+  .stage:not(.chat-capture) .dock-track b { font-size: 12px; }
+  .stage:not(.chat-capture) .dock-track small { font-size: 10px; }
+  .stage:not(.chat-capture) .app-shell .wordmark > b {
+    font-size: 31px !important;
+  }
+  .stage:not(.chat-capture) .app-shell .today-home.home-desktop {
+    padding: 6px 20px 12px;
+    gap: 12px;
+  }
+  .stage:not(.chat-capture) .app-shell .home-desktop .welcome h1 {
+    font-size: clamp(27px, 7.5vw, 34px) !important;
+    line-height: 1.35 !important;
+    margin: 2px 0 0;
+  }
+  .stage:not(.chat-capture) .app-shell .desktop-weekly {
+    min-height: 28px;
+    font-size: 12px;
+  }
+  .stage:not(.chat-capture) .app-shell .home-desktop .desktop-letter {
+    padding: 14px 18px;
+    gap: 6px;
+  }
+  .stage:not(.chat-capture) .app-shell .home-desktop .desktop-letter-signature {
+    font-size: 22px !important;
+    line-height: 1.25 !important;
+    padding-left: 6px;
+  }
+  .stage:not(.chat-capture) .desktop-letter strong,
+  .stage:not(.chat-capture) .desktop-letter p {
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .stage:not(.chat-capture) .desktop-letter p { -webkit-line-clamp: 3; }
+  .stage:not(.chat-capture) .desktop-keepsakes { gap: 12px; }
+  .stage:not(.chat-capture) .app-shell .home-desktop .desktop-desire { min-height: 202px; }
+  .stage:not(.chat-capture) .desktop-slips {
+    grid-template-rows: minmax(96px, 1fr) minmax(94px, 1fr);
+    gap: 10px;
+  }
+  .stage:not(.chat-capture) .app-shell .desktop-date b { font-size: 32px !important; }
+  .stage:not(.chat-capture) .app-shell .chat-contacts-page {
+    min-height: 0;
+    padding: 8px 20px 12px;
+  }
+  .stage:not(.chat-capture) .chat-contact-search {
+    padding: 10px 14px;
+    min-height: 46px;
+    margin-bottom: 12px;
+    border-radius: 22px;
+  }
+  .stage:not(.chat-capture) .chat-contact-row {
+    padding: 12px 14px;
+    gap: 12px;
+    border-radius: 22px;
+  }
+  .stage:not(.chat-capture) .contact-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+  }
+  .stage:not(.chat-capture) .contact-copy b { font-size: 16px; }
+  .stage:not(.chat-capture) .contact-copy p { font-size: 13px; }
+  .stage:not(.chat-capture) .chat-heatmap { margin-bottom: 0; }
+  .stage:not(.chat-capture) .heatmap-week { margin-bottom: 8px; }
+  .stage:not(.chat-capture) .heatmap-days { gap: 6px; }
+  .stage:not(.chat-capture) .heatmap-day { min-height: 44px; gap: 3px; }
+  .stage:not(.chat-capture) .heatmap-day b { font-size: 14px; }
+  .stage:not(.chat-capture) .vesper-letters {
+    width: 100%;
+    padding: 8px 20px 20px !important;
+  }
+  .stage:not(.chat-capture) .letter-filters { margin-bottom: 12px; }
+  .stage:not(.chat-capture) .letters-section-label { margin-top: 10px; }
+  .stage:not(.chat-capture) .letters-box { margin-top: -24px; }
+  .stage:not(.chat-capture) .vesper-letters .letters-section-label h2 { font-size: 16px; }
+  .stage:not(.chat-capture) .settings-page:not(.detail-active) {
+    padding: 10px 20px 16px;
+  }
+  .stage:not(.chat-capture) .settings-usage-card {
+    padding: 10px 12px;
+    margin-bottom: 16px;
+  }
+  .stage:not(.chat-capture) .settings-usage-card .subscription-usage { margin: 0; padding: 0; border: 0; }
+  .stage:not(.chat-capture) .app-shell .settings-accordion .setting-row {
+    min-height: 52px;
+    padding: 9px 14px;
+    gap: 12px;
+  }
+  .stage:not(.chat-capture) .app-shell .settings-accordion .setting-row b { font-size: 15px !important; }
+  .stage:not(.chat-capture) .settings-category-list { padding-bottom: 0; }
+}
+@media (max-width: 359px) {
+  .stage:not(.chat-capture) .app-shell .chat-contacts-page,
+  .stage:not(.chat-capture) .vesper-letters { padding-inline: 14px !important; }
+  .stage:not(.chat-capture) .chat-heatmap { padding-inline: 10px; }
+  .stage:not(.chat-capture) .chat-heatmap h2 { font-size: 20px; }
+  .stage:not(.chat-capture) .chat-heatmap header span { font-size: 12px; }
+}
