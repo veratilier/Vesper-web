@@ -8,6 +8,7 @@ import sys
 import threading
 import os
 import signal
+from io import BytesIO
 from urllib.parse import urlencode, urlparse, parse_qs, quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -131,8 +132,29 @@ def capture_appearance(token):
     })
     with build_opener(NoRedirects()).open(request, timeout=10) as response:
         state = json.load(response)
-    return {'documents': {key: value for key, value in state['documents'].items()
-                          if key in ('profile', 'appearance')}}
+    documents = {key: value for key, value in state['documents'].items()
+                 if key in ('profile', 'appearance')}
+    profile = documents.get('profile', {}).get('value')
+    if isinstance(profile, dict):
+        profile = dict(profile)
+        for key in ('userAvatar', 'agentAvatar'):
+            profile[key] = capture_avatar(profile.get(key, ''))
+        documents['profile'] = dict(documents['profile'], value=profile)
+    return {'documents': documents}
+
+
+def capture_avatar(value):
+    # Uploaded avatars can be multi-megabyte originals. The header displays
+    # 40 CSS pixels; keep a 4x thumbnail only in this transient capture snapshot.
+    if not isinstance(value, str) or not re.match(r'^data:image/(png|jpe?g|webp);base64,', value):
+        return value
+    from PIL import Image, ImageOps
+    with Image.open(BytesIO(base64.b64decode(value.split(',', 1)[1]))) as original:
+        image = ImageOps.exif_transpose(original)
+        image.thumbnail((160, 160))
+        output = BytesIO()
+        image.convert('RGBA').save(output, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(output.getvalue()).decode('ascii')
 
 
 def render_child(data, token, *, asset_proxy=None, fixtures=None):

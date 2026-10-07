@@ -12,6 +12,17 @@ import vesper_chat_screenshot as screenshot
 
 @unittest.skipUnless(os.environ.get('VESPER_TEST_SCREENSHOT_RENDER') == '1', 'real Chrome integration runs in screenshot CI')
 class ScreenshotRenderTests(unittest.TestCase):
+    def test_large_avatar_becomes_temporary_header_thumbnail(self):
+        from PIL import Image
+        from io import BytesIO
+        source = BytesIO()
+        Image.new('RGB', (1920, 1920), '#647e94').save(source, format='PNG')
+        value = 'data:image/png;base64,' + base64.b64encode(source.getvalue()).decode()
+        result = screenshot.capture_avatar(value)
+        self.assertEqual(Image.open(BytesIO(base64.b64decode(result.split(',', 1)[1]))).size, (160, 160))
+        self.assertLess(len(result), len(value))
+        self.assertEqual(screenshot.capture_avatar('/avatar.png'), '/avatar.png')
+
     def test_hidden_broken_images_do_not_block_visible_excerpt(self):
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:

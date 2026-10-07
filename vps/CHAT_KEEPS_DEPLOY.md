@@ -11,7 +11,7 @@ Deploy the matching Web commit before restarting the VPS renderer. The browser l
 As the existing service user, install the renderer:
 
 ```sh
-python3 -m pip install --user playwright==1.58.0
+python3 -m pip install --user playwright==1.58.0 Pillow
 python3 -m playwright install chrome
 ```
 

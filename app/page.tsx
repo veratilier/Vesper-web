@@ -1619,7 +1619,7 @@ function HomeContent() {
             <WebAppearanceToggle />
           )}
         </header>
-        {visitedSections.map((section) => (
+        {(captureMode ? ["聊天"] : visitedSections).map((section) => (
         <div className={`scroll-view${section === "音乐" ? " music-scroll-view" : ""}${historyOpen ? " history-host-shift" : ""}`} key={section} hidden={active !== section} data-section={section}>
           {section === "今日" ? (
             <Today
