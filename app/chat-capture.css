@@ -4,3 +4,8 @@
 .chat-capture { pointer-events: none; }
 .chat-capture .chat-stream * { animation: none !important; transition: none !important; }
 .chat-capture .sent-message { opacity: 1 !important; transform: none !important; }
+/* Rowan's timestamp follows his outgoing bubbles in the same right-hand column. */
+.chat-capture .app-shell .codex-chat .sent-turn .chat-activity-inline > summary {
+  margin-left: auto;
+  margin-right: 0;
+}

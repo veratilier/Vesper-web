@@ -235,6 +235,8 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
             if (row.dataset.captureLayout !== 'live-chat-v3') return false;
             const r = row.getBoundingClientRect(), own = row.dataset.messageRole === 'agent';
+            const stamp = row.querySelector('.chat-activity-inline > summary');
+            if (own && stamp && Math.abs(stamp.getBoundingClientRect().right - r.right) >= 4) return false;
             return Array.from(row.querySelectorAll('.text-bubble-target')).every(bubble => {
                 const b = bubble.getBoundingClientRect();
                 return own ? Math.abs(b.right - r.right) < 4 : Math.abs(b.left - r.left) < 4;
