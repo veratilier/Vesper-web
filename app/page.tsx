@@ -1446,6 +1446,8 @@ function HomeContent() {
   useEffect(() => {
     const root = document.documentElement;
     const previousCanvas = root.style.getPropertyValue("--vesper-browser-canvas");
+    const previousBackground = root.style.getPropertyValue("--vesper-browser-background");
+    root.style.setProperty("--vesper-browser-background", isPhotoBackground ? customBackground : "none");
     root.style.setProperty("--vesper-browser-canvas", canvasColor);
     const metas = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')];
     const previous = metas.map((meta) => meta.content);
@@ -1453,9 +1455,11 @@ function HomeContent() {
     return () => {
       if (previousCanvas) root.style.setProperty("--vesper-browser-canvas", previousCanvas);
       else root.style.removeProperty("--vesper-browser-canvas");
+      if (previousBackground) root.style.setProperty("--vesper-browser-background", previousBackground);
+      else root.style.removeProperty("--vesper-browser-background");
       metas.forEach((meta, index) => { meta.content = previous[index]; });
     };
-  }, [canvasColor]);
+  }, [canvasColor, isPhotoBackground, customBackground]);
   const shellStyle = {
     "--theme-accent": accent,
     backgroundColor: canvasColor,

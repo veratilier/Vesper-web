@@ -23,6 +23,7 @@ import './app/home-desktop.css';
 import './app/control-glass.css';
 import './app/ios-parity.css';
 import './app/web-proportions.css';
+import './app/pwa-viewport.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Vesper root element is missing');
