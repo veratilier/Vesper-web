@@ -222,6 +222,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, chat_screenshot.render(data, self.watch_secret()))
             except chat_screenshot.ScreenshotUnavailable as error:
                 self.send_json(503, {'error': str(error)})
+            except ValueError as error:
+                # Selection errors are actionable; do not disguise them as malformed JSON.
+                self.send_json(400, {'error': str(error)})
         elif len(path) == 3 and path[0] == "conversations" and path[2] == "generated-image" and self.command == "POST":
             body = self.body()
             try:

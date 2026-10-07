@@ -76,3 +76,18 @@
 .chat-capture .codex-chat :is(.turn-status, .message-actions) { display: none !important; }
 
 .chat-capture .codex-chat .sent-turn > time:not(.capture-message-time) { display: none !important; }
+
+/* Current Web glass bubbles, viewed from Rowan's side. */
+.chat-capture .codex-chat .bubble-turn.agent-turn { align-items: flex-end; }
+.chat-capture .codex-chat .bubble-turn.sent-turn { align-items: flex-start; }
+.chat-capture .app-shell .bubble-turn .text-bubble-target { max-width: 88%; }
+.chat-capture .app-shell .bubble-turn .message { display: block; padding: 12px 15px; }
+.chat-capture .app-shell .bubble-turn .message p { text-align: left; font-weight: 400; }
+.chat-capture .app-shell .bubble-turn.agent-turn .message { border-radius: 20px 20px 5px 20px; }
+.chat-capture .app-shell .bubble-turn.sent-turn .message { border-radius: 20px 20px 20px 5px; }
+
+.chat-capture .capture-whitespace { display: block; height: 0; font-size: 0; line-height: 0; white-space: normal; }
+.chat-capture .app-shell .codex-chat .bubble-turn.agent-turn .message p { font-weight: 400; }
+/* A still image must capture the final state, never an in-flight send animation. */
+.chat-capture .chat-stream * { animation: none !important; transition: none !important; }
+.chat-capture .sent-message { opacity: 1 !important; transform: none !important; }

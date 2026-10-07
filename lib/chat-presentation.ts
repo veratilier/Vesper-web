@@ -33,6 +33,22 @@ export function splitChatBubbles(text: string): string[] {
       return result;
     });
 }
+// Use the same bubble boundaries in exports while preserving every original byte.
+export function splitCaptureBubbles(text: string): string[] {
+  const parts = splitChatBubbles(text);
+  if (!parts.length) return text ? [text] : [];
+  let cursor = 0;
+  const result: string[] = [];
+  for (const part of parts) {
+    const index = text.indexOf(part, cursor);
+    if (index < 0) return [text];
+    const end = index + part.length;
+    result.push(text.slice(cursor, end));
+    cursor = end;
+  }
+  result[result.length - 1] += text.slice(cursor);
+  return result;
+}
 export function verifiedChatQuote(
   messages: { id: string; content: string; role: string }[],
   messageId: string,

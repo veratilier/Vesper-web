@@ -8,7 +8,7 @@ import { PlaybackIcon } from "./playback-icon";
 import { MusicLyrics } from "./music-lyrics";
 import { WebAppearanceToggle, WebAppearanceControls } from "./web-appearance";
 import { MessagePopover, VoiceMessageBar, type MessageAction } from "./message-popover";
-import { splitChatBubbles, verifiedChatQuote, webBubbleTool, webVoiceTool, type ChatQuote, type ChatBubble } from "@/lib/chat-presentation";
+import { splitCaptureBubbles, splitChatBubbles, verifiedChatQuote, webBubbleTool, webVoiceTool, type ChatQuote, type ChatBubble } from "@/lib/chat-presentation";
 import { DiaryBook, type DiaryDocument } from "./diary-book";
 import { ChatContacts } from "./chat-contacts";
 import { ChatLiveTerminal } from "./chat-live-terminal";
@@ -3708,12 +3708,19 @@ function CodexChatMessage({
     { label: "删除", run: () => void onDelete(item).catch(() => {}) },
   ];
   const quote = (value?: ChatQuote) => value && <button className="bubble-quote" onClick={() => { const element = document.querySelector(`[data-message-id="${CSS.escape(value.messageId)}"]`); element?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}><b>{value.role === 'user' ? userName : agentName}</b><span>{value.text}</span></button>;
-  // Screenshot exports verify the exact stored original, including whitespace.
-  // Keep that read-only transcript layout independent of interactive bubble splitting.
-  if (chatCaptureRequest()) return <div data-message-id={item.id} className={assistant ? 'agent-turn' : 'sent-turn'}>
-    <div className={assistant ? 'message assistant' : 'message mine sent-message'}>
-      <div className={assistant ? 'assistant-message-content' : undefined}><p>{item.content}</p></div>
-    </div>
+  // Read-only exports use the current glass bubbles and retain exact original text.
+  if (chatCaptureRequest()) return <div data-message-id={item.id} data-capture-layout="bubbles-v2" className={`${assistant ? 'agent-turn' : 'sent-turn'} bubble-turn`}>
+    {(assistant ? splitCaptureBubbles(item.content) : item.content ? [item.content] : []).map((text, index) => {
+      const leading = text.match(/^\s*/)?.[0] || "";
+      const rest = text.slice(leading.length);
+      const trailing = rest.match(/\s*$/)?.[0] || "";
+      const body = rest.slice(0, rest.length - trailing.length);
+      return <div className="message-popover-target text-bubble-target" key={index}>
+        <span className="capture-whitespace" data-capture-text>{leading}</span>
+        <div className={assistant ? 'message assistant' : 'message mine sent-message'}><p data-capture-text>{body}</p></div>
+        <span className="capture-whitespace" data-capture-text>{trailing}</span>
+      </div>;
+    })}
     {sticker && <div className="standalone-sticker"><StickerImage sticker={sticker} /></div>}
     {metadata.musicCard && <MusicMessageCard card={metadata.musicCard} onPlay={onPlayMusic} onQueue={onQueueMusic} onOpen={onOpenMusic} onAddToPlaylist={onAddMusicToPlaylist} />}
     <MessageAttachments items={metadata.attachments || []} />

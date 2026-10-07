@@ -1,6 +1,8 @@
 import json
 import sqlite3
 import unittest
+from io import BytesIO
+from unittest.mock import patch, Mock
 import vesper_chat_screenshot as screenshot
 
 
@@ -29,6 +31,30 @@ class OriginalScreenshotTests(unittest.TestCase):
         for ids in (['other'],['missing'],['u','u'],['a','u'],['hidden'],[]):
             with self.subTest(ids=ids),self.assertRaises(ValueError):
                 screenshot.select_messages(self.db,'one',ids)
+
+    def test_capture_uses_only_authorized_original_snapshot(self):
+        data = screenshot.select_messages(self.db, 'one', ['u', 'a'])
+        self.db.execute('UPDATE messages SET content="later edit" WHERE id="u"')
+        history = screenshot.capture_history(data)
+        self.assertEqual([m['id'] for m in history['messages']], ['u', 'a'])
+        self.assertEqual(history['messages'][0]['content'], '你好 <script>steal()</script>')
+        self.assertFalse(history['hasMore'])
+        self.assertEqual(history['messages'][0]['metadata'], {'attachments': []})
+
+    def test_capture_state_exposes_only_appearance_and_profile(self):
+        opener = Mock()
+        opener.open.return_value = BytesIO(json.dumps({'documents': {
+            'profile': {'value': {'userName': 'Vera'}},
+            'appearance': {'value': {'accent': '#fff'}},
+            'private-notes': {'value': 'not needed by capture'},
+        }}).encode())
+        with patch.object(screenshot, 'build_opener', return_value=opener) as factory:
+            state = screenshot.capture_appearance('fixture-token')
+        self.assertEqual(set(state['documents']), {'profile', 'appearance'})
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, screenshot.API_ORIGIN + '/api/state')
+        self.assertEqual(request.get_header('X-vesper-device-token'), 'fixture-token')
+        self.assertIsNone(factory.call_args.args[0].redirect_request(None, None, 302, '', {}, 'https://other.test'))
 
     def test_archived_and_deleted_conversation(self):
         self.db.execute('UPDATE conversations SET archived_at="now" WHERE vesper_conversation_id="one"')

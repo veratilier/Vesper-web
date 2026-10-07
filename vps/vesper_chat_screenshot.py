@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 from urllib.parse import urlencode, urlparse, parse_qs, quote
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 RENDER_LOCK = threading.BoundedSemaphore(1)
 
@@ -92,10 +93,40 @@ def request_policy(url, method, data):
 VISIBLE_IMAGES_READY = 'Array.from(document.querySelectorAll(".chat-capture img")).filter(i => i.checkVisibility()).every(i => i.complete && i.naturalWidth > 0)'
 
 
+def capture_history(data):
+    """Serve the exact database snapshot already authorized by select_messages.
+
+    Rendering must not re-fetch the same history through the public proxy: that
+    adds a second network/auth boundary and can race later edits to the records.
+    """
+    return {
+        'conversation': {'id': data['conversationId'], 'title': data['title']},
+        'messages': [dict(m, conversationId=data['conversationId'], status='delivered',
+                          metadata={'attachments': m.get('attachments', [])}) for m in data['messages']],
+        'tombstones': [], 'hasMore': False,
+    }
+
+
+def capture_appearance(token):
+    # Fetch once before routing the page, avoiding nested synchronous route.fetch
+    # calls for every mounted (including hidden) section of the application.
+    class NoRedirects(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    request = Request(API_ORIGIN + '/api/state', headers={
+        'x-vesper-device-token': token, 'User-Agent': 'Vesper-Capture/1.0',
+    })
+    with build_opener(NoRedirects()).open(request, timeout=10) as response:
+        state = json.load(response)
+    return {'documents': {key: value for key, value in state['documents'].items()
+                          if key in ('profile', 'appearance')}}
+
+
 def render_child(data, token, *, asset_proxy=None, fixtures=None):
     # asset_proxy/fixtures are only supplied directly by the isolated CI test.
     # Production stdin cannot select a host, proxy or fixture.
     from playwright.sync_api import sync_playwright
+    appearance = fixtures['app'] if fixtures is not None else capture_appearance(token)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel='chrome', headless=True)
         context = browser.new_context(viewport={'width': PHONE_WIDTH, 'height': PHONE_HEIGHT}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
@@ -111,13 +142,14 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             kind = request_policy(route.request.url, route.request.method, data)
             if kind is None or route.request.redirected_from is not None:
                 route.abort(); return
+            if kind == 'history':
+                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(capture_history(data), ensure_ascii=False))
+                loaded['history'] = True; return
             headers = {k: v for k, v in route.request.headers.items() if k not in ('authorization', 'x-vesper-device-token')}
-            if kind == 'history': headers['authorization'] = 'Bearer ' + token
-            if kind == 'app': headers['x-vesper-device-token'] = token
-            if fixtures is not None and kind in fixtures:
-                payload = fixtures[kind]
+            if kind == 'app':
+                payload = appearance
                 key = parse_qs(urlparse(route.request.url).query).get('key', [None])[0]
-                if kind == 'app' and key:
+                if key:
                     payload = {'key': key, 'value': payload['documents'].get(key, {}).get('value'), 'updatedAt': '2026-10-03T12:00:00+08:00'}
                 route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(payload, ensure_ascii=False))
                 loaded[kind] = True; return
@@ -153,15 +185,23 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
         phase('original text verification')
         # Verify that the real UI rendered precisely the selected original text.
-        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.querySelector('.message > div > p')?.textContent || ''}))")
+        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:Array.from(row.querySelectorAll('[data-capture-text]')).map(p => p.textContent).join('')}))")
         if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
             raise ValueError('Rendered webpage messages do not match the selected originals')
-        if not page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.every(row => { const p=row.querySelector('.message > div > p'); return !p || getComputedStyle(p).textAlign === (row.classList.contains('agent-turn') ? 'right' : 'left'); })"):
-            raise ValueError('Webpage did not apply the requested agent perspective')
+        if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
+            if (row.dataset.captureLayout !== 'bubbles-v2') return false;
+            if (!Array.from(row.querySelectorAll('.capture-whitespace')).every(el => !el.textContent.trim())) return false;
+            const r = row.getBoundingClientRect(), own = row.classList.contains('agent-turn');
+            return Array.from(row.querySelectorAll('.text-bubble-target')).every(bubble => {
+                const b = bubble.getBoundingClientRect();
+                return own ? Math.abs(b.right - r.right) < 4 : Math.abs(b.left - r.left) < 4;
+            });
+        })"""):
+            raise ValueError('Webpage capture layout is outdated or has the wrong perspective')
         # Both the text and its actual timestamp must follow the chosen side.
         if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
             const stamp = row.querySelector('.capture-message-time');
-            const text = row.querySelector('.message > div > p');
+            const text = row.querySelector('p[data-capture-text]');
             if (!stamp || getComputedStyle(stamp).opacity !== "1" || getComputedStyle(stamp).animationName !== "none") return false;
             const r = row.getBoundingClientRect(), t = stamp.getBoundingClientRect();
             const own = row.classList.contains('agent-turn');

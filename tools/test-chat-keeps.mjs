@@ -35,3 +35,6 @@ assert.equal(calls.length, 1, 'Never follow redirects with history credentials')
 reply = Response.json({ error: 'Original conversation is unavailable' }, { status: 404 });
 await assert.rejects(exports.historyRead('/conversations/fixture'), /Original conversation is unavailable/);
 console.log('Chat capture history: Worker-compatible redirect mode, real POST body, redirects blocked and failures propagated passed');
+
+reply = new Response('error code: 502', { status: 502 });
+await assert.rejects(exports.historyRead('/conversations/fixture/screenshot', {}), /HTTP 502; no image was delivered/);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   splitChatBubbles,
+  splitCaptureBubbles,
   verifiedChatQuote,
 } from "../lib/chat-presentation.ts";
 import { parseLyrics, activeLyric } from "../lib/music-lyrics.ts";
@@ -34,3 +35,8 @@ assert.equal(activeLyric(parseLyrics("[00:01]One\n[00:05]Two"), 6), 1);
 console.log(
   "Web presentation: paragraphs, fenced code, verified quotes, timed lyrics passed",
 );
+
+for (const original of ["  你好。\n\n第二句。  ", "重复\n\n重复\n", code, "\t\n ", "😀西语：Hola！中文保留。"]) {
+  assert.equal(splitCaptureBubbles(original).join(""), original, "Exports preserve exact originals including whitespace and Unicode");
+}
+assert.equal(splitCaptureBubbles("一\n\n二").length, 2);

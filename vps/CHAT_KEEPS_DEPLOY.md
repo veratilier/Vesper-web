@@ -6,7 +6,7 @@ This change uses the existing private history service, Worker media bucket and s
 
 Update `codex_history_server.py`, `vesper_chat_screenshot.py`, `vesper_wake_runner.py`, `vesper_wake_store.py`, `vesper_wake_tools.py` together from the checked main commit into the existing `/home/ubuntu/vesper-codex-history` checkout. Preserve its database, token and service configuration.
 
-Deploy the matching Web commit before restarting the VPS renderer. The browser loads `https://vesper.r-vera.com/?capture=agent&conversation=…&message=…` and the authenticated original-history read endpoint. Appearance and avatars come from the existing Web state API. Native device-local palettes are not synchronized to Web automatically.
+Deploy the matching Web commit before restarting the VPS renderer. The browser loads `https://vesper.r-vera.com/?capture=agent&conversation=…&message=…`. Its exact history read is fulfilled from the database snapshot already authorized by the screenshot handler, avoiding a second public history request and races with later edits. Appearance and avatars come from one authenticated Web state read before browser navigation; only profile and appearance documents are exposed to the capture page. Native device-local palettes are not synchronized to Web automatically.
 
 As the existing service user, install the renderer:
 
@@ -15,7 +15,7 @@ python3 -m pip install --user playwright==1.58.0
 python3 -m playwright install chrome
 ```
 
-Install Chrome system dependencies with the administrator's existing deployment procedure (`python3 -m playwright install-deps chrome`), and `fonts-noto-cjk` if absent. Restart the existing `vesper-codex-history` service. It continues to use the same bearer token. No new port or public renderer is introduced. The renderer uses an isolated subprocess with a 40-second deadline and uses an ephemeral Chrome context with only the fixed Vesper origins allowed. Credentials are attached only to the precise state/history reads, never browser storage or URLs. Non-GET requests, WebSockets, service workers and redirects are blocked. A failed or outdated Web capture view produces no image; there is no HTML-rendering fallback.
+Install Chrome system dependencies with the administrator's existing deployment procedure (`python3 -m playwright install-deps chrome`), and `fonts-noto-cjk` if absent. Restart the existing `vesper-codex-history` service. It continues to use the same bearer token. No new port or public renderer is introduced. The renderer uses an isolated subprocess with a 40-second deadline and uses an ephemeral Chrome context with only the fixed Vesper origins allowed. Credentials are attached only to the fixed state read, never browser storage or URLs. Non-GET requests, WebSockets, service workers and redirects are blocked. A failed or outdated Web capture view produces no image; there is no HTML-rendering fallback. Captures use the current split glass bubbles, disable send animations, and verify the selected original text without rewriting or truncating it.
 
 ## Worker and app
 
