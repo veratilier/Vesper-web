@@ -39,6 +39,7 @@ jobs:
       - run: node --test tests/service-worker.test.mjs tests/browser-storage.test.mjs
       - name: VPS isolated regression tests
         run: |
+          python3 -m pip install aiohttp==3.14.3
           for test in vps/test_*.py; do
             python3 "$test" || exit 1
           done
