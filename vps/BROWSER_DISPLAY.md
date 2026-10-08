@@ -30,12 +30,14 @@ sudo python3 install_browser_display.py --expected-server-sha <reviewed-sha256>
 ```
 
 Stage this script and `vesper_browser_display.py` together. It makes private backups,
-adds a narrow startup hook to the existing browser source, copies the existing
-device pairing token into a root/browser-group readable display-only credential,
+adds a narrow startup hook to the existing browser source, saves a SHA-256 verifier
+of the existing device pairing token in a root/browser-group readable file,
 validates Nginx configuration and authenticated startup, then reloads Nginx. A
 failure restores the saved files. It restarts only the browser; active owner login
 must finish first. If the device token is rotated, rerun the installer with the
-current browser source hash. Chat history, Codex threads and login stay in place.
+current browser source hash. The browser keeps only the one-way verifier on disk;
+the original device token stays in Codex's existing private file. Chat history,
+Codex threads and login stay in place.
 
 Offline regression: `python3 vps/test_browser_display.py` (requires aiohttp).
 Test authentication, exact read-only route, unchanged browser observations and idle
