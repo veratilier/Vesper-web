@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import hashlib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,7 +32,7 @@ class DisplayTests(unittest.IsolatedAsyncioTestCase):
         client = TestClient(TestServer(app))
         await client.start_server()
         self.addAsyncCleanup(client.close)
-        with patch.object(display.TOKEN_PATH.__class__, 'read_text', return_value='device-secret'):
+        with patch.object(display.TOKEN_PATH.__class__, 'read_text', return_value=hashlib.sha256(b'device-secret').hexdigest()):
             for token in ['', 'wrong', 'browser-secret']:
                 response = await client.get(display.PATH, headers={'Authorization': 'Bearer ' + token})
                 self.assertEqual(response.status, 401)

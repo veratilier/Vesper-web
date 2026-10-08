@@ -21,7 +21,7 @@ source = Path(__file__).resolve().parent
 server = Path('/opt/vesper-browser/server.py')
 module = server.with_name('vesper_browser_display.py')
 nginx = Path('/etc/nginx/snippets/vesper-browser.conf')
-token = Path('/etc/vesper-browser/display-token')
+token = Path('/etc/vesper-browser/display-token-sha256')
 original = server.read_bytes()
 if hashlib.sha256(original).hexdigest() != args.expected_server_sha:
     raise SystemExit('Browser source changed since inspection; review it before retrying.')
@@ -76,7 +76,7 @@ try:
         raise RuntimeError('Browser source changed during preparation.')
     atomic(module, adapter, 0o644)
     atomic(server, text.encode(), 0o644)
-    atomic(token, device_token.encode(), 0o640, grp.getgrnam('vesper-browser').gr_gid)
+    atomic(token, hashlib.sha256(device_token.encode()).hexdigest().encode(), 0o640, grp.getgrnam('vesper-browser').gr_gid)
     atomic(nginx, nginx_text.encode(), 0o644)
     subprocess.run(['nginx', '-t'], check=True)
     subprocess.run(['systemctl', 'restart', 'vesper-browser.service'], check=True)

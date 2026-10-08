@@ -1,13 +1,14 @@
 """Passive, owner-authenticated view of Rowan's existing browser page."""
 import asyncio
 import base64
+import hashlib
 import hmac
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from aiohttp import web
 
-TOKEN_PATH = Path('/etc/vesper-browser/display-token')
+TOKEN_PATH = Path('/etc/vesper-browser/display-token-sha256')
 PATH = '/browser/display'
 ORIGINS = {None, 'https://codex.r-vera.com', 'https://vesper.r-vera.com'}
 
@@ -83,10 +84,12 @@ class LiveDisplay:
 
     async def request(self, request):
         try:
-            token = TOKEN_PATH.read_text().strip()
+            expected = TOKEN_PATH.read_text().strip()
         except OSError:
             return web.json_response({'error': 'Display pairing is unavailable.'}, status=503)
-        if not token or not hmac.compare_digest(request.headers.get('Authorization', ''), 'Bearer ' + token):
+        supplied = request.headers.get('Authorization', '')
+        token = supplied[7:] if supplied.startswith('Bearer ') else ''
+        if len(expected) != 64 or not token or not hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(), expected):
             return web.json_response({'error': 'Unauthorized'}, status=401)
         if request.headers.get('Origin') not in ORIGINS:
             return web.json_response({'error': 'Origin rejected'}, status=403)
