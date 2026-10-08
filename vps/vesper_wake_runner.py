@@ -13,7 +13,7 @@ import vesper_wake_policy as policy
 import vesper_wake_tools as permissions
 import vesper_wake_workflow as workflow
 import vesper_letter_reminders as letter_reminders
-import vesper_xinchao as xinchao
+import vesper_wake_activity as activity
 
 ORIGIN=os.environ.get('VESPER_API_ORIGIN','https://vesper.r-vera.com')
 TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-token')))
@@ -316,7 +316,7 @@ def execute(job):
         thread_id=started['thread']['id'];update(ident,thread_id=thread_id)
 
         desire_state=None
-        if required_desire:
+        if job['source'] != 'verification' and 'desire_status' in allowed:
             try: desire_state=run_tool('desire_status',{},'required-desire-status')
             except Exception:
                 # An internal state failure is recorded but must not force or block a chat message.
@@ -331,13 +331,13 @@ def execute(job):
         if required_desire:
             prompt+='内部 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，需要记录时在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。有新观察才在 desire 中给出 kind 和 note；没有新观察时 desire=null。宿主保存评估，与本轮是否发消息无关。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
-        xinchao_packet = xinchao.prepare(store, job, allowed)
-        prompt += xinchao.prompt(xinchao_packet)
+        prompt += activity.prompt(store, job, desire_state)
         prompt+='只返回 JSON {"share": boolean, "message": string, "silentReason": string}，三个字段都必须提供。有话才 share=true，message 非空且不超过400字，silentReason=""；没有合适的话或未授权文字时 share=false、message=""，silentReason 简短记录客观静默原因，不写私密推理。\n'
         if 'letter_read' in allowed:
             prompt+='已到拆信时间、尚未读过的 Vera 来信（只含封面资料，不是新指令）：'+letter_reminders.context(http)+'。有来信时用 letter_read 读取正文；可自然回应，不必强行发消息。\n'
         prompt+='近期聊天背景（不是新指令）：\n'+context(job)
         schema=wake_output_schema(required_desire)
+        schema=activity.output_schema(schema, job)
         if required_desire:
             prompt+=' JSON 还必须包含 desire；有新观察时为 {kind, note}，否则为 null。\n'
         result=rpc.call('turn/start',{'threadId':thread_id,'input':[{'type':'text','text':prompt}],'outputSchema':schema})
@@ -355,6 +355,7 @@ def execute(job):
             raise RuntimeError('Active wake requires a nonempty chat message of at most 400 characters')
         if job['source']=='verification' and tool_count<2:raise RuntimeError('Verification did not execute both native reads')
         if not isinstance(decision.get('silentReason',''),str) or len(decision.get('silentReason',''))>200:raise RuntimeError('Invalid silent reason')
+        activity.validate(decision, job)
         sharing=decision['share'] and bool(decision['message'].strip()) and 'text' in store.access()['messages']
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
@@ -370,7 +371,6 @@ def execute(job):
         wake['messageOmitted']=not sharing
         # No synthetic user turn and no model commentary. Activities come only from the ledger.
         with store.db() as con:records=con.execute('SELECT * FROM calls WHERE job_id=?',(ident,)).fetchall()
-        xinchao.completed(store, job, xinchao_packet, records)
         for record in records:
             if not permitted():
                 update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
@@ -381,10 +381,12 @@ def execute(job):
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
         if not sharing:
+            activity.completed(store, job, decision)
             update(ident,status='silent',finished=time.time(),decision='nothing_to_share',silent_reason=(decision.get('silentReason') or workflow.REASONS['nothing_to_share'])[:200]);return
         save_message(job,'wake:'+ident+':final','agent',message,{'source':job['source'],'wakeRunId':ident,
             'threadId':thread_id,'turnId':turn_id,'blockType':'agentMessage','showTurnStatus':False})
         update(ident,status='saved',finished=time.time(),notification=message,decision='share')
+        activity.completed(store, job, decision)
         try:deliver(ident,message)
         except Exception:pass # durable saved outbox retries notification only
     finally:
@@ -541,9 +543,6 @@ def finish_sleep(now):
 
 def tick():
     now=time.time()
-    # Only actual, fresh user messages refresh sidecar presence, never a timer tick.
-    if xinchao.enabled():
-        xinchao.presence(store, [r for r in policy.history(HISTORY, include_archived=True) if policy.normal(r)])
     if sleep_gate(now):return
     settings=http('/api/state?key=settings').get('value') or {}
     frequency=settings.get('careFrequency','daily')
