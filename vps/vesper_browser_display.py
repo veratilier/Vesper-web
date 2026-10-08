@@ -46,6 +46,11 @@ class LiveDisplay:
             self.clear()
             return self.status('idle', reason='Rowan has no open browser page.')
         url = page.url
+        # The existing read-only browser clears its page after each tool call.
+        # A cleared page is idle, rather than a live, featureless white frame.
+        if url in ('about:blank', ''):
+            self.clear()
+            return self.status('idle', reason='Rowan has no open browser page.')
         if page is not self.cached_page or url != self.cached_url:
             self.clear()
         if self.cached and (time.monotonic() - self.captured < 1.0 or self.lock.locked()):

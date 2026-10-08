@@ -59,6 +59,10 @@ class DisplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(browser.page_id, 'observed-elements-unchanged')
         browser.start.assert_not_awaited()
         self.assertEqual(browser.page.screenshot.call_args.kwargs['mask'], ['masked-inputs'])
+        browser.page.url = 'about:blank'
+        self.assertEqual((await viewer.snapshot('device-secret'))['state'], 'idle')
+        self.assertIsNone(viewer.cached)
+        self.assertEqual(browser.page.screenshot.await_count, 1)
         browser.page = None
         self.assertEqual((await viewer.snapshot('device-secret'))['state'], 'idle')
         self.assertIsNone(viewer.cached)

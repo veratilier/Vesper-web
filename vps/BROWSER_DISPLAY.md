@@ -22,6 +22,10 @@ as the last frame, while idle/login/private states clear it. Pinch zoom remains
 stable as frames refresh. Browser fields are masked, and visible known credential
 values suppress capture. Owner login mode suppresses the display altogether.
 
+The deployed read-only browser clears its page after each read/screenshot tool
+finishes. Its blank page is reported as idle. During a tool call, the monitor
+shows the actual page being read; viewing retains the original clearing policy.
+
 Install from the checked production commit on the existing VPS, using its browser
 source hash inspected immediately before deployment:
 
