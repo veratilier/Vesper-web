@@ -18,10 +18,13 @@ class PolicyTests(unittest.TestCase):
         clock = patch('time.time', side_effect=count(1790827200, 0.001))  # 2026-10-01 12:00 Asia/Shanghai
         clock.start(); self.addCleanup(clock.stop)
 
-    def test_recent_user_activity_hour_boundary_and_synthetic_exclusion(self):
+    def test_recent_user_activity_half_hour_boundary_and_synthetic_exclusion(self):
         now=10000
-        self.assertTrue(policy.recent_user_activity([row('u',at=now-3599)],now))
-        self.assertFalse(policy.recent_user_activity([row('u',at=now-3600)],now))
+        self.assertTrue(policy.recent_user_activity([row('u',at=now-1799)],now))
+        self.assertFalse(policy.recent_user_activity([row('u',at=now-1800)],now))
+        self.assertFalse(policy.recent_user_activity([row('u',at=now-2700)],now))
+        self.assertFalse(policy.recent_user_activity([row('u',at=now-1800), row('a','agent',at=now-1)],now))
+        self.assertTrue(policy.recent_user_activity([row('old',at=now-2700), row('new',at=now-60)],now))
         self.assertFalse(policy.recent_user_activity([row('a','agent',at=now-1)],now))
         self.assertFalse(policy.recent_user_activity([row('w',at=now-1,wakeRunId='auto')],now))
         self.assertFalse(policy.recent_user_activity([row('t',at=now-1,test=True)],now))
