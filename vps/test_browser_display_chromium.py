@@ -20,9 +20,10 @@ class ChromiumDisplayTests(unittest.IsolatedAsyncioTestCase):
             engine = await pw.chromium.launch(channel='chromium', headless=True, chromium_sandbox=True, args=['--disable-dev-shm-usage'])
             try:
                 context = await engine.new_context(viewport={'width': 1100, 'height': 800})
-                await context.route('**/*', lambda route: route.abort())
+                markup = '<title>Live display fixture</title><body style="background:#224466;color:white"><h1>Actual browser fixture</h1><input value="Private input" style="width:400px;height:80px"><p>Only synthetic content</p></body>'
+                await context.route('**/*', lambda route: route.fulfill(status=200, content_type='text/html', body=markup))
                 page = await context.new_page()
-                await page.set_content('<title>Live display fixture</title><body style="background:#224466;color:white"><h1>Actual browser fixture</h1><input value="Private input" style="width:400px;height:80px"><p>Only synthetic content</p></body>')
+                await page.goto('https://display-fixture.example/')
                 browser = SimpleNamespace(page=page, context=context, lock=asyncio.Lock(), last=123, page_id='existing-tool-observation')
                 viewer = display.LiveDisplay(browser, SimpleNamespace(exists=lambda:False), lambda url:url, 'synthetic-browser-token')
                 result = await viewer.snapshot('synthetic-device-token')
@@ -35,6 +36,9 @@ class ChromiumDisplayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await page.locator('input').input_value(), 'Private input')
                 self.assertEqual(browser.last, 123); self.assertEqual(browser.page_id, 'existing-tool-observation')
                 self.assertLess(len(base64.b64decode(result['image'])), 512 * 1024)
+                await page.goto('about:blank')
+                self.assertEqual((await viewer.snapshot('synthetic-device-token'))['state'], 'idle')
+                self.assertIsNone(viewer.cached)
             finally:
                 await engine.close()
 
