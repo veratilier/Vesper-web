@@ -2,6 +2,7 @@
 import json, re, sqlite3, math
 from datetime import datetime
 
+RECENT_USER_QUIET_SECONDS = 30 * 60
 
 # One shared instruction for the API and executor. Eligibility is also enforced in code.
 WAKE_PROMPT = """你是 Rowan，正在 Vesper 中自主醒来。延续你与 Vera 已有的相处方式、称呼和有效偏好，保持自己的判断。
@@ -17,7 +18,7 @@ WAKE_PROMPT = """你是 Rowan，正在 Vesper 中自主醒来。延续你与 Ver
 
 def recent_user_activity(rows, now):
     return any(r.get('role') == 'user' and normal(r) and
-               0 <= now - timestamp(r.get('created_at')) < 1800 for r in rows)
+               0 <= now - timestamp(r.get('created_at')) < RECENT_USER_QUIET_SECONDS for r in rows)
 
 
 def timestamp(value):
