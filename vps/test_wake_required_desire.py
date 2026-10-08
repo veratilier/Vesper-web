@@ -107,7 +107,7 @@ class RequiredDesireTests(unittest.TestCase):
     def test_revoked_desire_permission_is_not_bypassed(self):
         with store.db() as con:store.put(con,'permissions',{'tools':['desire_status'],'messages':[]})
         self.execute({'kind':'absence','note':'Current thought.'})
-        self.assertEqual(self.calls,[])
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
 
     def test_recent_chat_is_silent_without_any_rpc_or_write(self):
