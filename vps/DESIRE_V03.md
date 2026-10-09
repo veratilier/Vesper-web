@@ -5,9 +5,9 @@ and the previous six-dimensional Vesper tables are never rewritten. New values
 start absent and are initialized by a semantic assessment of actual recent data.
 
 `vesper-emotion.timer` runs one tool-free, ephemeral `gpt-6-luna` turn every
-quarter hour, including during sleep and with no new chat. It uses at most 20
-pending events and 6 already-counted background events, approximately 16,000
-characters, and enforces 16,000 fresh / 24,000 total tokens and a 3-minute model
+quarter hour, including during sleep and with no new chat. It uses at most 10
+pending events and 3 already-counted background events, with the whole input
+bounded to 4,800 characters, and enforces 16,000 fresh / 24,000 total tokens and a 3-minute model
 deadline. Model/quota/network failures preserve the committed state and record a
 brief error. One catch-up run occurs after downtime, without replaying missed runs.
 

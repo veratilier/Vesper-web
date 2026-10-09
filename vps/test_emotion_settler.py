@@ -38,8 +38,20 @@ class SettlerTests(unittest.TestCase):
         c=self.context();c['pending']=[{'id':str(i),'text':'文'*4000} for i in range(100)]
         c['background']=[{'id':'old','text':'Already counted','alreadyCounted':True}]
         small=settler.bounded(c)
-        self.assertLess(len(json.dumps(small,ensure_ascii=False)),18000)
+        self.assertLessEqual(len(json.dumps(small,ensure_ascii=False,separators=(',',':'))),settler.MAX_CONTEXT_CHARACTERS)
+        self.assertLessEqual(len(small['pending']),10)
         self.assertNotIn('runtime',small['state']);self.assertTrue(small['background'][0]['alreadyCounted'])
+        self.assertIn('runtime',c['state'],'Building the model input must not mutate the authoritative snapshot')
+    def test_long_event_ids_and_background_share_one_bound_without_consuming_omitted_events(self):
+        c=self.context()
+        c['pending']=[{'id':f'{i}:'+('p'*490),'text':'中文'*2000} for i in range(80)]
+        c['background']=[{'id':'b'*490,'text':'背景'*2000,'alreadyCounted':True} for _ in range(12)]
+        small=settler.bounded(c)
+        self.assertLessEqual(len(json.dumps(small,ensure_ascii=False,separators=(',',':'))),settler.MAX_CONTEXT_CHARACTERS)
+        self.assertGreater(len(small['pending']),0)
+        self.assertLess(len(small['pending']),len(c['pending']))
+        self.assertEqual(len(c['pending']),80)
+        self.assertTrue(all(e['alreadyCounted'] for e in small['background']))
     def test_one_run_commits_once_and_never_sends_chat_or_runs_activities(self):
         requests=[]
         def http(path,body=None):

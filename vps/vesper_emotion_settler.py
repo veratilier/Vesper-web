@@ -8,6 +8,7 @@ import vesper_wake_store as store
 
 KEYS=('joy','calm','sadness','anxiety','anger','closeness','curiosity','hurt')
 MODEL='gpt-6-luna'
+MAX_CONTEXT_CHARACTERS=4800
 PROMPT='''你只负责 Vesper Desire 的内部语义评估，不执行活动、不发消息、不调用任何工具。
 评估 Rowan 自己的八种情绪：愉悦 joy、平静 calm、低落 sadness、焦虑 anxiety、生气 anger、亲近 closeness、好奇 curiosity、委屈 hurt。每项独立0–100，不需加总为100。不复制 Vera 的心情，不按事件关键词、工具次数或时间套加减公式。
 沿用上一份已保存状态及未解决事项；初次评估只依据实际近期资料，不能把旧六维复制成八维。没有新聊天也评估状态连续性，可以所有数值不变。沉默不自动代表拒绝。alreadyCounted背景不可重复计分，未化解情绪可以延续。
@@ -50,16 +51,24 @@ def events():
     return result
 
 def bounded(context):
-    result={'state':context['state'],'pending':[],'background':[]}
-    result['state'].pop('runtime',None)
-    # Small, independent threads prevent historical context accumulation.
+    state=context['state']
+    result={'state':{k:state[k] for k in ('schemaVersion','initialized','version','values','reason','unresolved','updatedAt','source','cadence') if k in state},'pending':[],'background':[]}
+    result['state']['lastSettlementAt']=(state.get('runtime') or {}).get('last_success_at')
+    def append(section,event,characters):
+        entry={**event,'text':event['text'][:characters]}
+        result[section].append(entry)
+        if len(json.dumps(result,ensure_ascii=False,separators=(',',':')))>MAX_CONTEXT_CHARACTERS:
+            result[section].pop();return False
+        return True
+    # Codex's base prompt and structured output also consume the token budget.
+    # Bound the entire assessment, including already-counted background. Events
+    # outside this batch remain pending, rather than repeatedly failing one batch.
+    for event in context.get('background',[])[:3]:
+        if not append('background',event,120):break
     pending=context.get('pending',[])
-    if not context['state'].get('initialized'):pending=pending[-16:]
-    for e in pending[:20]:
-      entry={**e,'text':e['text'][:700]}
-      if len(json.dumps(result,ensure_ascii=False))+len(json.dumps(entry,ensure_ascii=False))>16000:break
-      result['pending'].append(entry)
-    result['background']=[{**e,'text':e['text'][:240]} for e in context.get('background',[])[:6]]
+    if not state.get('initialized'):pending=pending[-10:]
+    for event in pending[:10]:
+        if not append('pending',event,360):break
     return result
 
 def assess(context,rpc):
@@ -73,7 +82,7 @@ def assess(context,rpc):
         if p.get('turn',{}).get('status')!='completed':failure=host.turn_error_detail(p.get('turn',{}))
       elif m=='thread/tokenUsage/updated':
         tokens,fresh=host.token_budget(p.get('tokenUsage',{}).get('total',{}))
-        if fresh>16000 or tokens>24000:raise RuntimeError('Emotion settlement token budget exceeded; no replay')
+        if fresh>16000 or tokens>24000:raise RuntimeError(f'Emotion settlement token budget exceeded (fresh={fresh}, total={tokens}); no replay')
       elif 'id' in msg and m:rpc.send({'id':msg['id'],'error':{'code':-32601,'message':'No tools or approvals during emotion settlement'}})
     rpc.handler=handle
     rpc.call('initialize',{'clientInfo':{'name':'vesper-emotion','version':'0.3'},'capabilities':{'experimentalApi':True}})
@@ -82,7 +91,7 @@ def assess(context,rpc):
     if not any(m.get('model')==MODEL for m in available):raise RuntimeError('gpt-6-luna is unavailable; prior state retained')
     config={**host.CONFIG,'web_search':'disabled','features.web_search':False}
     thread=rpc.call('thread/start',{'model':MODEL,'ephemeral':True,'cwd':str(host.WORK),'dynamicTools':[],'approvalPolicy':'never','sandbox':'read-only','config':config,'developerInstructions':PROMPT})['thread']['id']
-    rpc.call('turn/start',{'threadId':thread,'effort':'low','input':[{'type':'text','text':json.dumps(context,ensure_ascii=False)}],'outputSchema':schema()})
+    rpc.call('turn/start',{'threadId':thread,'effort':'low','input':[{'type':'text','text':json.dumps(context,ensure_ascii=False,separators=(',',':'))}],'outputSchema':schema()})
     deadline=time.time()+180
     while not done and time.time()<deadline:
       try:handle(rpc.next(timeout=min(5,max(.1,deadline-time.time()))))
