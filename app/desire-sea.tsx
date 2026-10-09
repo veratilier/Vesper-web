@@ -7,11 +7,11 @@ export function DesireSea({ data }: { data: Record<string,unknown> | null }) {
   useEffect(()=>{
     const canvas=ref.current;if(!canvas)return;
     const ctx=canvas.getContext('2d');if(!ctx)return;
-    let frame=0;
+    let frame=0,lastDraw=-Infinity,width=640,height=340;
+    const resize=()=>{const rect=canvas.getBoundingClientRect();width=Math.max(240,rect.width);height=Math.max(260,rect.height);const dpr=Math.min(2,devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);};
     const reduce=matchMedia('(prefers-reduced-motion: reduce)');
     const draw=()=>{
-      const width=640,height=340,dpr=Math.min(2,devicePixelRatio||1);
-      canvas.width=width*dpr;canvas.height=height*dpr;ctx.scale(dpr,dpr);
+      const stamp=performance.now();if(!reduce.matches&&stamp-lastDraw<40){frame=requestAnimationFrame(draw);return;}lastDraw=stamp;
       const dark=canvas.closest('[data-home-theme]')?.getAttribute('data-home-theme')==='black';
       const t=reduce.matches?0:performance.now()/1000;
       const shore=(x:number)=>{
@@ -25,11 +25,11 @@ export function DesireSea({ data }: { data: Record<string,unknown> | null }) {
       path();ctx.lineTo(width,height);ctx.lineTo(0,height);ctx.closePath();const water=ctx.createLinearGradient(0,height*.25,0,height);water.addColorStop(0,dark?'#366675':'#a8d1cf');water.addColorStop(.5,dark?'#143b53':'#599eae');water.addColorStop(1,dark?'#0b1a30':'#265e7d');ctx.fillStyle=water;ctx.fill();ctx.save();ctx.clip();
       for(let i=0;i<4;i++){const p=(t/9+i/4)%1;path((1-p)*height*.85);ctx.strokeStyle=`rgba(255,255,255,${.05+p*.14})`;ctx.lineWidth=1+p;ctx.stroke();}
       ctx.restore();path();ctx.strokeStyle='#ffffffaa';ctx.lineWidth=2;ctx.stroke();
-      ctx.textAlign='center';emotions.forEach((key,i)=>{const x=width*(i+.5)/8;ctx.fillStyle=dark?'#e3f0f5':'#294a57';ctx.font='20px Georgia';ctx.fillText(values?.[key]?.toString()??'—',x,shore(x)-20);ctx.fillStyle='#ffffffe6';ctx.font='17px serif';ctx.fillText(emotionLabels[i],x,height-20);});
+      ctx.textAlign='center';emotions.forEach((key,i)=>{const x=width*(i+.5)/8;ctx.fillStyle=dark?'#e3f0f5':'#294a57';ctx.font='17px Georgia';ctx.fillText(values?.[key]?.toString()??'—',x,shore(x)-20);ctx.fillStyle='#ffffffe6';ctx.font='12px serif';ctx.fillText(emotionLabels[i],x,height-20);});
       if(!reduce.matches&&!document.hidden)frame=requestAnimationFrame(draw);
     };
-    const resume=()=>{cancelAnimationFrame(frame);draw();};resume();document.addEventListener('visibilitychange',resume);reduce.addEventListener('change',resume);
-    return()=>{cancelAnimationFrame(frame);document.removeEventListener('visibilitychange',resume);reduce.removeEventListener('change',resume);};
+    const resume=()=>{cancelAnimationFrame(frame);lastDraw=-Infinity;resize();draw();};resume();window.addEventListener("resize",resume);document.addEventListener('visibilitychange',resume);reduce.addEventListener('change',resume);
+    return()=>{window.removeEventListener("resize",resume);cancelAnimationFrame(frame);document.removeEventListener('visibilitychange',resume);reduce.removeEventListener('change',resume);};
   },[values]);
   return <canvas ref={ref} className="desire-sea" role="img" aria-label={emotions.map((key,i)=>`${emotionLabels[i]} ${values?.[key]??'待评估'}`).join('，')}/>;
 }
