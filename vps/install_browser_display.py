@@ -20,6 +20,7 @@ if Path('/run/vesper-browser/login-mode').exists():
 source = Path(__file__).resolve().parent
 server = Path('/opt/vesper-browser/server.py')
 module = server.with_name('vesper_browser_display.py')
+capture_module = server.with_name('vesper_desktop_capture.py')
 nginx = Path('/etc/nginx/snippets/vesper-browser.conf')
 token = Path('/etc/vesper-browser/display-token-sha256')
 original = server.read_bytes()
@@ -33,7 +34,9 @@ if 'install_display(app,browser,LOGIN,display_url,TOKEN)' not in text:
         raise SystemExit('The current browser startup does not match the reviewed adapter hook.')
     text = text.replace(needle, hook + needle)
 adapter = (source/'vesper_browser_display.py').read_bytes()
+capture = (source/'vesper_desktop_capture.py').read_bytes()
 compile(text, str(server), 'exec'); compile(adapter, str(module), 'exec')
+compile(capture, str(capture_module), 'exec')
 route = '''
 # Native Vesper owner view; the browser MCP retains its separate credential.
 location = /browser/display {
@@ -52,9 +55,11 @@ location = /browser/display {
 nginx_text = nginx.read_text()
 if 'location = /browser/display' not in nginx_text:
     nginx_text += route
+if 'location = /desktop/display' not in nginx_text:
+    nginx_text += route.replace('/browser/display', '/desktop/display')
 backup = Path('/var/backups/vesper-display')/str(time.time_ns())
 backup.mkdir(parents=True, mode=0o700)
-originals = {p: p.read_bytes() if p.exists() else None for p in [server, module, nginx, token]}
+originals = {p: p.read_bytes() if p.exists() else None for p in [server, module, capture_module, nginx, token]}
 for path, data in originals.items():
     if data is not None:
         destination = backup/path.name; destination.write_bytes(data); destination.chmod(0o600)
@@ -75,6 +80,7 @@ try:
     if server.read_bytes() != original:
         raise RuntimeError('Browser source changed during preparation.')
     atomic(module, adapter, 0o644)
+    atomic(capture_module, capture, 0o644)
     atomic(server, text.encode(), 0o644)
     atomic(token, hashlib.sha256(device_token.encode()).hexdigest().encode(), 0o640, grp.getgrnam('vesper-browser').gr_gid)
     atomic(nginx, nginx_text.encode(), 0o644)

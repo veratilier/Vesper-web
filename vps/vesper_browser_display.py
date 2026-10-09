@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from aiohttp import web
 
 TOKEN_PATH = Path('/etc/vesper-browser/display-token-sha256')
 PATH = '/browser/display'
+DESKTOP_PATH = '/desktop/display'
 ORIGINS = {None, 'https://codex.r-vera.com', 'https://vesper.r-vera.com'}
 
 
@@ -103,8 +105,69 @@ class LiveDisplay:
         return web.json_response(await self.snapshot(token), headers={'Cache-Control': 'no-store', 'Pragma': 'no-cache'})
 
 
+class DesktopDisplay(LiveDisplay):
+    """Capture the actual X11 root display, including every visible window."""
+    def __init__(self, *args, capture=None):
+        super().__init__(*args)
+        self.capture = capture or self.capture_pixels
+
+    def status(self, state, **fields):
+        return {**super().status(state, **fields), 'kind': 'desktop'}
+
+    async def capture_pixels(self):
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, str(Path(__file__).with_name('vesper_desktop_capture.py')),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        try:
+            async with asyncio.timeout(3):
+                picture, _ = await process.communicate()
+            if process.returncode or not picture or len(picture) > 512 * 1024:
+                raise RuntimeError('Desktop capture failed.')
+            return picture
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
+    async def snapshot(self, owner_token):
+        if self.login.exists():
+            self.clear()
+            return self.status('owner_login')
+        if self.cached and time.monotonic() - self.captured < 1:
+            return {**self.cached, 'observedAt': timestamp()}
+        if self.lock.locked():
+            return self.status('working')
+        async with self.lock:
+            try:
+                page = self.browser.page
+                if page is not None and not page.is_closed() and page.url != 'about:blank':
+                    async with asyncio.timeout(2):
+                        visible = await page.evaluate('() => (document.body?.innerText || "").slice(0,300000)')
+                        title = await page.title()
+                        secrets = [owner_token, self.browser_token]
+                        secrets += [c['value'] for c in await self.browser.context.cookies() if len(c['value']) >= 4]
+                        if any(s and (s in visible or s in title or s in page.url) for s in secrets):
+                            self.clear()
+                            return self.status('private')
+                picture = await self.capture()
+                if self.login.exists():
+                    self.clear()
+                    return self.status('owner_login')
+                result = self.status('live', capturedAt=timestamp(), mimeType='image/jpeg',
+                    image=base64.b64encode(picture).decode())
+                self.cached = result
+                self.captured = time.monotonic()
+                return result
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.clear()
+                return self.status('unavailable', reason='The desktop display could not be captured.')
+
+
 def install(app, browser, login, display_url, browser_token):
     display = LiveDisplay(browser, login, display_url, browser_token)
+    desktop = DesktopDisplay(browser, login, display_url, browser_token)
 
     @web.middleware
     async def display_only(request, handler):
@@ -112,8 +175,11 @@ def install(app, browser, login, display_url, browser_token):
         # The independent browsing MCP and local login retain their own auth.
         if request.path == PATH:
             return await display.request(request)
+        if request.path == DESKTOP_PATH:
+            return await desktop.request(request)
         return await handler(request)
 
     app.middlewares.insert(0, display_only)
     app.router.add_route('*', PATH, display.request)
+    app.router.add_route('*', DESKTOP_PATH, desktop.request)
     return display
