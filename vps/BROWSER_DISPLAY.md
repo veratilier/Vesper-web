@@ -1,8 +1,10 @@
-# Native VPS monitor
+# Browser viewport adapter (retained for compatibility)
 
-The native chat's top-right menu opens **VPS**, with **画面** and **终端** tabs.
-The first tab passively reads the current page in the independent Rowan browser.
-The terminal tab keeps the existing current-chat command/output and terminal UI.
+The native monitor now shows the full desktop. See `VPS_DESKTOP.md`. The original
+browser-only route below remains available without changing its MCP permissions.
+
+The original browser-only adapter passively reads the current page in the
+independent Rowan browser. The terminal retains the current-chat command/output.
 This VPS has a private Xvfb browser display; the monitor shows its actual webpage
 viewport. Commands and tool results are available in the terminal tab.
 

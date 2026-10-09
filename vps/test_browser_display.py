@@ -96,6 +96,49 @@ class DisplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['state'], 'unavailable')
         self.assertNotIn('private diagnostic', result['reason'])
 
+    async def test_desktop_captures_root_even_without_a_browser_page(self):
+        browser, login = self.fixture()
+        browser.page = None
+        capture = AsyncMock(return_value=b'actual-root-frame')
+        viewer = display.DesktopDisplay(browser, login, lambda url: url, 'browser-secret', capture=capture)
+        first = await viewer.snapshot('device-secret')
+        self.assertEqual(first['kind'], 'desktop')
+        self.assertEqual(first['state'], 'live')
+        self.assertEqual(first['image'], 'YWN0dWFsLXJvb3QtZnJhbWU=')
+        self.assertEqual((await viewer.snapshot('device-secret'))['capturedAt'], first['capturedAt'])
+        capture.assert_awaited_once()
+        browser.start.assert_not_awaited()
+        self.assertEqual(browser.last, 123)
+        login.exists.return_value = True
+        self.assertEqual((await viewer.snapshot('device-secret'))['state'], 'owner_login')
+        self.assertIsNone(viewer.cached)
+
+    async def test_desktop_retains_owner_auth_and_suppresses_sensitive_pages(self):
+        browser, login = self.fixture()
+        with patch.object(display.DesktopDisplay, 'capture_pixels', new=AsyncMock(return_value=b'root-frame')):
+            app = web.Application()
+            display.install(app, browser, login, lambda url: url, 'browser-secret')
+            client = TestClient(TestServer(app)); await client.start_server()
+            self.addAsyncCleanup(client.close)
+            with patch.object(display.TOKEN_PATH.__class__, 'read_text', return_value=hashlib.sha256(b'device-secret').hexdigest()):
+                self.assertEqual((await client.get(display.DESKTOP_PATH)).status, 401)
+                headers = {'Authorization': 'Bearer device-secret'}
+                self.assertEqual((await client.post(display.DESKTOP_PATH, headers=headers)).status, 405)
+                self.assertEqual((await client.get(display.DESKTOP_PATH, headers={**headers, 'Origin':'https://evil.example'})).status, 403)
+                value = await (await client.get(display.DESKTOP_PATH, headers=headers)).json()
+                self.assertEqual(value['kind'], 'desktop')
+                self.assertEqual(value['state'], 'live')
+        capture = AsyncMock(return_value=b'never-share')
+        viewer = display.DesktopDisplay(browser, login, lambda url: url, 'browser-secret', capture=capture)
+        browser.page.evaluate.return_value = 'visible device-secret'
+        self.assertEqual((await viewer.snapshot('device-secret'))['state'], 'private')
+        capture.assert_not_awaited()
+        browser.page = None
+        capture.side_effect = RuntimeError('sensitive capture diagnostic')
+        failure = await viewer.snapshot('device-secret')
+        self.assertEqual(failure['state'], 'unavailable')
+        self.assertNotIn('sensitive capture diagnostic', failure['reason'])
+
 
 if __name__ == '__main__':
     unittest.main()

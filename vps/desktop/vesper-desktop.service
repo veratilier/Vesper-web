@@ -1,0 +1,37 @@
+[Unit]
+Description=Vesper private Linux desktop
+JoinsNamespaceOf=vesper-browser-display.service
+Requires=vesper-browser-display.service
+After=vesper-browser-display.service
+PartOf=vesper-browser-display.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+PrivateTmp=yes
+Environment=DISPLAY=:94
+Environment=XAUTHORITY=/etc/vesper-desktop/Xauthority
+Environment=XDG_CONFIG_HOME=/var/lib/vesper-desktop/config
+Environment=XDG_CACHE_HOME=/var/lib/vesper-desktop/cache
+Environment=XDG_DATA_HOME=/var/lib/vesper-desktop/data
+Environment=XDG_RUNTIME_DIR=/run/vesper-desktop
+ExecStart=/usr/bin/dbus-run-session -- /opt/vesper-desktop/session.sh
+Restart=on-failure
+RestartSec=3
+StateDirectory=vesper-desktop
+RuntimeDirectory=vesper-desktop
+RuntimeDirectoryMode=0700
+MemoryMax=192M
+MemorySwapMax=128M
+CPUQuota=30%
+TasksMax=96
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/vesper-desktop /run/vesper-desktop
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
