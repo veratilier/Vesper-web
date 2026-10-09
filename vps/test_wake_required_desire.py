@@ -53,20 +53,17 @@ class RequiredDesireTests(unittest.TestCase):
             runner.execute(self.job)
     def test_active_run_reads_writes_then_sends_message(self):
         self.execute({'kind':'absence','note':'A current observation.'})
-        self.assertEqual([c['name'] for c in self.calls],['desire_status','desire_encounter'])
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(len(self.messages),1)
         self.assertEqual(self.messages[0]['content'],'A real observation.')
-        args=self.calls[-1]['arguments']
-        self.assertEqual(args['interaction_source'],'automation')
-        self.assertEqual(args['note'],'A current observation.')
-        self.assertTrue(args['request_id'].startswith('wake-'))
+        self.assertNotIn('desire',self.schema['properties'])
         with store.db() as con:self.assertEqual(con.execute("SELECT status FROM jobs WHERE id='test'").fetchone()[0],'completed')
 
     def test_no_observation_uses_nullable_desire_without_writing(self):
         self.execute(None,share=False,message='')
         self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
-        self.assertIn({'type':'null'},self.schema['properties']['desire']['anyOf'])
+        self.assertNotIn('desire',self.schema['properties'])
         self.assertEqual(store.status()['jobs'][0]['status'],'silent')
 
     def test_provider_schema_failure_keeps_specific_cause_and_cannot_publish(self):
@@ -95,31 +92,26 @@ class RequiredDesireTests(unittest.TestCase):
         self.assertEqual(len(self.messages),1)
         self.assertEqual(store.status()['jobs'][0]['outcome'],'partial_failure')
 
-    def test_missing_note_cannot_complete_or_write(self):
-        with self.assertRaises(RuntimeError):self.execute({'kind':'absence','note':''})
-        self.assertEqual(len(self.calls),1)
-    def test_failed_write_cannot_mark_run_successful(self):
-        self.execute({'kind':'absence','note':'Current thought.'},True)
-        with store.db() as con:
-            self.assertEqual(con.execute("SELECT status FROM calls WHERE item_id='required-desire-encounter'").fetchone()[0],'failed')
-            self.assertEqual(store.status()['jobs'][0]['outcome'],'partial_failure')
+    def test_legacy_candidate_is_not_written_by_activity_executor(self):
+        self.execute({'kind':'absence','note':''})
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(len(self.messages),1)
+
     def test_revoked_desire_permission_is_not_bypassed(self):
         with store.db() as con:store.put(con,'permissions',{'tools':['desire_status'],'messages':[]})
         self.execute({'kind':'absence','note':'Current thought.'})
         self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
 
-    def test_recent_chat_is_silent_without_any_rpc_or_write(self):
-        with patch.object(runner, 'recent_chat', return_value=True), patch.object(runner, 'Rpc') as rpc, patch.object(runner, 'http') as http:
-            runner.execute(self.job)
-            rpc.assert_not_called();http.assert_not_called()
-        with store.db() as con:
-            self.assertEqual(con.execute("SELECT decision FROM jobs WHERE id='test'").fetchone()[0], 'recent_user_activity')
+    def test_recent_chat_allows_read_and_activity_decision_but_no_message(self):
+        with patch.object(runner,'recent_chat',return_value=True):self.execute(None)
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
+        self.assertEqual(self.messages,[])
+        self.assertEqual(store.status()['jobs'][0]['status'],'silent')
 
     def test_silent_response_records_desire_without_chat(self):
         self.execute({'kind':'absence','note':'Real observation'},share=False,message='')
-        self.assertEqual([c['name'] for c in self.calls],['desire_status','desire_encounter'])
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
         self.assertEqual(store.status()['jobs'][0]['status'],'silent')
         self.assertTrue(store.status()['jobs'][0]['silentReason'])
@@ -138,15 +130,15 @@ class RequiredDesireTests(unittest.TestCase):
         self.assertEqual(store.status()['jobs'][0]['status'],'silent')
 
     def test_user_returns_before_desire_write_blocks_publication(self):
-        with patch.object(runner, 'recent_chat', side_effect=[False,False,True]):
+        with patch.object(runner, 'recent_chat', side_effect=lambda values=iter([False,False,True]):next(values,True)):
             self.execute({'kind':'absence','note':'Observation'})
         self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
 
     def test_disabled_text_permission_does_not_block_internal_assessment(self):
-        with store.db() as con:store.put(con,'permissions',{'tools':['desire_status','desire_encounter'],'messages':[]})
+        with store.db() as con:store.put(con,'permissions',{'tools':['desire_status'],'messages':[]})
         self.execute({'kind':'absence','note':'Observation'})
-        self.assertEqual([c['name'] for c in self.calls],['desire_status','desire_encounter'])
+        self.assertEqual([c['name'] for c in self.calls],['desire_status'])
         self.assertEqual(self.messages,[])
 
 class ExternalRecoveryTests(unittest.TestCase):

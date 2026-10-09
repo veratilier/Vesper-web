@@ -143,8 +143,6 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (owner.userId !== memoryScope.userId) throw new Error('Owner context mismatch');
     // Never initialize defaults when production storage or existing state is missing.
     if (!bindings.DB) throw new Error('Vesper Desire storage is unavailable');
-    const existing = await bindings.DB.prepare('SELECT user_id FROM vesper_desire_state WHERE user_id = ?').bind('vesper').first();
-    if (!existing) throw new Error('Existing Vesper Desire state was not found; no values have been initialized.');
     return executeDesire(bindings, name, input);
   }
   if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {

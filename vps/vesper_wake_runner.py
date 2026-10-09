@@ -20,10 +20,10 @@ TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-
 HISTORY=Path(os.environ.get('VESPER_HISTORY_DB',str(Path.home()/'.vesper/chat-history.sqlite3')))
 WORK=Path.home()/'.vesper/wake-workspace'
 ALLOWED={'letter_list','letter_create','letter_read','letter_keep','jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
-         'music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
+         'chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
          'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
-READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','music_get_status','music_search','album_search_photos','sticker_search'}
+READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','album_search_photos','sticker_search'}
 CONFIG={'apps._default.enabled':False,
         'apps.asdk_app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
         'apps.app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
@@ -158,7 +158,7 @@ def reschedule(job_id=None):
         return
     result=http('/api/codex/tools',{'name':'desire_status','arguments':{}})['result']
     values=policy.desire_values(result)
-    if values is None:raise RuntimeError('Native Desire longing/intensity/attachment unavailable; schedule not guessed')
+    if values is None:raise RuntimeError('Committed emotion cadence unavailable; schedule not guessed')
     now=time.time();seconds=policy.interval(values,current_preferences())
     with store.db() as con:
         con.execute('BEGIN IMMEDIATE')
@@ -167,7 +167,7 @@ def reschedule(job_id=None):
         if not job_id and store.get(con,'schedule',{}).get('version')==2:return
         if store.get(con, 'config', {}) != schedule_config:return
         store.put(con,'next_at',now+seconds)
-        store.put(con,'schedule',{'version':2,'drawnAt':now,'seconds':seconds,'longing':values['longing'],'intensity':values['intensity'],'attachment':values['attachment'],'mode':'desire','formulaVersion':1,'jobId':job_id})
+        store.put(con,'schedule',{'version':2,'drawnAt':now,'seconds':seconds,'emotionVersion':values['version'],'cadenceMode':values['mode'],'mode':'desire','formulaVersion':3,'jobId':job_id})
         if job_id:con.execute('UPDATE jobs SET scheduled_at=? WHERE id=?',(now,job_id))
 
 
@@ -196,13 +196,13 @@ def execute(job):
         if job['source']=='letter-reminder':
             update(ident,status='queued',due=time.time()+60,started=None,decision='sleep_time');return
         update(ident,status='silent',finished=time.time(),decision='sleep_time');return
-    if recent_chat():
-        if job['source']=='letter-reminder':
-            update(ident,status='queued',due=time.time()+60,started=None,decision='recent_user_activity');return
-        update(ident,status='silent',finished=time.time(),decision='recent_user_activity');return
+    if recent_chat() and job['source']=='letter-reminder':
+        update(ident,status='queued',due=time.time()+60,started=None,decision='recent_user_activity');return
     allowed=permissions.allowed_tools(store.access(), READ_ONLY if job['source']=='verification' else ALLOWED)
     tools=[t for t in http('/api/codex/tools')['tools'] if t['name'] in allowed]
-    required_desire = job['source'] != 'verification' and {'desire_status','desire_encounter'} <= allowed
+    required_desire = False  # The separate fifteen-minute semantic settler owns assessment.
+    allowed.discard('desire_encounter')
+    tools=[t for t in tools if t['name']!='desire_encounter']
     # Desire assessment is internal and independent of chat delivery.
     tools=[dict(t, type='function') for t in tools if not (required_desire and t['name']=='desire_encounter')]
     if not job.get('conversation_id'):raise RuntimeError('No locked target conversation')
@@ -212,12 +212,13 @@ def execute(job):
             if not store.get(con, 'config', {'enabled': True})['enabled']:return False
             row=con.execute('SELECT status FROM jobs WHERE id=?',(ident,)).fetchone()
             if not row or row['status'] not in {'queued','running'}:return False
-        return not sleep_gate(time.time()) and not recent_chat() and not current_preferences().get('quiet') and not front_busy(time.time()) and any(
+        return not sleep_gate(time.time()) and not current_preferences().get('quiet') and not front_busy(time.time()) and any(
             r['id']==job['user_message_id'] and r['vesper_conversation_id']==job['conversation_id'] and policy.normal(r)
             for r in policy.history(HISTORY))
     def run_tool(name,args,item):
         nonlocal tool_count,external_tools
         if name not in allowed or name not in permissions.allowed_tools(store.access(), allowed):raise RuntimeError('Tool not authorized for unattended wake')
+        if recent_chat() and name in permissions.SEND_TYPES:raise RuntimeError('Recent chat permits quiet activity only; no extra messages or attachments')
         args=permissions.tool_input(name,args,ident,item,permissions.external_catalog(external_tools, store.forum_connections()))
         with store.db() as con:
             old=con.execute('SELECT status,result FROM calls WHERE job_id=? AND item_id=?',(ident,item)).fetchone()
@@ -326,6 +327,7 @@ def execute(job):
         prompt='这是一次已授权的 Vesper 后台主动唤醒。request_id='+ident+'。当前时间 '+datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()+'.\n'
         if store.task_prompt() != INSTRUCTIONS:
             prompt+='补充任务要求（不得覆盖本轮规则）：\n'+store.task_prompt()+'\n'
+        if recent_chat():prompt+='Vera最近30分钟内有聊天：本轮只允许安静活动，share=false，不发送文字、图片或文件。\n'
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
         if required_desire:
@@ -356,7 +358,7 @@ def execute(job):
         if job['source']=='verification' and tool_count<2:raise RuntimeError('Verification did not execute both native reads')
         if not isinstance(decision.get('silentReason',''),str) or len(decision.get('silentReason',''))>200:raise RuntimeError('Invalid silent reason')
         activity.validate(decision, job)
-        sharing=decision['share'] and bool(decision['message'].strip()) and 'text' in store.access()['messages']
+        sharing=decision['share'] and bool(decision['message'].strip()) and 'text' in store.access()['messages'] and not recent_chat()
         if not permitted():
             update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
         if required_desire and decision.get('desire') is not None:
@@ -375,7 +377,7 @@ def execute(job):
             if not permitted():
                 update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
             item=record['item_id'];result=json.loads(record['result'] or '{}')
-            if record['status']=='done' and permissions.message_allowed(store.access(),record) and isinstance(result,dict) and (result.get('attachments') or result.get('stickerMessage')):
+            if not recent_chat() and record['status']=='done' and permissions.message_allowed(store.access(),record) and isinstance(result,dict) and (result.get('attachments') or result.get('stickerMessage')):
                 save_message(job,'attachment:'+ident+':'+item,'agent',result.get('message') or '附件',{
                     'source':job['source'],'wakeRunId':ident,'attachments':result.get('attachments'),'sticker':result.get('stickerMessage')})
         if not permitted():
@@ -383,6 +385,9 @@ def execute(job):
         if not sharing:
             activity.completed(store, job, decision)
             update(ident,status='silent',finished=time.time(),decision='nothing_to_share',silent_reason=(decision.get('silentReason') or workflow.REASONS['nothing_to_share'])[:200]);return
+        if recent_chat():
+            activity.completed(store,job,decision)
+            update(ident,status='silent',finished=time.time(),decision='recent_user_activity',silent_reason='Recent chat: quiet activity only.');return
         save_message(job,'wake:'+ident+':final','agent',message,{'source':job['source'],'wakeRunId':ident,
             'threadId':thread_id,'turnId':turn_id,'blockType':'agentMessage','showTurnStatus':False})
         update(ident,status='saved',finished=time.time(),notification=message,decision='share')

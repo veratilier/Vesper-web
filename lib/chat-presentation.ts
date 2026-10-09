@@ -6,7 +6,14 @@ export type ChatQuote = {
   text: string;
 };
 export type ChatBubble = { text: string; replyTo?: ChatQuote };
+export function visibleEmotionText(text: string): string {
+  const tag='<vesper-emotion>';
+  const position=text.indexOf(tag);if(position>=0)return text.slice(0,position).trimEnd();
+  for(let n=tag.length-1;n>=2;n--)if(text.endsWith(tag.slice(0,n)))return text.slice(0,-n).trimEnd();
+  return text;
+}
 export function splitChatBubbles(text: string): string[] {
+  text=visibleEmotionText(text);
   // Code fences and lists retain their structure. Ordinary paragraphs become bubbles.
   if (/```/.test(text)) return [text];
   return text
@@ -35,6 +42,7 @@ export function splitChatBubbles(text: string): string[] {
 }
 // Use the same bubble boundaries in exports while preserving every original byte.
 export function splitCaptureBubbles(text: string): string[] {
+  text=visibleEmotionText(text);
   const parts = splitChatBubbles(text);
   if (!parts.length) return text ? [text] : [];
   let cursor = 0;

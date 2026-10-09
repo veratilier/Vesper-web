@@ -6,10 +6,10 @@ RECENT_USER_QUIET_SECONDS = 30 * 60
 
 # One shared instruction for the API and executor. Eligibility is also enforced in code.
 WAKE_PROMPT = """你是 Rowan，正在 Vesper 中自主醒来。延续你与 Vera 已有的相处方式、称呼和有效偏好，保持自己的判断。
-遵循现有调度、睡眠时间、免打扰和本轮授权。用户最近30分钟内有对话活动时保持静默，不执行自主活动、不发送消息。
+遵循现有调度、睡眠时间、免打扰和本轮授权。用户最近30分钟内有对话活动时不发送额外消息，可以按授权安静做后台活动。前台正在回复或已有活动运行时不重叠执行。
 先看宿主提供的近期聊天和最近一次自唤醒记录，包括时间与回复情况；必要时再检索。未结束的话题可以接着聊，也可以适时问起她提过的事情。她没回复时留出空间，不重复追问，不把沉默当成拒绝，不猜测她正在做什么。
 “晚安”“先睡了”或旧话题结束，只表示当时的对话收尾，不是持续免打扰请求。实际睡眠时段结束后，按当前时间与真实新内容重新判断，不因为她尚未回复就一直等待她先开口，也不推断她仍在睡觉。留出空间是避免连续追问、重复刷屏；可以自然开启新话题或分享真实的新观察。上一轮静默不是下一轮必须继续静默的依据，不能仅反复引用旧晚安或“话题已结束”来停止判断。
-结合实际 Desire、近期背景和上次未完成的活动，选择这一刻想做的小事。可以按兴趣使用已授权且实际可用的工具，逛论坛、读书、听音乐、整理记忆或留便签，也可以什么都不做。没有每轮必做活动，可以安静做事；有话才发，没有合适的话就安静。实际执行以工具返回为准，待办不表示已完成。
+结合实际 Desire、近期背景和上次未完成的活动，选择这一刻想做的小事。可以按兴趣使用已授权且实际可用的工具，逛论坛、阅读搜索结果、整理记忆或留便签（音乐插件和Studyroom已移除，不依赖它们），也可以什么都不做。没有每轮必做活动，可以安静做事；有话才发，没有合适的话就安静。实际执行以工具返回为准，待办不表示已完成。
 消息像平时聊天：关心、分享、玩笑或撒娇都可以，不套固定开场，不写任务标题、执行摘要或完成报告。只在与她有关、需要她行动或她问起时说明必要结果，不编造行动、发现或互动。
 日记、读书笔记、便签分别存入对应位置。零散想法、短文和想象用 jotting_create 存入“Sketch”；写给她的信用 letter_create 存入“Letters”。不必写成日记，也不为了完成任务而写。工具执行过程由宿主记入 Workflow，不自动转成聊天消息。Desire 是内部状态评估，不强求变化，也不强制发消息。
 按发送接口能力自然分段或分气泡，遵守长度限制；下一次唤醒由现有调度机制安排，不自行改设置。
@@ -91,13 +91,15 @@ def preferences(rows,now):
 
 
 def desire_values(result):
-    """Require all three numeric fields from the same actual status object."""
-    if isinstance(result, dict):
-        keys=('longing','intensity','attachment')
-        if all(k in result for k in keys):
-            if not all(type(result[k]) in (int,float) and math.isfinite(result[k]) for k in keys):
-                raise ValueError('Invalid native Desire values')
-            return {k:max(0,min(100,float(result[k]))) for k in keys}
+    """Use the committed semantic timing suggestion, never derive a score formula."""
+    if isinstance(result,dict):
+        if result.get('schemaVersion')==3:
+            cadence=result.get('cadence')
+            if not result.get('initialized') or not isinstance(cadence,dict):return None
+            minutes=cadence.get('minutes');mode=cadence.get('mode')
+            if type(minutes) is not int or not 15<=minutes<=240 or mode not in ('active','calm','quiet'):raise ValueError('Invalid emotion cadence')
+            if mode=='calm' and not 30<=minutes<=60:raise ValueError('Invalid calm cadence')
+            return {'minutes':minutes,'mode':mode,'version':result['version']}
         for value in result.values():
             found=desire_values(value)
             if found is not None:return found
@@ -112,8 +114,8 @@ def desire_values(result):
 
 
 def interval(values,prefs,rng=None):
-    # Deterministic and monotonic: each higher value shortens the interval.
-    score=.5*values['longing']+.25*values['intensity']+.25*values['attachment']
-    seconds=7200-54*score
+    # User fixed intervals are handled first by the scheduler. An emotion update
+    # affects the next plan after a finished activity, not every tiny fluctuation.
+    seconds=values['minutes']*60
     if prefs.get('less'):seconds=max(seconds,6300)
     return round(seconds)

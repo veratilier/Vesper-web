@@ -24,7 +24,7 @@ test('actual Codex catalog and dispatcher route authenticated Desire reads and w
   globalThis.__codexDesireEnv = {DB:adapter, VESPER_APP_TOKEN:'fixture-token'};
   t.after(() => delete globalThis.__codexDesireEnv);
   await executeDesire(globalThis.__codexDesireEnv,'desire_status');
-  db.exec("UPDATE vesper_desire_state SET longing=55,tenderness=74 WHERE user_id='vesper'");
+
   const dir = await mkdtemp(join(tmpdir(),'desire-routing-'));
   t.after(() => rm(dir,{recursive:true,force:true}));
   const file = join(dir,'route.mjs');
@@ -42,15 +42,13 @@ test('actual Codex catalog and dispatcher route authenticated Desire reads and w
   const catalog=(await (await GET(request())).json()).tools;
   for(const name of ['desire_status','desire_history','desire_encounter','desire_set_style','desire_express']) assert.ok(catalog.some(t=>t.name===name));
   const call=async(name,args={})=>{const response=await POST(request({name,arguments:args}));assert.equal(response.status,200);return (await response.json()).result;};
-  assert.equal((await call('desire_status')).longing,55);
-  assert.equal((await call('desire_set_style',{style:'playful'})).style,'playful');
-  assert.equal((await call('desire_status')).style,'playful');
-  const args={kind:'warmth',interaction_source:'user',request_id:'fixture-event',note:'Fixture event'};
-  const first=await call('desire_encounter',args);
-  assert.ok(first.encounterId);
-  assert.equal((await call('desire_encounter',args)).replayed,true);
-  assert.equal((await call('desire_history')).records.length,1);
-  db.exec("DELETE FROM vesper_desire_state");
-  assert.equal((await POST(request({name:'desire_status'}))).status,400);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vesper_desire_state').get().n,0);
+  assert.equal((await call('desire_status')).schemaVersion,3);
+  assert.equal((await call('desire_status')).initialized,false);
+  assert.equal((await call('desire_set_style',{style:'playful'})).deprecated,true);
+  const args={kind:'warmth',interaction_source:'user',request_id:'fixture-event',note:'Fixture observation'};
+  assert.equal((await call('desire_encounter',args)).pendingAssessment,true);
+  await call('desire_encounter',args);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM vesper_emotion_events').get().n,1);
+  assert.equal((await call('desire_history')).records.length,0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='vesper_desire_state'").get().n,0);
 });
