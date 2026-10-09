@@ -80,7 +80,7 @@ def assess(context,rpc):
     rpc.send({'method':'initialized'})
     available=rpc.call('model/list',{'includeHidden':False}).get('data',[])
     if not any(m.get('model')==MODEL for m in available):raise RuntimeError('gpt-6-luna is unavailable; prior state retained')
-    config={**host.CONFIG,'features.web_search':False}
+    config={**host.CONFIG,'web_search':'disabled','features.web_search':False}
     thread=rpc.call('thread/start',{'model':MODEL,'ephemeral':True,'cwd':str(host.WORK),'dynamicTools':[],'approvalPolicy':'never','sandbox':'read-only','config':config,'developerInstructions':PROMPT})['thread']['id']
     rpc.call('turn/start',{'threadId':thread,'effort':'low','input':[{'type':'text','text':json.dumps(context,ensure_ascii=False)}],'outputSchema':schema()})
     deadline=time.time()+180

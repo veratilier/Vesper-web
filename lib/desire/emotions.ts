@@ -4,7 +4,7 @@ import { emotions } from './emotion-keys';
 export { emotions, emotionLabels } from './emotion-keys';
 export const emotionValues = z.object(Object.fromEntries(emotions.map(key => [key, z.number().int().min(0).max(100)])) as Record<typeof emotions[number], z.ZodNumber>).strict();
 export const eventInput = z.object({
-  id: z.string().min(1).max(200), stream: z.string().min(1).max(180),
+  id: z.string().min(1).max(512), stream: z.string().min(1).max(180),
   at: z.string().datetime(), kind: z.enum(['user', 'agent', 'activity']),
   text: z.string().max(4000), outcome: z.enum(['observed', 'confirmed', 'failed', 'unconfirmed']).default('observed'),
 }).strict();
@@ -12,7 +12,7 @@ export const candidateInput = z.object({
   updateId: z.string().min(1).max(200), baseVersion: z.number().int().nonnegative(),
   source: z.enum(['chat', 'settlement']), values: emotionValues,
   reason: z.string().trim().min(1).max(320), unresolved: z.string().max(600),
-  eventIds: z.array(z.string().min(1).max(200)).max(100).refine(ids => new Set(ids).size === ids.length, 'Duplicate events'),
+  eventIds: z.array(z.string().min(1).max(512)).max(100).refine(ids => new Set(ids).size === ids.length, 'Duplicate events'),
   cadence: z.object({ minutes: z.number().int().min(15).max(240), mode: z.enum(['active', 'calm', 'quiet']), reason: z.string().trim().min(1).max(160) }).strict().nullable(),
 }).strict();
 export type EmotionCandidate = z.infer<typeof candidateInput>;

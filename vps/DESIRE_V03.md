@@ -44,3 +44,10 @@ three Python files and two units to a private VPS staging folder, then run
 `python3 install_emotions.py`. The installer backs up existing runner/policy files,
 does not restart the foreground chat/history/browser services, and enables only
 the new emotion timer. The installed runner imports the policy on its next wake.
+
+The existing production VPS also has its own nextWake/selfPrompt plan extension.
+The installer checks its reviewed source digests and applies narrow, compiled
+compatibility patches while retaining those plans, prompts and atomic saves.
+Unrecognized host changes abort before replacing files. The existing host
+30-minute/24-hour bounds remain in force; calm choices are restricted to30–60
+minutes before the existing sleep and owner-setting validator runs.
