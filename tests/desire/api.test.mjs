@@ -21,11 +21,8 @@ test('native API preserves existing storage and distinguishes missing state from
            export async function executeDesire(env,name,input) { globalThis.__desireFixture.calls.push({name,input}); return name === 'desire_history' ? {records:[{note:'existing note'}]} : {longing:57,tenderness:71}; }`, loader:'js'}));
     }
   }] });
-  let exists = true, probes = 0;
-  const fixture = { calls: [], env: { VESPER_APP_TOKEN:'test-token', DB:{ prepare(sql) {
-    probes++; assert.match(sql,/SELECT user_id FROM vesper_desire_state/);
-    return {bind(owner) {assert.equal(owner,'vesper');return {async first(){return exists ? {user_id:owner} : null;}};}};
-  }}}};
+  let probes = 0;
+  const fixture = { calls: [], env: { VESPER_APP_TOKEN:'test-token', DB:{ prepare() {probes++;throw Error('GET must delegate, never probe or modify old six-dimensional state');}}}};
   globalThis.__desireFixture=fixture;
   t.after(()=>delete globalThis.__desireFixture);
   const {GET}=await import(pathToFileURL(file));
@@ -38,6 +35,5 @@ test('native API preserves existing storage and distinguishes missing state from
   const history=await GET(request('?view=history&limit=20'));
   assert.equal((await history.json()).data.records[0].note,'existing note');
   assert.deepEqual(fixture.calls[1],{name:'desire_history',input:{limit:20}});
-  exists=false;assert.equal((await GET(request())).status,503);assert.equal(fixture.calls.length,2);
   delete fixture.env.DB;assert.equal((await GET(request())).status,503);
 });

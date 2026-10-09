@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesireFlower } from './desire-flower';
+import { DesireSea } from './desire-sea';
 import './desire-panel.css';
 function unpack(input: unknown): unknown {
   if (!input || typeof input !== 'object') return input;
@@ -11,7 +12,7 @@ function unpack(input: unknown): unknown {
   if (text) { try { return JSON.parse(text); } catch { throw Error("Desire returned unrecognized data"); } }
   return input;
 }
-type Note = { id: string; note: string; date: string };
+type Note = { id: string; note: string; date: string; source: string };
 function historyNotes(value: unknown): Note[] {
   const object = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const rows = Array.isArray(value) ? value : [object.records, object.events, object.history, object.encounters, object.items].find(Array.isArray);
@@ -19,7 +20,7 @@ function historyNotes(value: unknown): Note[] {
   return rows.flatMap((row, index) => {
     const item = row && typeof row === 'object' ? row as Record<string, unknown> : {};
     if (typeof item.note !== 'string' || !item.note.trim()) return [];
-    return [{ id: String(item.id || item.encounterId || index), note: item.note, date: String(item.eventAt || item.event_at || item.createdAt || item.created_at || '') }];
+    return [{ id: String(item.id || item.encounterId || index), note: item.note, date: String(item.createdAt || item.created_at || ''), source: String(item.source || '') }];
   });
 }
 function dateLabel(date: string) { const stamp = new Date(date); return Number.isFinite(stamp.getTime()) ? stamp.toLocaleString("en-US", { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''; }
@@ -33,13 +34,14 @@ export function DesirePanel({ apiUrl, headers, active, agentName, onWake }: {
   const [historyError, setHistoryError] = useState('');
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [legacySelected,setLegacySelected]=useState(false);
   const [updatedAt, setUpdatedAt] = useState('');
   const request = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     if (request.current) return;
     const controller = new AbortController(); request.current = controller; setLoading(true);
     const get = async (view: string) => {
-      const response = await fetch(apiUrl(`/api/desire?view=${view}`), { headers: headers(), cache: 'no-store', signal: controller.signal });
+      const response = await fetch(apiUrl(`/api/desire?view=${view}${view==='history'&&legacySelected?'&legacy=true':''}`), { headers: headers(), cache: 'no-store', signal: controller.signal });
       const result = await response.json() as { error?: string; data?: unknown };
       if (!response.ok) throw Error(result.error || "Could not load");
       return unpack(result.data);
@@ -50,14 +52,14 @@ export function DesirePanel({ apiUrl, headers, active, agentName, onWake }: {
       if (status.status === 'fulfilled') {
         const object = status.value as Record<string, unknown> | null;
         const state = object?.state ?? object;
-        if (state && typeof state === 'object' && !Array.isArray(state)) { setData(state as Record<string, unknown>); setError(''); setUpdatedAt(new Date().toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit' })); }
+        if (state && typeof state === 'object' && !Array.isArray(state)) { setData(state as Record<string, unknown>); setError(''); setUpdatedAt(typeof (state as Record<string,unknown>).updatedAt === 'string' ? dateLabel(String((state as Record<string,unknown>).updatedAt)) : ''); }
         else setError("Unsupported Desire status format");
       } else setError(status.reason instanceof Error ? status.reason.message : "Could not load status");
       if (history.status === 'fulfilled') {
         try { setNotes(historyNotes(history.value)); setHistoryError(''); } catch (reason) { setHistoryError(reason instanceof Error ? reason.message : "Could not load notes"); }
       } else setHistoryError(history.reason instanceof Error ? history.reason.message : "Could not load notes");
     } finally { if (request.current === controller) { request.current = null; setLoading(false); } }
-  }, [apiUrl, headers]);
+  }, [apiUrl, headers,legacySelected]);
   useEffect(() => {
     if (!active) return;
     const refresh = () => { if (!document.hidden) void load(); };
@@ -65,13 +67,13 @@ export function DesirePanel({ apiUrl, headers, active, agentName, onWake }: {
     document.addEventListener('visibilitychange', refresh);
     return () => { clearTimeout(timer); clearInterval(interval); document.removeEventListener('visibilitychange', refresh); request.current?.abort(); request.current = null; };
   }, [active, load]);
-  const note = typeof data?.note === 'string' && data.note.trim() ? data.note : notes[0]?.note;
+  const note = typeof data?.reason === 'string' ? data.reason : undefined;
   return <div className="page-body app-center desire-panel desire-garden">
-    <div className="desire-heading"><div><small>INNER WEATHER</small><h1>Now</h1></div></div>
+    <div className="desire-heading"><div><small>INNER WEATHER</small><h1>此刻的潮汐</h1></div></div>
     {error && <p className="desire-error" role="alert">{error}{data ? "· Showing the last loaded values." : ''}</p>}
-    <section className="desire-note-surface"><h2>{agentName}</h2><p>{note || (loading ? "Reading the latest note…" : "No notes yet.")}</p>{notes[0]?.date && <time>{dateLabel(notes[0].date)}</time>}</section>
-    <section className="desire-flower-surface"><DesireFlower data={data} /><div className="desire-flower-footer"><small>{loading ? "Loading…" : updatedAt ? `Updated ${updatedAt}` : "Values not loaded yet"}</small><button type="button" disabled={loading} onClick={() => void load()} aria-label="Refresh mood"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.5 7a7.5 7.5 0 0 1 12-1L20 9M4 15l2.5 3a7.5 7.5 0 0 0 12-1" /></svg></button></div></section>
-    <section className="desire-timeline"><div className="desire-timeline-heading"><h2>Recent notes</h2>{notes.length > 3 && <button type="button" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse" : "Recent entries"} ›</button>}</div>{historyError && <p role="alert">{historyError}</p>}{!notes.length && !historyError && <p className="desire-timeline-empty">{loading ? "Loading…" : "New notes will appear here."}</p>}<ol>{notes.slice(0, expanded ? notes.length : 3).map(item => <li key={item.id}><time>{dateLabel(item.date)}</time><p>{item.note}</p></li>)}</ol></section>
+    <section className="desire-note-surface"><h2>{agentName} · {data?.initialized ? "岸边的心绪" : "等待第一次评估"}</h2><p>{note || "依据真实聊天与活动评估，旧版数值不会直接迁入。"}</p>{updatedAt && <time>{updatedAt} · {data?.source === "chat" ? "聊天更新" : "周期评估"}</time>}</section>
+    <section className="desire-flower-surface"><DesireSea data={data} /><div className="desire-flower-footer"><small>{loading ? "Loading…" : updatedAt ? `Updated ${updatedAt}` : "Values not loaded yet"}</small><button type="button" disabled={loading} onClick={() => void load()} aria-label="Refresh mood"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.5 7a7.5 7.5 0 0 1 12-1L20 9M4 15l2.5 3a7.5 7.5 0 0 0 12-1" /></svg></button></div></section>
+    <section className="desire-timeline"><div className="desire-timeline-heading"><button onClick={()=>setLegacySelected(false)} aria-pressed={!legacySelected}>八种情绪</button><button onClick={()=>setLegacySelected(true)} aria-pressed={legacySelected}>旧版六维</button></div><div className="desire-timeline-heading"><h2>Recent notes</h2>{notes.length > 3 && <button type="button" onClick={() => setExpanded(value => !value)}>{expanded ? "Collapse" : "Recent entries"} ›</button>}</div>{historyError && <p role="alert">{historyError}</p>}{!notes.length && !historyError && <p className="desire-timeline-empty">{loading ? "Loading…" : "New notes will appear here."}</p>}<ol>{notes.slice(0, expanded ? notes.length : 3).map(item => <li key={item.id}><time>{dateLabel(item.date)}</time><p>{item.note}</p></li>)}</ol></section>
     {onWake && <>
       <section className="room-wake"><div><h2>Wake AI</h2><p>Leave room for a new thought.</p></div><button type="button" onClick={onWake}>Wake</button></section>
       <p className="room-caption">Keep Vesper open and connected for a manual wake-up.</p>

@@ -87,6 +87,13 @@ class ActivityTests(unittest.TestCase):
             self.assertEqual(receipt['completion'], 'completed')
             self.assertFalse(any('xinchao' in row[0] for row in con.execute('SELECT key FROM runtime')))
 
+    def test_recent_chat_permits_quiet_saved_activity_and_suppresses_extra_text(self):
+        with patch.object(runner,'recent_chat',return_value=True):
+            self.run_turn(share=True,tool_calls=[('read_vesper_state',{'kind':'notes'}),('write_vesper_state',{'kind':'note','text':'Actual thought'})])
+        self.assertEqual([c['name'] for c in self.calls],['desire_status','read_vesper_state','write_vesper_state'])
+        self.assertEqual(self.messages,[])
+        self.assertEqual(self.pending()['activity'],PLAN['activity'])
+
     def test_next_turn_receives_pending_plan_and_real_receipts(self):
         self.run_turn(tool_calls=[('read_vesper_state', {'kind': 'notes'})])
         self.second()
