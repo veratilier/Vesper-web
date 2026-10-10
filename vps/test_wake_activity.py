@@ -58,7 +58,7 @@ class ActivityTests(unittest.TestCase):
                 return {'tools': [{'name': name} for name in ['desire_status', 'desire_encounter', 'read_vesper_state', 'write_vesper_state']]}
             owner.calls.append(body)
             if body['name'] == 'desire_status': return {'result': STATE}
-            if body['name'] == 'write_vesper_state': return {'result': {'saved': True, 'section': 'notes'}}
+            if body['name'] == 'write_vesper_state': return {'result': {'saved': True, 'section': 'journal'}}
             return {'result': {'text': 'A real returned paragraph'}}
 
         with patch.object(runner, 'Rpc', RPC), patch.object(runner, 'http', side_effect=http), \
@@ -76,7 +76,7 @@ class ActivityTests(unittest.TestCase):
         self.job = dict(self.job, id='second')
 
     def test_silent_activity_uses_actual_desire_and_saves_continuation(self):
-        self.run_turn(tool_calls=[('read_vesper_state', {'kind': 'notes'}), ('write_vesper_state', {'kind': 'note', 'text': 'A real observation'})])
+        self.run_turn(tool_calls=[('read_vesper_state', {'section': 'journal'}), ('write_vesper_state', {'kind': 'journal', 'date': '2026-10-11', 'text': 'A real observation'})])
         self.assertIn(json.dumps(STATE, ensure_ascii=False), self.prompt)
         self.assertIn('nextActivity', self.schema['required'])
         self.assertEqual([call['name'] for call in self.calls], ['desire_status', 'read_vesper_state', 'write_vesper_state'])
@@ -109,13 +109,13 @@ class ActivityTests(unittest.TestCase):
 
     def test_recent_chat_permits_quiet_saved_activity_and_suppresses_extra_text(self):
         with patch.object(runner,'recent_chat',return_value=True):
-            self.run_turn(share=True,tool_calls=[('read_vesper_state',{'kind':'notes'}),('write_vesper_state',{'kind':'note','text':'Actual thought'})])
+            self.run_turn(share=True,tool_calls=[('read_vesper_state',{'section':'journal'}),('write_vesper_state',{'kind':'journal','date':'2026-10-11','text':'Actual thought'})])
         self.assertEqual([c['name'] for c in self.calls],['desire_status','read_vesper_state','write_vesper_state'])
         self.assertEqual(self.messages,[])
         self.assertEqual(self.pending()['activity'],PLAN['activity'])
 
     def test_next_turn_receives_pending_plan_and_real_receipts(self):
-        self.run_turn(tool_calls=[('read_vesper_state', {'kind': 'notes'})])
+        self.run_turn(tool_calls=[('read_vesper_state', {'section': 'journal'})])
         self.second()
         self.run_turn(next_activity=MISSING)
         self.assertIn(PLAN['activity'], self.prompt)
@@ -166,7 +166,7 @@ class ActivityTests(unittest.TestCase):
 
     def test_verification_has_no_activity_plan_or_schema(self):
         self.job = dict(self.job, source='verification')
-        self.run_turn(tool_calls=[('desire_status', {}), ('read_vesper_state', {'kind': 'notes'})])
+        self.run_turn(tool_calls=[('desire_status', {}), ('read_vesper_state', {'section': 'journal'})])
         self.assertNotIn('nextActivity', self.schema['properties'])
         self.assertNotIn('自主活动：', self.prompt)
         self.assertIsNone(self.pending())

@@ -25,7 +25,7 @@ import "./pwa-viewport.css";
 
 export const metadata: Metadata = {
   title: "Vesper — Your private corner",
-  description: "Weather, notes, meaningful dates, reminders and music in a quiet space.",
+  description: "Weather, meaningful dates, reminders and music in a quiet space.",
   manifest: "/manifest.webmanifest?v=11",
   appleWebApp: {
     capable: true,

@@ -1,7 +1,3 @@
-export function latestRowanNote<T extends { text: string; kind: string; createdAt: string; updatedAt?: string }>(notes: T[]): T | undefined {
-  const stamp = (note: T) => Date.parse(note.createdAt) || Date.parse(note.updatedAt || '') || 0;
-  return notes.filter(note => note.kind === 'agent' && note.text.trim()).sort((a, b) => stamp(b) - stamp(a))[0];
-}
 export function homeCountdown(days: number): string {
   if (days === 0) return 'Today';
   const count = Math.abs(days), unit = count === 1 ? 'day' : 'days';

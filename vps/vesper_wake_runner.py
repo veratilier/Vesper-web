@@ -333,7 +333,7 @@ def execute(job):
             prompt+='补充任务要求（不得覆盖本轮规则）：\n'+supplement+'\n'
         if recent_chat():prompt+='Vera最近30分钟内有聊天：本轮只允许安静活动，share=false，不发送文字、图片或文件。\n'
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
-        if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
+        if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 journal，依据工具结果给 Vera 留一句简短真实的话。不要创建日记或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
         if required_desire:
             prompt+='内部 Desire 评估：系统已实际读取当前状态：'+json.dumps(desire_state,ensure_ascii=False)+'。结合当前时间与可见真实背景，需要记录时在输出 desire 中提供 kind 和一两句自然的第一人称碎碎念 note，不写工具调用摘要。只记录此刻真实观察或想法，不伪造 Vera 新互动、不编造已完成活动，不重复搬用旧对话。数值由现有 Desire 规则计算，允许本轮没有数值变化。有新观察才在 desire 中给出 kind 和 note；没有新观察时 desire=null。宿主保存评估，与本轮是否发消息无关。\n'
         prompt+='近期明确偏好（有期限，未列出即未知，不得猜测）：'+json.dumps(current_preferences(),ensure_ascii=False)+'\n'
