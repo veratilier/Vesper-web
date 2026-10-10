@@ -404,6 +404,7 @@ class Handler(BaseHTTPRequestHandler):
               FROM conversations c LEFT JOIN messages m ON m.vesper_conversation_id = c.vesper_conversation_id
               WHERE c.archived_at IS NULL GROUP BY c.vesper_conversation_id
               ORDER BY c.updated_at DESC LIMIT 100""").fetchall()
+            rows = [row for row in rows if not conversation_delete.is_deleted(connection, row["vesper_conversation_id"], row["codex_thread_id"])]
         self.send_json(200, {"conversations": [dict(conversation(row, row["message_count"]), preview=row["preview"] or "") for row in rows]})
 
     def search_messages(self) -> None:
@@ -435,7 +436,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         with db() as connection:
             if conversation_delete.is_deleted(connection, conversation_id):
-                self.send_json(404, {"error": "Conversation not found"}); return
+                self.send_json(410, {"error": "Conversation was deleted", "code": "conversation_deleted"}); return
             recovery = codex_records.sync(connection, conversation_id)
             row = connection.execute("SELECT * FROM conversations WHERE vesper_conversation_id = ?", (conversation_id,)).fetchone()
             query = parse_qs(urlparse(self.path).query)
@@ -491,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
         updated_at = str(body.get("updatedAt") or timestamp)
         with db() as connection:
             if conversation_delete.is_deleted(connection, conversation_id, thread_id):
-                self.send_json(410, {"error": "Conversation was permanently deleted"}); return
+                self.send_json(410, {"error": "Conversation was deleted", "code": "conversation_deleted"}); return
             connection.execute("""INSERT INTO conversations
               (vesper_conversation_id, codex_thread_id, title, created_at, updated_at, archived_at, source)
               VALUES (?, ?, ?, ?, ?, NULL, ?)
@@ -552,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
             connection.execute("BEGIN IMMEDIATE")
             existing_conversation = connection.execute("SELECT codex_thread_id FROM conversations WHERE vesper_conversation_id=?", (conversation_id,)).fetchone()
             if conversation_delete.is_deleted(connection, conversation_id, existing_conversation["codex_thread_id"] if existing_conversation else None):
-                self.send_json(410, {"error": "Conversation was permanently deleted"}); return
+                self.send_json(410, {"error": "Conversation was deleted", "code": "conversation_deleted"}); return
             if body.get("wakeTargetUserId"):
                 # Serialize with archive/delete: background output must never recreate a window.
                 target = connection.execute("""SELECT 1 FROM conversations c JOIN messages m
