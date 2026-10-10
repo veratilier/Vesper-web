@@ -19,5 +19,13 @@ def patch_source(source):
     if source.count(old) != 1:
         raise ValueError('Browser source changed; inspect before applying')
     patched = 'from vesper_browser_body import visible_body\n' + source.replace(old, new)
+    # Leave room for a cold browser start, privacy checks, capture and cleanup
+    # inside the MCP caller's 30-second deadline.
+    patched = patched.replace("wait_until='domcontentloaded',timeout=16000", "wait_until='domcontentloaded',timeout=12000")
+    patched = patched.replace('await asyncio.wait_for(browser.read(name,args),25)', 'await asyncio.wait_for(browser.read(name,args),28)')
+    patched = patched.replace('            return result,shot',
+        "            if shot and result['status']=='failed' and result.get('http_status') is None:\n"
+        "                result['status']='partial'\n"
+        '            return result,shot')
     compile(patched, 'server.py', 'exec')
     return patched

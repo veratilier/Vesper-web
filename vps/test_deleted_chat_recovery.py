@@ -3,13 +3,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 import codex_history_server as server
-from vesper_browser_body import visible_body
+from vesper_browser_body import visible_body, patch_source
 
 class Request:
     path = '/conversations/deleted?latest=1&limit=40'
     def send_json(self, status, value): self.status, self.value = status, value
 
 class RecoveryTests(unittest.TestCase):
+    def test_browser_patch_rejects_an_unexpected_source(self):
+        with self.assertRaises(ValueError): patch_source('unrelated service')
+
     def test_pending_source_deletion_is_not_listed_or_misreported_as_missing_route(self):
         with tempfile.TemporaryDirectory() as directory:
             original = server.DB_PATH
