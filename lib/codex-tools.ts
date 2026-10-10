@@ -29,7 +29,6 @@ export type CodexToolContext = { conversationId?: string; threadId?: string; tur
 
 const sectionToKey: Record<string, string> = {
   today: "todos",
-  notes: "notes",
   reminders: "todos",
   dates: "anniversaries",
   anniversaries: "anniversaries",
@@ -223,7 +222,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     return name === 'jotting_create' ? createJotting(memoryScope.userId, input) : listJottings(memoryScope.userId, Number(input.limit || 30), String(input.before || ''),'Rowan');
   }
   if (name === "read_vesper_state") {
-    const section = String(input.section || "notes").toLowerCase();
+    const section = String(input.section || "today").toLowerCase();
     if (section === "memory") {
       if (!memoryScope) throw new Error("Memory scope is unavailable");
       return { section, value: (await recallSharedMemory("")).memories };
@@ -253,14 +252,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "write_vesper_state") {
     const kind = String(input.kind || "").toLowerCase();
     const now = new Date().toISOString();
-    if (kind === "note") {
-      const text = String(input.text || input.title || "").trim();
-      if (!text) throw new Error("Note text is required");
-      const notes = (await readDocument("notes")) as Array<Record<string, unknown>>;
-      const entry = { id: crypto.randomUUID(), text, kind: "agent", tone: "cool", createdAt: now };
-      await writeDocument("notes", [...notes, entry]);
-      return { saved: true, section: "notes", entry };
-    }
+    if (kind === "note") throw new Error("The Notes feature has been removed. No note was saved. Use Sketch only when the user wants free writing.");
     if (kind === "reminder") {
       const title = String(input.title || input.text || "").trim();
       if (!title) throw new Error("Reminder title is required");

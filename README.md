@@ -82,3 +82,7 @@ is resumed.
 Images and audio are sent as inline data URLs, videos contribute a representative
 frame, and text/JSON/HTML files are included as text. Other files are uploaded
 to the existing media bucket and shown in the transcript.
+
+## Retired Notes feature
+
+The standalone Notes UI and agent tools have been removed. Existing `notes` documents are retained for backups and compatibility; they are not migrated or deleted. Sketch, journals and book annotations remain available. Cached `write_vesper_state(kind=note)` requests fail without writing data.

@@ -23,8 +23,8 @@ def external_catalog(result, authorized_connections=()):
 
 def tool_input(name, arguments, job_id, item_id, catalog):
     args = copy.deepcopy(arguments)
-    if name == 'write_vesper_state' and args.get('kind') not in {'note', 'journal'}:
-        raise RuntimeError('Background writes are limited to notes and journal')
+    if name == 'write_vesper_state' and args.get('kind') not in {'journal'}:
+        raise RuntimeError('Background writes are limited to journal; Notes has been removed')
     if name == 'manage_vesper_memory' and args.get('action') != 'list':
         raise RuntimeError('Use remember_vesper_memory to add; editing/deleting memories requires a specific user request')
     if name == 'desire_encounter':

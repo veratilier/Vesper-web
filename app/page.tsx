@@ -60,7 +60,7 @@ import { attachmentInputText, imageAttachmentInput } from "./codex-attachment-in
 import { useMobileViewport } from "./use-mobile-viewport";
 import "./mobile-navigation.css";
 import "./home-desktop.css";
-import { latestRowanNote, homeCountdown, darkHomeBackground, homeWeatherCondition } from "@/lib/home-desktop";
+import { homeCountdown, darkHomeBackground, homeWeatherCondition } from "@/lib/home-desktop";
 import { subscribe, serializeSubscription } from "@mmmike/web-push/client";
 import { codexBubbleIdentity, hasCodexChatBubbles, isCompletedCodexItem, mergeCodexMessages } from "./codex-message-merge";
 import {
@@ -75,92 +75,6 @@ import {
 import { requestNeteaseLibrary, type MusicLibraryResult } from "@/lib/music-service";
 import { CodexModelPicker } from "./codex-model-picker";
 import { startCodexTurnWithModel, effortLabel, listCodexModels, selectionFromThread, type CodexModel, type CodexModelSelection } from "@/lib/codex-models";
-function Notes() {
-  const [notes, setNotes] = usePersistentDocument<NoteItem[]>("notes", []);
-  const add = () =>
-    setNotes((items) => [
-      ...items,
-      {
-        id: crypto.randomUUID(),
-        text: "",
-        kind: "user",
-        tone: "warm",
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-  return (
-    <div className="page-body">
-      <PageIntro
-        eyebrow="QUICK NOTES"
-        title="Notes"
-        text="You and Rowan can both leave something here."
-      />
-      <div className="note-toolbar">
-        <span>{notes.length}  notes</span>
-        <button onClick={add}>
-          <Icon name="plus" />
-          New note
-        </button>
-      </div>
-      {!notes.length ? (
-        <EmptyState text="No notes yet. Select “New note” to begin." />
-      ) : (
-        <div className="sticky-wall">
-          {notes.map((note) => (
-            <article className={`sticky ${note.tone}`} key={note.id}>
-              <div className="tape" />
-              <div className="sticky-meta">
-                <span>{note.kind === "agent" ? "ROWAN" : "VERA"}</span>
-                <button
-                  aria-label="Delete note"
-                  onClick={() =>
-                    setNotes((items) =>
-                      items.filter((item) => item.id !== note.id),
-                    )
-                  }
-                >
-                  <Icon name="close" />
-                </button>
-              </div>
-              {note.kind === "user" ? (
-                <textarea
-                  className="sticky-editor"
-                  aria-label="Edit note"
-                  placeholder="Write a note…"
-                  value={note.text}
-                  onChange={(event) =>
-                    setNotes((items) =>
-                      items.map((item) =>
-                        item.id === note.id
-                          ? { ...item, text: event.target.value }
-                          : item,
-                      ),
-                    )
-                  }
-                />
-              ) : (
-                <p>{note.text}</p>
-              )}
-              <footer>
-                {note.kind === "agent" ? (
-                  <>
-                    <Icon name="sparkles" />
-                    Rowan’s notes
-                  </>
-                ) : (
-                  <>
-                    <Icon name="edit" />
-                    Editable · Saved automatically
-                  </>
-                )}
-              </footer>
-            </article>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 const VESPER_API_ORIGIN = "https://api.vesper.r-vera.com";
 const DEFAULT_CANVAS_COLOR = "#eaf0f5";
 const DEFAULT_APP_BACKGROUND = 'url("/backgrounds/vesper-marble-20260908.jpg")';
@@ -532,7 +446,7 @@ function NavIcon({ name }: { name: string }) {
 }
 // Display labels only; persisted section and connection keys remain unchanged.
 const uiLabels: Record<string, string> = {
-  "今日": "Today", "聊天": "Chat", "日记": "Diary", "便笺": "Notes",
+  "今日": "Today", "聊天": "Chat", "日记": "Diary",
   "提醒": "Reminders", "纪念日": "Dates", "音乐": "Music", "相册": "Album",
   "记忆库": "Memory", "欲望": "Desire", "设置": "Settings",
   "Agent 声音": "Agent Voice", "MCP 工具": "MCP Tools",
@@ -549,7 +463,6 @@ const nav = [
   { label: "Letters", english: "Letters", icon: "envelope" },
   { label: "欲望", english: "Desire", icon: "heart" },
   { label: "日记", english: "Diary", icon: "diary" },
-  { label: "便笺", english: "Notes", icon: "note" },
   { label: "提醒", english: "Reminders", icon: "check" },
   { label: "纪念日", english: "Dates", icon: "calendar" },
   { label: "音乐", english: "Music", icon: "music" },
@@ -559,13 +472,6 @@ const nav = [
   { label: "Cinema", english: "Cinema", icon: "play" },
   { label: "设置", english: "Settings", icon: "settings" },
 ];
-type NoteItem = {
-  id: string;
-  text: string;
-  kind: "user" | "agent";
-  tone: string;
-  createdAt: string;
-};
 type TodoItem = {
   id: string;
   title: string;
@@ -685,20 +591,16 @@ type EnvironmentSnapshot = {
 type VesperPreferences = {
   reminders: boolean;
   anniversaries: boolean;
-  agentNotes: boolean;
   careFrequency: "off" | "daily" | "twice-weekly";
   memoryDiary: boolean;
-  memoryNotes: boolean;
   memoryChat: boolean;
   lastExportAt?: string;
 };
 const defaultPreferences: VesperPreferences = {
   reminders: true,
   anniversaries: true,
-  agentNotes: true,
   careFrequency: "daily",
   memoryDiary: true,
-  memoryNotes: true,
   memoryChat: true,
 };
 
@@ -1673,8 +1575,6 @@ function HomeContent() {
             <Letters apiUrl={apiUrl} headers={appHeaders} active={active === "Letters"} theme={darkHome ? "black" : customBackground.includes("white-") ? "white" : "blue"} />
           ) : section === "日记" ? (
             <Diary />
-          ) : section === "便笺" ? (
-            <Notes />
           ) : section === "提醒" ? (
             <Todos />
           ) : section === "纪念日" ? (
@@ -2104,9 +2004,8 @@ function Today({
   active: boolean; dark: boolean; environment: EnvironmentSnapshot;
   onPrevious: () => void; onNext: () => void; track?: Track;
   playing: boolean; onToggle: () => void; userName: string;
-  onOpenSection: (section: "便笺" | "提醒" | "纪念日" | "音乐" | "日记" | "欲望" | "设置") => void;
+  onOpenSection: (section: "提醒" | "纪念日" | "音乐" | "日记" | "欲望" | "设置") => void;
 }) {
-  const [notes] = usePersistentDocument<NoteItem[]>("notes", []);
   const [todos, setTodos] = usePersistentDocument<TodoItem[]>("todos", []);
   const [dates] = usePersistentDocument<AnniversaryItem[]>("anniversaries", []);
   const [now, setNow] = useState(() => new Date());
@@ -2120,7 +2019,6 @@ function Today({
   const dateText = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", weekday: "long" }).format(now);
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const note = latestRowanNote(notes), noteDate = note ? new Date(note.createdAt) : null;
   const nextDate = nextAnniversary(dates, now), target = nextDate ? anniversaryTarget(nextDate, now) : null;
   const pendingTodos = todos.filter(item => !item.done);
   const temperature = typeof environment.temperature === "number" && Number.isFinite(environment.temperature) ? environment.temperature : null;
@@ -2130,12 +2028,6 @@ function Today({
       <h1>{greeting}, {userName}</h1>
     </section>
     <SubscriptionUsage active={active} socketUrl={codexSocketUrl} weeklyOnly />
-    <button type="button" className="desktop-letter" onClick={() => onOpenSection("便笺")} aria-label="Read Rowan’s latest note">
-      <span className="desktop-letter-signature">from Rowan</span>
-      <strong>哥哥留下的</strong>
-      <p>{note?.text || "这里留给哥哥下一张小纸条。"}</p>
-      {noteDate && Number.isFinite(noteDate.getTime()) && <time dateTime={noteDate.toISOString()}>{noteDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</time>}
-    </button>
     <div className="desktop-keepsakes">
       <button type="button" className="desktop-desire" onClick={() => onOpenSection("欲望")} aria-label="Open Desire">
         <img src={dark ? "/home/desire-dark-coast.jpg" : "/home/desire-coast.jpg"} alt="" />
@@ -5267,12 +5159,12 @@ function SettingsPage({
         </>}
         {title === "Tools" && <>
           <SettingRow icon="link" title="MCP Servers" sub="Connect external tools and services" onClick={() => setSelected("MCP 工具")} />
-          <SettingRow icon="link" title="Vesper MCP" sub="Connect external AI to journals, notes and memory" onClick={() => setSelected("Vesper MCP")} />
+          <SettingRow icon="link" title="Vesper MCP" sub="Connect external AI to journals and memory" onClick={() => setSelected("Vesper MCP")} />
           <SettingRow icon="bell" title="Notification" sub="Web Push and Apple notification permissions" onClick={() => setSelected("Notification")} />
-          <SettingRow icon="bell" title="Notification Preferences" sub={`${preferences.reminders ? "Reminders " : ""}${preferences.anniversaries ? "Dates " : ""}${preferences.agentNotes ? "Rowan’s notes" : ""}`.trim() || "All off"} onClick={() => setSelected("通知偏好")} />
+          <SettingRow icon="bell" title="Notification Preferences" sub={`${preferences.reminders ? "Reminders " : ""}${preferences.anniversaries ? "Dates " : ""}`.trim() || "All off"} onClick={() => setSelected("通知偏好")} />
         </>}
         {title === "Data" && <>
-          <SettingRow icon="lock" title="Memory Permissions" sub="Control access to journals, notes and chat separately" onClick={() => setSelected("记忆权限")} />
+          <SettingRow icon="lock" title="Memory Permissions" sub="Control access to journals and chat separately" onClick={() => setSelected("记忆权限")} />
           <SettingRow icon="archive" title="Export &amp; Backup" sub={preferences.lastExportAt ? `Last export: ${new Date(preferences.lastExportAt).toLocaleString("en-US")}` : "Saved locally · App updates preserve your data"} onClick={() => setSelected("导出与备份")} />
         </>}
             </div>
@@ -5840,7 +5732,7 @@ function VesperMcpModal({ onClose }: { onClose: () => void }) {
           <div><small>VESPER MCP</small><h2>Vesper MCP</h2></div>
         </div>
         <div className="connection-symbol"><Icon name="link" /></div>
-        <p>Vesper provides notes, reminders, journals, dates, memory and notification tools to Codex and other AI clients that support remote MCP.</p>
+        <p>Vesper provides reminders, journals, dates, memory and notification tools to Codex and other AI clients that support remote MCP.</p>
         <div className="parameter-form">
           <label className="profile-field">
             <span>Streamable HTTP URL</span>
@@ -6412,9 +6304,7 @@ function FunctionalSettingsModal({
       VesperPreferences,
       | "reminders"
       | "anniversaries"
-      | "agentNotes"
       | "memoryDiary"
-      | "memoryNotes"
       | "memoryChat"
     >,
   ) => onPreferences({ ...preferences, [key]: !preferences[key] });
@@ -6454,12 +6344,6 @@ function FunctionalSettingsModal({
               value={preferences.anniversaries}
               onChange={() => toggle("anniversaries")}
             />
-            <PreferenceToggle
-              label="Rowan’s notes"
-              detail="Allow Vesper to leave messages"
-              value={preferences.agentNotes}
-              onChange={() => toggle("agentNotes")}
-            />
           </div>
         )}
         {type === "关心频率" && (
@@ -6493,12 +6377,6 @@ function FunctionalSettingsModal({
               detail="Allow Rowan to read journals for memories"
               value={preferences.memoryDiary}
               onChange={() => toggle("memoryDiary")}
-            />
-            <PreferenceToggle
-              label="Notes"
-              detail="Allow Rowan to organize and connect notes"
-              value={preferences.memoryNotes}
-              onChange={() => toggle("memoryNotes")}
             />
             <PreferenceToggle
               label="Chat"

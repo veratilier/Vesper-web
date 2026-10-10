@@ -21,7 +21,6 @@ type Env = OAuthEnv & NativeDesireEnv & {
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
 };
-type Note = { id: string; text: string; kind: "user" | "agent"; tone: string; createdAt: string };
 type Todo = { id: string; title: string; done: boolean; due: string; tag: string; createdAt: string };
 type Anniversary = { id: string; title: string; date: string; repeats: boolean };
 type DiaryEntry = { user?: string; agent?: string; updatedAt?: string; agentSource?: string };
@@ -105,12 +104,12 @@ function createServer(env: Env) {
     });
   }
 
-  server.registerTool("vesper_overview", { description: "查看 Vesper 中便笺、待办、纪念日和日记的数量。" }, async () => {
-    const [notes, todos, anniversaries, diary] = await Promise.all([
-      readDoc<unknown[]>(env.DB, "notes", []), readDoc<Todo[]>(env.DB, "todos", []),
+  server.registerTool("vesper_overview", { description: "查看 Vesper 中待办、纪念日和日记的数量。" }, async () => {
+    const [todos, anniversaries, diary] = await Promise.all([
+      readDoc<Todo[]>(env.DB, "todos", []),
       readDoc<unknown[]>(env.DB, "anniversaries", []), readDoc<Record<string, unknown>>(env.DB, "diary", {}),
     ]);
-    return text({ notes: notes.length, todos: todos.length, openTodos: todos.filter((item) => !item.done).length, anniversaries: anniversaries.length, diaryDays: Object.keys(diary).length });
+    return text({ todos: todos.length, openTodos: todos.filter((item) => !item.done).length, anniversaries: anniversaries.length, diaryDays: Object.keys(diary).length });
   });
 
   const mediaOrigin = 'https://api.vesper.r-vera.com';
@@ -136,19 +135,6 @@ function createServer(env: Env) {
   }, async ({ photoIds }) => {
     const owner = (await ownerMemoryScope(env)).userId;
     return text({ photos: await Promise.all([...new Set(photoIds)].map(id => getAlbumPhoto(owner, id, mediaOrigin))), instruction: 'Use the returned photo URLs to display selected photos in your current reply.' });
-  });
-
-  server.registerTool("list_notes", { description: "列出 Vesper 便笺。" }, async () => text(await readDoc(env.DB, "notes", [])));
-  server.registerTool("save_note", {
-    description: "在 Vesper 留下或更新一张 Agent 便笺。",
-    inputSchema: { text: z.string().min(1), id: z.string().optional(), tone: z.string().optional() },
-  }, async ({ text: noteText, id, tone }) => {
-    const notes = await readDoc<Note[]>(env.DB, "notes", []);
-    const entry: Note = { id: id || crypto.randomUUID(), text: noteText, kind: "agent", tone: tone || "cool", createdAt: now() };
-    const index = notes.findIndex((item) => item.id === entry.id);
-    if (index >= 0) notes[index] = { ...notes[index], ...entry }; else notes.push(entry);
-    await writeDoc(env.DB, "notes", notes);
-    return text(entry);
   });
 
   server.registerTool("list_todos", { description: "列出 Vesper 提醒。" }, async () => text(await readDoc(env.DB, "todos", [])));
@@ -222,10 +208,10 @@ function createServer(env: Env) {
   })));
 
   server.registerTool("search_memory", {
-    description: "在 Vesper 的便笺、日记、提醒和纪念日中搜索文字。",
+    description: "在 Vesper 的日记、提醒和纪念日中搜索文字。",
     inputSchema: { query: z.string().min(1) },
   }, async ({ query }) => {
-    const keys = ["notes", "diary", "todos", "anniversaries"];
+    const keys = ["diary", "todos", "anniversaries"];
     const lower = query.toLowerCase();
     const matches = [];
     for (const key of keys) {
