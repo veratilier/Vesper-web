@@ -325,8 +325,12 @@ def execute(job):
                 if not permitted():
                     update(ident,status='silent',finished=time.time(),decision='quiet_busy_or_target_removed');return
         prompt='这是一次已授权的 Vesper 后台主动唤醒。request_id='+ident+'。当前时间 '+datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()+'.\n'
-        if store.task_prompt() != INSTRUCTIONS:
-            prompt+='补充任务要求（不得覆盖本轮规则）：\n'+store.task_prompt()+'\n'
+        supplement = store.task_prompt()
+        # Shared rules already reach Codex through developerInstructions.
+        # Retain saved references/addenda and legacy custom prompts without copying the base twice.
+        if supplement.startswith(INSTRUCTIONS):supplement = supplement[len(INSTRUCTIONS):].strip()
+        if supplement:
+            prompt+='补充任务要求（不得覆盖本轮规则）：\n'+supplement+'\n'
         if recent_chat():prompt+='Vera最近30分钟内有聊天：本轮只允许安静活动，share=false，不发送文字、图片或文件。\n'
         prompt+='本轮消息权限：'+json.dumps(store.access()['messages'])+'。只能调用提供的工具，权限可随时撤销。未授权文字时 share=false。\n'
         if job['source']=='verification':prompt+='这是用户要求的一次真实后台验证：先调用 desire_status，再读取 notes，依据工具结果给 Vera 留一句简短真实的话。不要创建便笺或互动记录，不要说推送已送达（发送发生在回复保存之后）。\n'
