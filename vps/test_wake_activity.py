@@ -31,7 +31,9 @@ class ActivityTests(unittest.TestCase):
             handler = None
             def call(self, method, params):
                 if method == 'account/read': return {'account': {'type': 'chatgpt'}}
-                if method == 'thread/start': return {'thread': {'id': 'thread'}}
+                if method == 'thread/start':
+                    owner.instructions = params['developerInstructions']
+                    return {'thread': {'id': 'thread'}}
                 if method == 'turn/start':
                     owner.prompt = params['input'][0]['text']
                     owner.schema = params['outputSchema']
@@ -86,6 +88,24 @@ class ActivityTests(unittest.TestCase):
             receipt = json.loads(con.execute("SELECT workflow_json FROM calls WHERE name='write_vesper_state'").fetchone()[0])
             self.assertEqual(receipt['completion'], 'completed')
             self.assertFalse(any('xinchao' in row[0] for row in con.execute('SELECT key FROM runtime')))
+
+    def test_saved_references_and_owner_addendum_reach_turn_without_duplicate_rules(self):
+        reference = 'Rowan 自己保存的活动提示词：\nA saved interest.'
+        addendum = 'Vera 的补充提示词：\nAn owner preference.'
+        with patch.object(store, 'task_prompt', return_value=store.DEFAULT_PROMPT+'\n\n'+reference+'\n\n'+addendum):
+            self.run_turn()
+        self.assertEqual(self.instructions, store.DEFAULT_PROMPT)
+        self.assertNotIn(store.DEFAULT_PROMPT, self.prompt)
+        self.assertIn(reference, self.prompt)
+        self.assertIn(addendum, self.prompt)
+
+    def test_legacy_owner_prompt_still_reaches_turn(self):
+        with store.db() as con:
+            store.put(con, 'permission_mode', False)
+            store.put(con, 'task_prompt', 'A legacy owner preference.')
+        self.run_turn()
+        self.assertEqual(self.instructions, store.DEFAULT_PROMPT)
+        self.assertIn('A legacy owner preference.', self.prompt)
 
     def test_recent_chat_permits_quiet_saved_activity_and_suppresses_extra_text(self):
         with patch.object(runner,'recent_chat',return_value=True):
