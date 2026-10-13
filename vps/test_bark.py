@@ -98,6 +98,25 @@ class BarkTests(unittest.TestCase):
             bark.configure(con, {'enabled': True, 'address': 'https://api.day.app/new-fixture-key'})
         calls=[]; bark.deliver_pending(history.db, 'fixture', calls.append)
         self.assertEqual(calls, [])
+    def test_large_existing_avatar_becomes_a_small_notification_preview(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest('Pillow is installed on the deployed VPS')
+        import base64
+        from io import BytesIO
+        output=BytesIO()
+        Image.effect_noise((1100,1100),100).convert('RGB').save(output,format='PNG')
+        raw=output.getvalue(); self.assertGreater(len(raw),512_000)
+        with patch.object(bark,'ROOT',Path(self.temp.name)/'avatars'):
+            with closing(history.db()) as con, con:
+                value=bark.set_profile(con,{'agentName':'Ash','agentAvatar':'data:image/png;base64,'+base64.b64encode(raw).decode()},'fixture')
+            self.assertTrue(value['icon'])
+            file=next(bark.ROOT.glob('*.image'))
+            self.assertLess(file.stat().st_size,40_000)
+            with Image.open(file) as image:
+                self.assertLessEqual(image.width,160); self.assertLessEqual(image.height,160)
+
     def test_avatar_signed_capability_changes_with_current_profile(self):
         import base64
         root=Path(self.temp.name)/'avatars'
