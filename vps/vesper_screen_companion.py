@@ -6,7 +6,6 @@ import queue
 import threading
 import time
 import uuid
-from PIL import Image
 from vesper_companion_poke import active, stamp, transaction
 
 LOCK = threading.RLock()
@@ -42,6 +41,7 @@ def receipt(row):
 def image_data(encoded):
     if not isinstance(encoded, str) or len(encoded) > 700000: raise ValueError('Screen image is too large')
     try:
+        from PIL import Image
         raw = base64.b64decode(encoded, validate=True)
         with Image.open(io.BytesIO(raw)) as image:
             if image.format != 'JPEG' or max(image.size) > 1000 or min(image.size) < 16: raise ValueError('Invalid screen image')
