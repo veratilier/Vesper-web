@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+from io import BytesIO
 import sqlite3
 import threading
 import time
@@ -102,6 +103,16 @@ def set_profile(con, profile, token):
     if isinstance(source, str) and source.startswith('data:image/') and ';base64,' in source:
         try:
             raw = base64.b64decode(source.split(';base64,', 1)[1], validate=True)
+            if raw.startswith((b'\xff\xd8', b'\x89PNG\r\n\x1a\n')) and len(raw) <= 9_000_000:
+                try:
+                    from PIL import Image, ImageOps
+                    with Image.open(BytesIO(raw)) as image:
+                        if image.width * image.height > 32_000_000: raise ValueError('Avatar dimensions exceed limit')
+                        image.thumbnail((160, 160))
+                        image = ImageOps.exif_transpose(image).convert('RGB')
+                        output = BytesIO(); image.save(output, format='JPEG', quality=85); raw = output.getvalue()
+                except (ImportError, OSError):
+                    pass  # Already bounded legacy previews remain usable without Pillow.
             if 0 < len(raw) <= 512_000 and raw.startswith((b'\xff\xd8', b'\x89PNG\r\n\x1a\n')):
                 digest = hashlib.sha256(raw).hexdigest()
                 ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -123,8 +134,8 @@ def set_profile(con, profile, token):
 def load_profile(token):
     request = Request(API_ORIGIN + '/api/state?key=profile', headers={'x-vesper-device-token': token, 'User-Agent': 'curl/8.5.0'})
     with urlopen(request, timeout=8) as response:
-        data = response.read(1_200_001)
-    if len(data) > 1_200_000:
+        data = response.read(16_000_001)
+    if len(data) > 16_000_000:
         raise ValueError('Profile is too large')
     return json.loads(data).get('value', {})
 
