@@ -20,6 +20,7 @@ import vesper_codex_records as codex_records
 import vesper_music_search as music_search
 import vesper_chat_screenshot as chat_screenshot
 import vesper_companion_poke as companion_poke
+import vesper_bark as bark
 import vesper_generated_images as generated_images
 
 
@@ -251,10 +252,40 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "watch" and parts[2] == "stream" and self.command == "GET":
             watch.serve(self, parts[1])
             return
+        if len(parts) == 4 and parts[:3] == ["notifications", "bark", "icon"] and self.command == "GET":
+            digest = parts[3]
+            ticket = parse_qs(urlparse(self.path).query).get("ticket", [""])[0]
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) or not hmac.compare_digest(ticket, bark.icon_ticket(digest, self.watch_secret())):
+                self.send_json(404, {"error": "Icon unavailable"}); return
+            file = bark.ROOT / (digest + ".image")
+            if not file.is_file(): self.send_json(404, {"error": "Icon unavailable"}); return
+            data = file.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png" if data.startswith(b"\x89PNG") else "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=604800, immutable")
+            self.end_headers(); self.wfile.write(data); return
         if not self.authenticated():
             self.send_json(401, {"error": "Unauthorized"})
             return
         path = [unquote(part) for part in urlparse(self.path).path.strip("/").split("/") if part]
+        if path == ["notifications", "bark"] and self.command in ("GET", "POST"):
+            if self.command == "GET":
+                with db() as connection: value = bark.settings(connection)
+                self.send_json(200, value); return
+            body = self.body()
+            if body.get("action") == "test":
+                value = bark.refresh_profile(db, self.watch_secret())
+                try:
+                    bark.send(value, "Bark 已连接，离开聊天后会在整轮回复完成时提醒你。")
+                    self.send_json(200, {"ok": True}); return
+                except Exception:
+                    self.send_json(502, {"error": "Bark delivery could not be confirmed"}); return
+            with db() as connection: value = bark.configure(connection, body)
+            self.send_json(200, value); return
+        if path == ["notifications", "bark", "presence"] and self.command == "POST":
+            with db() as connection: bark.presence(connection, self.body())
+            self.send_json(200, {"ok": True}); return
         if path == ["companion", "poke"] and self.command == "POST":
             status, value = companion_poke.enqueue(db, self.body())
             self.send_json(status, value)
@@ -716,4 +747,5 @@ if __name__ == "__main__":
         pass
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("VESPER_HISTORY_PORT", "4510"))), Handler)
     companion_poke.start(db, recover=True)
+    bark.start(db, lambda: TOKEN_PATH.read_text().strip())
     server.serve_forever()
