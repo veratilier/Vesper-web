@@ -198,8 +198,6 @@ def drain(db, reviewer=generate):
                     con.execute("UPDATE screen_frames SET status='cancelled',finished=? WHERE id=? AND status='running'",(time.time(),job['id']))
                     return
                 now=time.time()
-                # One coherent comment at most every 45 seconds, never a stream of image reports.
-                if now-current['last_reply']<45: reply=''
                 ident='screen:'+job['id']+':reply'
                 deleted=con.execute('SELECT 1 FROM message_tombstones WHERE vesper_conversation_id=? AND stable_id=?',(session['room'],ident)).fetchone()
                 if reply and not deleted:

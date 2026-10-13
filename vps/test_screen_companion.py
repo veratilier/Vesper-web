@@ -67,7 +67,7 @@ class ScreenTests(unittest.TestCase):
             with history.db() as con:
                 self.assertEqual(con.execute('SELECT count(*) FROM messages WHERE role="agent"').fetchone()[0],0)
                 con.execute('UPDATE conversations SET archived_at=NULL')
-    def test_rate_limit_and_foreground_suppression(self):
+    def test_continuous_comments_and_foreground_suppression(self):
         self.seed_screen();f=self.frame();self.request('POST','/companion/watch',f)
         with history.db() as con:
             bark.configure(con,{'enabled':True,'address':'https://api.day.app/fixture'})
@@ -75,9 +75,9 @@ class ScreenTests(unittest.TestCase):
         screen.drain(history.db,lambda *_:{'scene':'one','reply':'Seen in Chat'})
         bark.scan(history.db);bark.deliver_pending(history.db,'fixture',lambda *_:self.fail('Visible reply pushed'))
         self.age();self.request('POST','/companion/watch',self.frame('black'))
-        screen.drain(history.db,lambda *_:{'scene':'two','reply':'Too soon'})
+        screen.drain(history.db,lambda *_:{'scene':'two','reply':'Next scene comment'})
         with history.db() as con:
-            self.assertEqual(con.execute('SELECT count(*) FROM messages WHERE role="agent"').fetchone()[0],1)
+            self.assertEqual(con.execute('SELECT count(*) FROM messages WHERE role="agent"').fetchone()[0],2)
             self.assertEqual(con.execute('SELECT status FROM bark_events').fetchone()[0],'viewed')
     def test_invalid_images_and_expired_sessions_rejected(self):
         self.seed_screen();f=self.frame();f['image']='not-base64'
