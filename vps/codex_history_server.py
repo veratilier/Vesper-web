@@ -88,6 +88,48 @@ def is_internal_context(content: str) -> bool:
     return content.strip().lower().startswith(INTERNAL_CONTEXT_PREFIXES)
 
 
+def valid_history_attachment(item: object) -> bool:
+    if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+        return False
+    try:
+        url = urlparse(item["url"])
+        return url.scheme in {"http", "https"} and bool(url.hostname) and isinstance(item.get("type"), str) and bool(item["type"].strip())
+    except ValueError:
+        return False
+
+
+def valid_history_batch(batch: object, conversation_id: str) -> bool:
+    """Native collected messages keep their visible payloads in child records."""
+    if not isinstance(batch, list) or not batch:
+        return False
+    seen = set()
+    for child in batch:
+        if not isinstance(child, dict):
+            return False
+        child_id = child.get("id")
+        content = child.get("content")
+        metadata = child.get("metadata")
+        if (not isinstance(child_id, str) or not child_id.strip() or child_id in seen
+                or child.get("role") != "user" or child.get("conversationId") != conversation_id
+                or not isinstance(content, str) or len(content) > 120_000
+                or not isinstance(metadata, dict) or metadata.get("batchMessages")
+                or child.get("type", "text") not in ("text", "sticker")
+                or is_internal_context(content)):
+            return False
+        seen.add(child_id)
+        attachments = metadata.get("attachments")
+        has_attachments = isinstance(attachments, list) and bool(attachments) and all(valid_history_attachment(item) for item in attachments)
+        sticker = metadata.get("sticker")
+        has_sticker = isinstance(sticker, dict) and all(sticker.get(key) for key in ("assetId", "url", "mimeType"))
+        music = metadata.get("musicCard")
+        has_music = isinstance(music, dict) and isinstance(music.get("title"), str) and bool(music["title"].strip())
+        location = metadata.get("locationCard")
+        has_location = isinstance(location, dict) and all(isinstance(location.get(key), (int, float)) for key in ("latitude", "longitude"))
+        if not (content.strip() or has_attachments or has_sticker or has_music or has_location):
+            return False
+    return True
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -524,17 +566,10 @@ class Handler(BaseHTTPRequestHandler):
         # Native photo/file messages keep the caption empty and store uploaded
         # media in metadata. Do not reject them before the model turn can start.
         attachments = metadata.get("attachments")
-        def valid_attachment(item: object) -> bool:
-            if not isinstance(item, dict) or not isinstance(item.get("url"), str):
-                return False
-            try:
-                url = urlparse(item["url"])
-                return url.scheme in {"http", "https"} and bool(url.hostname) and isinstance(item.get("type"), str) and bool(item["type"].strip())
-            except ValueError:
-                return False
-        has_attachments = isinstance(attachments, list) and bool(attachments) and all(valid_attachment(item) for item in attachments)
+        has_attachments = isinstance(attachments, list) and bool(attachments) and all(valid_history_attachment(item) for item in attachments)
+        has_batch = role == "user" and valid_history_batch(metadata.get("batchMessages"), conversation_id)
         if (not message_id or role not in {"user", "agent", "system"} or message_type not in {"text", "sticker"}
-                or (message_type == "text" and not content and not has_attachments) or (message_type == "sticker" and not valid_sticker)
+                or (message_type == "text" and not content and not has_attachments and not has_batch) or (message_type == "sticker" and not valid_sticker)
                 or len(content) > 120_000):
             self.send_json(400, {"error": "Invalid message"})
             return
