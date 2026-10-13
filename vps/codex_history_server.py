@@ -19,6 +19,7 @@ import vesper_terminal as terminal
 import vesper_codex_records as codex_records
 import vesper_music_search as music_search
 import vesper_chat_screenshot as chat_screenshot
+import vesper_companion_poke as companion_poke
 import vesper_generated_images as generated_images
 
 
@@ -212,6 +213,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(401, {"error": "Unauthorized"})
             return
         path = [unquote(part) for part in urlparse(self.path).path.strip("/").split("/") if part]
+        if path == ["companion", "poke"] and self.command == "POST":
+            status, value = companion_poke.enqueue(db, self.body())
+            self.send_json(status, value)
+            return
         if len(path) == 3 and path[0] == "conversations" and path[2] == "screenshot" and self.command == "POST":
             try:
                 body = self.body()
@@ -675,4 +680,5 @@ if __name__ == "__main__":
     with db():
         pass
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("VESPER_HISTORY_PORT", "4510"))), Handler)
+    companion_poke.start(db, recover=True)
     server.serve_forever()
