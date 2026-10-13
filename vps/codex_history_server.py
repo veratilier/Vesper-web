@@ -21,6 +21,7 @@ import vesper_music_search as music_search
 import vesper_chat_screenshot as chat_screenshot
 import vesper_companion_poke as companion_poke
 import vesper_bark as bark
+import vesper_screen_companion as screen_companion
 import vesper_generated_images as generated_images
 
 
@@ -286,6 +287,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == ["notifications", "bark", "presence"] and self.command == "POST":
             with db() as connection: bark.presence(connection, self.body())
             self.send_json(200, {"ok": True}); return
+        if path == ["companion", "watch"] and self.command == "POST":
+            status, value = screen_companion.dispatch(db, self.body())
+            self.send_json(status, value); return
+        if len(path) == 4 and path[:2] == ["companion", "watch"] and self.command == "GET":
+            status, value = screen_companion.poll(db, path[2], path[3])
+            self.send_json(status, value); return
         if path == ["companion", "poke"] and self.command == "POST":
             status, value = companion_poke.enqueue(db, self.body())
             self.send_json(status, value)
@@ -747,5 +754,6 @@ if __name__ == "__main__":
         pass
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("VESPER_HISTORY_PORT", "4510"))), Handler)
     companion_poke.start(db, recover=True)
+    screen_companion.start(db)
     bark.start(db, lambda: TOKEN_PATH.read_text().strip())
     server.serve_forever()

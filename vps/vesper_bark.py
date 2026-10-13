@@ -230,10 +230,10 @@ def scan(db):
                         scan_thread(con, lookup[thread], thread, path, config['since'])
         # Independent wake/poke workers already store one final message after successful completion.
         since = datetime.fromtimestamp(config['since'], timezone.utc).isoformat().replace('+00:00', 'Z')
-        rows = con.execute("SELECT m.* FROM messages m JOIN conversations c ON c.vesper_conversation_id=m.vesper_conversation_id WHERE c.archived_at IS NULL AND m.role='agent' AND m.status='delivered' AND m.created_at>=? AND (m.id LIKE 'wake:%:final' OR m.id LIKE 'poke:%:reply')", (since,)).fetchall()
+        rows = con.execute("SELECT m.* FROM messages m JOIN conversations c ON c.vesper_conversation_id=m.vesper_conversation_id WHERE c.archived_at IS NULL AND m.role='agent' AND m.status='delivered' AND m.created_at>=? AND (m.id LIKE 'wake:%:final' OR m.id LIKE 'poke:%:reply' OR m.id LIKE 'screen:%:reply')", (since,)).fetchall()
         for row in rows:
             meta = json.loads(row['metadata_json'])
-            key = 'wake:' + str(meta['wakeRunId']) if meta.get('wakeRunId') else 'poke:' + str(meta['companionPokeId']) if meta.get('companionPokeId') else ''
+            key = 'wake:' + str(meta['wakeRunId']) if meta.get('wakeRunId') else 'poke:' + str(meta['companionPokeId']) if meta.get('companionPokeId') else 'screen:' + str(meta['screenFrameId']) if meta.get('screenFrameId') else ''
             at = completed_time({'timestamp': row['created_at']})
             if key and at: enqueue(con, key, row['vesper_conversation_id'], row['content'], at)
 
