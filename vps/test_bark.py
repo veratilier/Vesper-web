@@ -47,14 +47,14 @@ class BarkTests(unittest.TestCase):
         self.seed()
         self.request('POST', '/conversations/a/messages', {
             'id': 'wake:fixture:final', 'role': 'agent', 'content': '想跟你说句话。',
+            'createdAt': history.now(),
             'metadata': {'wakeRunId': 'fixture', 'voiceMessage': True},
         })
         bark.scan(history.db)
         bark.scan(history.db)
-        sent = []
-        bark.deliver_pending(history.db, 'fixture', sent.append)
-        self.assertEqual(len(sent), 1)
-        self.assertEqual(sent[0]['body'], '🎙️ 语音 · 想跟你说句话。')
+        with closing(history.db()) as con:
+            rows = con.execute("SELECT body FROM bark_events WHERE id='wake:fixture'").fetchall()
+        self.assertEqual([row['body'] for row in rows], ['🎙️ 语音 · 想跟你说句话。'])
     def test_matching_visible_chat_suppressed_even_if_user_leaves_before_poll(self):
         now = self.seed()
         with closing(history.db()) as con, con:
