@@ -67,6 +67,10 @@ def records(thread_id):
             if not line.endswith(b'\n'):
                 break  # Retry a currently-being-written item on the next read.
             state['offset'] = stream.tell()
+            # Most rollout lines are tokens, state updates or tool progress.
+            # Only completed items from this thread can change saved chat history.
+            if b'"item_completed"' not in line or ident.encode('ascii') not in line:
+                continue
             try:
                 event = json.loads(line)
                 payload = event.get('payload', {})
@@ -131,11 +135,19 @@ def sync(con, conversation_id):
     if not current or current['archived_at'] or current['codex_thread_id'] != thread or deletion.is_deleted(con, conversation_id, thread):
         return {'restored': 0}
     deleted = {r[0] for r in con.execute('SELECT stable_id FROM message_tombstones WHERE vesper_conversation_id=?', (conversation_id,))}
+    # Index this room once. The old OR/json_extract query scanned its entire
+    # history for every rollout item, taking seconds on long conversations.
+    saved_by_key = {}
+    for saved in con.execute('SELECT * FROM messages WHERE vesper_conversation_id=?', (conversation_id,)):
+        meta = json.loads(saved['metadata_json'])
+        for key in (saved['id'], saved['item_id'], meta.get('itemId')):
+            if key:
+                saved_by_key.setdefault(key, saved)
     restored = 0
     for item in items:
         if item['type'] != 'AgentMessage' or item['id'] in deleted or not item['text'].strip() or len(item['text']) > 120000:
             continue
-        saved = con.execute('SELECT * FROM messages WHERE vesper_conversation_id=? AND (id=? OR item_id=? OR json_extract(metadata_json,\'$.itemId\')=?)', (conversation_id, item['id'], item['id'], item['id'])).fetchone()
+        saved = saved_by_key.get(item['id'])
         if saved and saved['status'] == 'delivered':
             continue  # Preserve saved/edited content, timestamps, attachment and call metadata.
         if saved and saved['id'] in deleted:
