@@ -43,6 +43,18 @@ class BarkTests(unittest.TestCase):
         self.assertEqual(sent[0]['body'], '第一句\n第二句')
         self.assertEqual(sent[0]['title'], 'Ash'); self.assertEqual(sent[0]['icon'], 'https://fixture.test/avatar.jpg')
         self.assertEqual(sent[0]['url'], 'vesper://chat?backend=vps&conversationId=a')
+    def test_proactive_voice_notification_identifies_audio_once(self):
+        self.seed()
+        self.request('POST', '/conversations/a/messages', {
+            'id': 'wake:fixture:final', 'role': 'agent', 'content': '想跟你说句话。',
+            'createdAt': history.now(),
+            'metadata': {'wakeRunId': 'fixture', 'voiceMessage': True},
+        })
+        bark.scan(history.db)
+        bark.scan(history.db)
+        with closing(history.db()) as con:
+            rows = con.execute("SELECT body FROM bark_events WHERE id='wake:fixture'").fetchall()
+        self.assertEqual([row['body'] for row in rows], ['🎙️ 语音 · 想跟你说句话。'])
     def test_matching_visible_chat_suppressed_even_if_user_leaves_before_poll(self):
         now = self.seed()
         with closing(history.db()) as con, con:

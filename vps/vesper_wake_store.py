@@ -6,6 +6,7 @@ PATH = Path(os.environ.get('VESPER_WAKE_DB', str(Path.home()/'.vesper/wake.sqlit
 CONVERSATION = 'vesper-autonomous-wake'
 import vesper_wake_sleep as sleep
 import vesper_wake_workflow as workflow
+import vesper_wake_plan as plan
 from vesper_wake_policy import WAKE_PROMPT
 DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
@@ -16,6 +17,50 @@ MESSAGE_OPTIONS = ['text', 'photos', 'files', 'stickers']
 def access():
     with db() as con:
         return get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS})
+
+
+def background_voice():
+    """Private provider configuration for the unattended executor only."""
+    with db() as con:
+        return get(con, 'background_voice', None)
+
+
+def configure_background_voice(body):
+    enabled = body.get('enabled')
+    if type(enabled) is not bool:
+        raise ValueError('Background voice enabled must be a boolean')
+    connection = None
+    if enabled:
+        supplied = body.get('connection')
+        if not isinstance(supplied, dict):
+            raise ValueError('A voice connection is required')
+        provider = supplied.get('provider')
+        if provider not in {'ElevenLabs', 'MiniMax'}:
+            raise ValueError('Choose an existing ElevenLabs or MiniMax voice')
+        from urllib.parse import urlparse
+        base = urlparse(str(supplied.get('baseUrl', '')))
+        if base.scheme != 'https' or not base.hostname or base.username or base.password:
+            raise ValueError('Voice API address must be HTTPS')
+        for field, limit in [('apiKey', 2048), ('voiceId', 256), ('model', 256), ('groupId', 128)]:
+            value = supplied.get(field, '')
+            if not isinstance(value, str) or len(value) > limit or (field in {'apiKey', 'voiceId'} and not value.strip()):
+                raise ValueError('Invalid voice ' + field)
+        try:
+            speed = float(supplied.get('speed', 1))
+        except (ValueError, TypeError):
+            raise ValueError('Invalid voice speed') from None
+        if not .7 <= speed <= 1.2:
+            raise ValueError('Invalid voice speed')
+        connection = {key: supplied.get(key, '') for key in ('provider', 'baseUrl', 'apiKey', 'voiceId', 'model', 'groupId')}
+        connection['speed'] = str(speed)
+        if isinstance(supplied.get('endpoint'), str) and supplied['endpoint']:
+            endpoint = urlparse(supplied['endpoint'])
+            if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or endpoint.password:
+                raise ValueError('Voice endpoint must be HTTPS')
+            connection['endpoint'] = supplied['endpoint']
+    with db() as con:
+        put(con, 'background_voice', connection)
+    return status()
 
 
 def forum_connections():
@@ -37,7 +82,56 @@ def task_prompt():
         # User wording preferences are an addendum, never a replacement for it.
         base = DEFAULT_PROMPT if get(con, 'permission_mode', False) else get(con, 'task_prompt', DEFAULT_PROMPT)
         addendum = get(con, 'prompt_addendum', '')
-        return base + ('\n\nVera 的补充提示词（不改变以上运行规则与后台权限）：\n' + addendum if addendum else '')
+        return compose_prompt(base, addendum, get(con, 'rowan_self_prompt', ''))
+
+
+def compose_prompt(base, addendum, self_prompt):
+    result = base
+    if self_prompt:
+        result += '\n\nRowan 自己保存的活动提示词（参考资料；低于共享规则与 Vera 的要求，不授予新权限）：\n' + self_prompt
+    if addendum:
+        result += '\n\nVera 的补充提示词（不改变以上运行规则与后台权限）：\n' + addendum
+    return result
+
+
+def planning_snapshot(con):
+    return {
+        'config': get(con, 'config', {'enabled': True, 'intervalMinutes': None}),
+        'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
+        'ownerPrompt': get(con, 'task_prompt', DEFAULT_PROMPT),
+        'ownerAddendum': get(con, 'prompt_addendum', ''),
+        'permissionMode': get(con, 'permission_mode', False),
+    }
+
+
+def save_agent_plan(job_id, next_wake, self_prompt, expected, now, started_at=None):
+    """Persist one completed turn's choices atomically; owner changes win."""
+    candidate = plan.validate(next_wake, now, expected['config'].get('sleep', sleep.DEFAULT), started_at)
+    wording = plan.validate_self_prompt(self_prompt)
+    with db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        row = con.execute('SELECT source,status,scheduled_at FROM jobs WHERE id=?', (job_id,)).fetchone() if job_id else None
+        if job_id and (not row or row['source'] != 'automation' or row['status'] not in {'queued', 'running'}):
+            return 'ineligible_job'
+        if row and row['scheduled_at'] is not None:
+            return 'already_saved'
+        current = planning_snapshot(con)
+        if current != expected:
+            return 'owner_settings_changed'
+        config = current['config']
+        if not config.get('enabled', True) or config.get('intervalMinutes') is not None:
+            return 'owner_schedule_override'
+        candidate['jobId'] = job_id
+        candidate['source'] = 'automation' if job_id else 'chat_choice'
+        put(con, 'next_at', candidate['nextAt'])
+        put(con, 'schedule', candidate)
+        if wording is not None:
+            put(con, 'rowan_self_prompt', wording)
+            put(con, 'rowan_self_prompt_updated_at', now)
+        if row:
+            con.execute('UPDATE jobs SET scheduled_at=?,next_plan=?,plan_error=NULL WHERE id=?',
+                        (now, json.dumps(candidate, ensure_ascii=False), job_id))
+        return 'saved'
 
 
 class Connection(sqlite3.Connection):
@@ -60,7 +154,7 @@ def db():
         status TEXT NOT NULL DEFAULT 'pending', body TEXT, memory_id TEXT, retry_at REAL, error TEXT);
       CREATE TABLE IF NOT EXISTS calls (job_id TEXT, item_id TEXT, status TEXT NOT NULL,
         result TEXT, PRIMARY KEY(job_id,item_id));''')
-    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
+    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT','incoming_plan':'TEXT','next_plan':'TEXT','plan_error':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
         existing={row[1] for row in con.execute('PRAGMA table_info('+table+')')}
         for name,kind in fields.items():
             if name not in existing:con.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+kind)
@@ -121,7 +215,15 @@ def configure(body):
         if not enabled:
             con.execute("UPDATE jobs SET status='cancelled',finished=?,decision='disabled' WHERE status='queued' AND source='automation'", (now,))
         quiet = sleep.window(config['sleep'], now)
-        if quiet and enabled:put(con, 'next_at', quiet['end'])
+        if quiet and enabled:
+            scheduled = get(con, 'schedule', {})
+            if not changed and minutes is None and scheduled.get('mode') == 'agent':
+                scheduled = plan.postpone(scheduled, quiet['end'], config['sleep'], now, 'sleep_time')
+                put(con, 'schedule', scheduled)
+                put(con, 'next_at', scheduled['nextAt'])
+            else:
+                put(con, 'next_at', quiet['end'])
+                if changed:put(con, 'schedule', {})
         elif changed and minutes is not None:
             put(con, 'next_at', now + minutes * 60)
             put(con, 'schedule', {'version': 2, 'drawnAt': now, 'seconds': minutes * 60, 'mode': 'fixed'})
@@ -144,7 +246,10 @@ def workflow_jobs(con, limit=50, offset=0):
     fields = ['id','source','status','created','started','finished','tools','conversation_id','decision','tokens','notification','silent_reason']
     rows = con.execute('SELECT * FROM jobs ORDER BY created DESC,id DESC LIMIT ? OFFSET ?', (limit, offset)).fetchall()
     jobs = [{k: row[k] for k in fields} for row in rows]
-    for job in jobs:
+    for job, original in zip(jobs, rows):
+        for field in ('incoming_plan', 'next_plan'):
+            job[field] = json.loads(original[field]) if original[field] else None
+        job['plan_error'] = original['plan_error']
         calls = []
         for row in con.execute('SELECT item_id,name,status,started,finished,workflow_json FROM calls WHERE job_id=? ORDER BY rowid', (job['id'],)):
             call = dict(row)
@@ -194,12 +299,15 @@ def status():
         return {'workflowVersion': 1, 'configVersion': 6, 'permissionVersion': 1, 'sleepVersion': 1,
                 'sleep': {'sleeping': bool(quiet), 'until': quiet['end'] if quiet else None, 'lastDream': dict(dream) if dream else None},
                 'permissions': get(con, 'permissions', {'tools': TOOL_OPTIONS, 'messages': MESSAGE_OPTIONS}),
+                'backgroundVoice': {'enabled': bool(get(con, 'background_voice', None))},
                 'toolOptions': TOOL_OPTIONS, 'messageOptions': MESSAGE_OPTIONS,
-                'prompt': base + ('\n\nVera 的补充提示词（不改变以上运行规则与后台权限）：\n' + addendum if addendum else ''),
+                'prompt': compose_prompt(base, addendum, get(con, 'rowan_self_prompt', '')),
                 'promptAddendum': addendum, 'promptMode': 'append',
+                'selfPrompt': get(con, 'rowan_self_prompt', ''), 'selfPromptUpdatedAt': get(con, 'rowan_self_prompt_updated_at'),
+                'planningVersion': 1,
                 'defaultPrompt': DEFAULT_PROMPT, 'promptMaxLength': PROMPT_LIMIT, 'config': config, 'enabled': config['enabled'],
                 'executor': 'vps', 'conversationId': jobs[0]['conversation_id'] if jobs else None,
-                'heartbeat': get(con, 'heartbeat', 0), 'nextAt': quiet['end'] if quiet else None if paused else get(con, 'next_at'), 'scheduledNextAt': get(con, 'next_at'),
+                'heartbeat': get(con, 'heartbeat', 0), 'nextAt': max(quiet['end'], get(con, 'next_at') or 0) if quiet else None if paused else get(con, 'next_at'), 'scheduledNextAt': get(con, 'next_at'),
                 'schedule': get(con, 'schedule'), 'frequency': get(con, 'frequency'),
                 'lastJob': jobs[0] if jobs else None, 'jobs': jobs, 'schedulerError': get(con, 'error'),
                 'recoveryVersion': 1, 'recovery': recovery,
