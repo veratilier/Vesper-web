@@ -235,7 +235,8 @@ def scan(db):
             meta = json.loads(row['metadata_json'])
             key = 'wake:' + str(meta['wakeRunId']) if meta.get('wakeRunId') else 'poke:' + str(meta['companionPokeId']) if meta.get('companionPokeId') else 'screen:' + str(meta['screenFrameId']) if meta.get('screenFrameId') else ''
             at = completed_time({'timestamp': row['created_at']})
-            if key and at: enqueue(con, key, row['vesper_conversation_id'], row['content'], at)
+            body = ('🎙️ 语音 · ' if meta.get('voiceMessage') else '') + row['content']
+            if key and at: enqueue(con, key, row['vesper_conversation_id'], body, at)
 
 
 def deliver_pending(db, token, sender=None):
