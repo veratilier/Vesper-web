@@ -2,15 +2,16 @@
 import argparse,ast,hashlib,shutil,time,os,stat,tempfile
 from pathlib import Path
 
-RPC_BASE = 'af98a1c1650cffbce5d6ab379a61e7552e929335aefeca21a4e8bf2bfddeb4b4'
-CONFIG_BASE = '6f883e78e523922a0f5514632c53168c89f3fbbf789b58f0c18379c53412894c'
-def fingerprint(node):return hashlib.sha256(ast.dump(node,include_attributes=False).encode()).hexdigest()
+RPC_BASE = '3dd3c0d1abf0ebb39c71ed36c0d6802b4829bd660fb0d44502c9e70acb3a0ec2'
+CONFIG_BASE = '1efbaca9682ec3af3a4dbb4f81e0edc83d1b89bd970d331f164bda1ec9b44bd3'
+# Hash source rather than ast.dump: optional AST fields differ across Python versions.
+def fingerprint(source,node):return hashlib.sha256(ast.get_source_segment(source,node).encode()).hexdigest()
 def patch_wake(source):
     tree=ast.parse(source)
     rpc=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='Rpc')
     if rpc.bases and ast.unparse(rpc.bases[0])=='CodexRpc':return source
     config=next(n for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='CONFIG' for t in n.targets))
-    if fingerprint(rpc)!=RPC_BASE or fingerprint(config)!=CONFIG_BASE:
+    if fingerprint(source,rpc)!=RPC_BASE or fingerprint(source,config)!=CONFIG_BASE:
         raise ValueError('Live model transport/config changed; inspect before installing')
     lines=source.splitlines()
     lines[rpc.lineno-1:rpc.end_lineno]=['class Rpc(CodexRpc):','    def __init__(self): super().__init__(WORK)']
