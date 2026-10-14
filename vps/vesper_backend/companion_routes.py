@@ -16,6 +16,10 @@ def dispatch(self, path, services):
         self.send_json(status, value)
         return True
         return True
+    if path == ['companion', 'watch-message'] and self.command == 'POST':
+        status, value = companion_poke.enqueue_watch_message(db, self.body())
+        self.send_json(status, value)
+        return True
     if path == ['companion', 'poke'] and self.command == 'POST':
         status, value = companion_poke.enqueue(db, self.body())
         self.send_json(status, value)

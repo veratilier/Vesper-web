@@ -36,6 +36,34 @@ class PokeTests(unittest.TestCase):
             self.assertEqual(job['status'], 'completed')
             self.assertEqual(job['payload'], '{}')
 
+    def test_watch_message_is_authenticated_durable_and_idempotent(self):
+        body = self.seed_poke() | {'text': '手表发来的一句话'}
+        path = '/companion/watch-message'
+        self.assertEqual(self.request('POST', path, body, token='bad')[0], 401)
+        self.assertEqual(self.request('POST', path, body)[0], 202)
+        self.assertEqual(self.request('POST', path, body)[0], 200)
+        with history.db() as con:
+            rows = con.execute('SELECT role,content FROM messages').fetchall()
+            self.assertEqual([(row['role'], row['content']) for row in rows], [('user', body['text'])])
+        seen = []
+        poke.drain(history.db, lambda payload, context: seen.append((payload, context)) or '手表收到的回复')
+        self.assertEqual(seen[0][0]['kind'], 'watch_message')
+        self.assertEqual(seen[0][0]['text'], body['text'])
+        self.assertFalse(any(item['text'] == body['text'] for item in seen[0][1]))
+        with history.db() as con:
+            rows = con.execute('SELECT role,content FROM messages ORDER BY rowid').fetchall()
+            self.assertEqual([(row['role'], row['content']) for row in rows], [('user', body['text']), ('agent', '手表收到的回复')])
+        self.assertEqual(self.request('POST', path, body)[0], 200)
+        self.assertEqual(self.request('POST', path, dict(body, text=''))[0], 400)
+
+    def test_watch_poke_uses_watch_wording(self):
+        body = self.seed_poke() | {'origin': 'watch'}
+        self.assertEqual(self.request('POST', '/companion/poke', body)[0], 202)
+        with history.db() as con:
+            row = con.execute("SELECT content,metadata_json FROM messages WHERE role='user'").fetchone()
+            self.assertIn('手表', row['content'])
+            self.assertEqual(json.loads(row['metadata_json'])['source'], 'watch')
+
     def test_deleted_target_is_never_restored(self):
         body = self.seed_poke()
         self.assertEqual(self.request('POST', '/companion/poke', body)[0], 202)
