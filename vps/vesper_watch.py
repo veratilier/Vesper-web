@@ -16,6 +16,10 @@ from urllib.parse import urlparse, parse_qs
 ROOT = Path(os.environ.get('VESPER_WATCH_CACHE', '/home/ubuntu/.vesper/watch-cache'))
 COOKIES = os.environ.get('VESPER_BILIBILI_COOKIES', '')
 LOCK = threading.Lock()
+STATE_LOCK = threading.RLock()
+ACTIVE_ID = None
+CANCEL = threading.Event()
+CLEANUP_THREAD = None
 TTL = 6 * 3600
 LIMIT = 2 * 1024**3
 
@@ -37,6 +41,41 @@ def folder(ident):
         raise ValueError('视频编号无效。')
     return ROOT / ident
 
+def release(ident):
+    """A Cinema import is temporary; closing its room cancels and discards it."""
+    path = folder(ident)
+    with STATE_LOCK:
+        if ACTIVE_ID == ident:
+            CANCEL.set()
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+    return {'id': ident, 'status': 'released'}
+
+def cleanup():
+    with STATE_LOCK:
+        for path in ROOT.glob('*'):
+            if not path.is_dir() or not re.fullmatch('[a-f0-9]{32}', path.name): continue
+            data = {}
+            try:
+                data = json.loads((path / 'state.json').read_text())
+                expired = time.time() - float(data['created']) > TTL
+            except (OSError, ValueError, KeyError, TypeError):
+                expired = time.time() - path.stat().st_mtime > TTL
+            if expired or data.get('status') == 'preparing' and ACTIVE_ID != path.name:
+                release(path.name)
+
+def start_cleanup():
+    global CLEANUP_THREAD
+    if CLEANUP_THREAD is not None: return
+    cleanup()
+    def run():
+        while True:
+            time.sleep(60)
+            try: cleanup()
+            except OSError: pass
+    CLEANUP_THREAD = threading.Thread(target=run, daemon=True, name='cinema-cache-cleanup')
+    CLEANUP_THREAD.start()
+
 def save(path, data):
     tmp = path / 'state.tmp'
     tmp.write_text(json.dumps(data, ensure_ascii=False))
@@ -55,6 +94,7 @@ def read(ident):
     return data
 
 def prepare(ident, url):
+    global ACTIVE_ID
     path = folder(ident)
     state = {'id': ident, 'status': 'preparing', 'created': time.time(), 'sourceHash': hashlib.sha256(url.encode()).hexdigest()}
     save(path, state)
@@ -73,6 +113,7 @@ def prepare(ident, url):
         proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         deadline = time.monotonic() + 1800
         while proc.poll() is None:
+            if CANCEL.is_set(): raise RuntimeError('Cinema 已关闭。')
             if time.monotonic() > deadline or sum(f.stat().st_size for f in path.iterdir() if f.is_file()) > LIMIT:
                 raise RuntimeError('视频准备超时或超过 2 GB 限额，请换较短的视频。')
             time.sleep(1)
@@ -107,10 +148,15 @@ def prepare(ident, url):
         if state['status'] == 'failed':
             for f in path.iterdir():
                 if f.is_file(): f.unlink()
-        save(path, state)
-        LOCK.release()
+        with STATE_LOCK:
+            if CANCEL.is_set(): shutil.rmtree(path, ignore_errors=True)
+            else: save(path, state)
+            ACTIVE_ID = None; CANCEL.clear()
+            LOCK.release()
 
 def start(url):
+    global ACTIVE_ID
+    cleanup()
     url = canonical(url)
     source_hash = hashlib.sha256(url.encode()).hexdigest()
     # Same private source within the existing TTL joins its import or reuses its file.
@@ -127,17 +173,17 @@ def start(url):
         raise ValueError('另一个视频正在准备，请稍后再试。')
     try:
         ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for p in ROOT.iterdir():
-            if p.is_dir() and re.fullmatch('[a-f0-9]{32}', p.name) and time.time() - p.stat().st_mtime > TTL:
-                shutil.rmtree(p)
         if sum(f.stat().st_size for f in ROOT.glob('*/*') if f.is_file()) > 4 * 1024**3:
             raise ValueError('临时视频缓存已满，过期清理后再试。')
         ident = secrets.token_hex(16)
-        path = folder(ident); path.mkdir(mode=0o700)
-        save(path, {'id': ident, 'status': 'preparing', 'created': time.time(), 'sourceHash': source_hash})
+        with STATE_LOCK:
+            path = folder(ident); path.mkdir(mode=0o700)
+            save(path, {'id': ident, 'status': 'preparing', 'created': time.time(), 'sourceHash': source_hash})
+            ACTIVE_ID = ident; CANCEL.clear()
         threading.Thread(target=prepare, args=(ident, url), daemon=True).start()
         return {'id': ident, 'status': 'preparing'}
     except Exception:
+        with STATE_LOCK: ACTIVE_ID = None; CANCEL.clear()
         LOCK.release()
         raise
 
