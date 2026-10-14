@@ -5,6 +5,29 @@ from unittest.mock import patch
 import vesper_watch as w
 
 class WatchTests(unittest.TestCase):
+    def test_cleanup_removes_expired_and_interrupted_imports_without_new_download(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(w, 'ROOT', Path(tmp)):
+            for ident, created, status in [('a'*32, 0, 'ready'), ('b'*32, w.time.time(), 'preparing'), ('c'*32, w.time.time(), 'ready')]:
+                path=w.folder(ident);path.mkdir();(path/'media.mp4').write_bytes(b'fixture')
+                w.save(path, {'status':status,'created':created})
+            other=Path(tmp)/'unrelated';other.mkdir();(other/'keep').write_bytes(b'keep')
+            w.cleanup()
+            self.assertFalse(w.folder('a'*32).exists())
+            self.assertFalse(w.folder('b'*32).exists())
+            self.assertTrue(w.folder('c'*32).exists())
+            self.assertTrue((other/'keep').exists())
+    def test_release_ready_import_is_idempotent_and_scoped(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(w, 'ROOT', Path(tmp)):
+            path=w.folder('a'*32);path.mkdir();(path/'media.mp4').write_bytes(b'fixture')
+            self.assertEqual(w.release('a'*32)['status'],'released')
+            self.assertFalse(path.exists())
+            w.release('a'*32)
+            with self.assertRaises(ValueError):w.release('../other')
+    def test_release_preparing_import_requests_cancellation_without_deleting_active_files(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(w,'ROOT',Path(tmp)), patch.object(w,'ACTIVE_ID','a'*32), patch.object(w,'CANCEL',w.threading.Event()):
+            path=w.folder('a'*32);path.mkdir();(path/'media.mp4.part').write_bytes(b'fixture')
+            w.release('a'*32)
+            self.assertTrue(w.CANCEL.is_set());self.assertTrue(path.exists())
     def test_only_bilibili_playback_urls(self):
         self.assertEqual(w.canonical('https://www.bilibili.com/video/BV1abc?p=2&foo=secret'), 'https://www.bilibili.com/video/BV1abc?p=2')
         for url in ['http://www.bilibili.com/video/BV1abc', 'https://127.0.0.1/video/BV1abc', 'https://www.bilibili.com.evil.test/video/BV1abc', 'https://user@www.bilibili.com/video/BV1abc', 'https://www.bilibili.com/redirect', 'https://www.bilibili.com/video/BV1abc?p=0']:
@@ -63,6 +86,11 @@ class WatchTests(unittest.TestCase):
                         self.assertEqual(response.read(), b'2345')
                         self.assertEqual(response.headers['Content-Range'], 'bytes 2-5/10')
                         self.assertEqual(response.headers['Access-Control-Allow-Origin'], 'https://vesper.r-vera.com')
+                    with self.assertRaises(HTTPError) as raised:urlopen(Request(base,method='DELETE'))
+                    self.assertEqual(raised.exception.code,401)
+                    with urlopen(Request(base,method='DELETE',headers={'Authorization':'Bearer fixture'})) as response:
+                        self.assertEqual(response.status,200)
+                    self.assertFalse(path.exists())
                 finally:
                     server.shutdown(); server.server_close(); thread.join()
 

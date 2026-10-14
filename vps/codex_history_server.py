@@ -336,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if path == ["watch"] and self.command == "POST":
                     self.send_json(202, watch.start(self.body().get("url")))
+                elif len(path) == 2 and self.command == "DELETE":
+                    self.send_json(200, watch.release(path[1]))
                 elif len(path) == 2 and self.command == "GET":
                     data = watch.read(path[1])
                     if data["status"] == "ready":
@@ -755,5 +757,6 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("VESPER_HISTORY_PORT", "4510"))), Handler)
     companion_poke.start(db, recover=True)
     screen_companion.start(db)
+    watch.start_cleanup()
     bark.start(db, lambda: TOKEN_PATH.read_text().strip())
     server.serve_forever()
