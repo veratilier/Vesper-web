@@ -126,7 +126,8 @@ class WakeTests(unittest.TestCase):
         class Night(datetime):
             @classmethod
             def now(cls,tz=None):return datetime(2026,9,10,2,tzinfo=tz)
-        with patch.object(runner,'datetime',Night),patch.object(runner,'Rpc',Rpc),patch.object(runner,'http',http):
+        history=[{'id':'real-user','vesper_conversation_id':'chat-existing','metadata_json':'{}','content':'Hello'}]
+        with patch.object(runner,'datetime',Night),patch.object(runner,'Rpc',Rpc),patch.object(runner,'http',http),patch.object(runner,'front_busy',lambda n:False),patch.object(policy,'history',lambda p,**kw:history):
             with self.assertRaisesRegex(RuntimeError,'API-key fallback disabled'):runner.execute(job)
 
 if __name__=='__main__':unittest.main()

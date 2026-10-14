@@ -27,6 +27,11 @@ def dispatch(self, path, services):
                 self.send_json(200, wake_store.configure(body))
             except ValueError as error:
                 self.send_json(400, {'error': str(error)})
+        elif body.get('action') == 'backgroundVoice':
+            try:
+                self.send_json(200, wake_store.configure_background_voice(body))
+            except ValueError as error:
+                self.send_json(400, {'error': str(error)})
         elif body.get('action') == 'prompt':
             try:
                 self.send_json(200, wake_store.update_prompt(body))
