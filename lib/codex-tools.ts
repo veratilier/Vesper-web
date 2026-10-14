@@ -1,6 +1,5 @@
 import { createChatKeep, historyRead, verifyPhotoSource } from './chat-keeps';
 import { WEB_MUSIC, neteaseTrackId, initializeWebMusicQueue } from "./web-music";
-import { cleanMusicDocument } from '@/lib/music-data';
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
@@ -14,7 +13,6 @@ import { memoryScopeFromRequest } from './memory';
 import { listAlbumPhotos, saveAlbumPhoto, getAlbumPhoto } from '@/lib/photo-album';
 import { deliverChatFiles } from './generated-chat-files';
 import { readExecutions } from '@/lib/codex-events';
-import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
 import { callConfiguredMcpTool, configuredMcpTools } from "@/lib/mcp-connections";
 import { type MemoryScope } from "@/lib/memory";
@@ -41,22 +39,9 @@ const sectionToKey: Record<string, string> = {
 import { codexToolDefinitions } from "./codex-tool-definitions";
 export { codexToolDefinitions };
 
-async function readDocument(key: string): Promise<unknown> {
-  if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
-  const row = await getDb().prepare("SELECT value FROM vesper_documents WHERE key = ?")
-    .bind(key).first<{ value: string }>();
-  if (!row) return key === "diary" || key === "settings" ? {} : [];
-  try { return JSON.parse(row.value); } catch { return null; }
-}
-
-async function writeDocument(key: string, value: unknown) {
-  value = cleanMusicDocument(key, value);
-  if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
-  await getDb().prepare(`INSERT INTO vesper_documents(key,value,updated_at) VALUES(?,?,?)
-    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
-    .bind(key, JSON.stringify(value), new Date().toISOString()).run();
-  return value;
-}
+import { documents } from './backend/services';
+async function readDocument(key: string): Promise<unknown> { return (await documents()).value(key); }
+async function writeDocument(key: string, value: unknown) { return (await (await documents()).write(key, value)).value; }
 
 async function readMusicTracks(key: string) {
   const value = await readDocument(key);
@@ -256,27 +241,26 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (kind === "reminder") {
       const title = String(input.title || input.text || "").trim();
       if (!title) throw new Error("Reminder title is required");
-      const todos = (await readDocument("todos")) as Array<Record<string, unknown>>;
       const entry = { id: crypto.randomUUID(), title, done: false, due: String(input.due || input.date || ""), tag: String(input.tag || "Agent"), createdAt: now };
-      await writeDocument("todos", [...todos, entry]);
+      await (await documents()).update("todos", value => [...value as Array<Record<string, unknown>>, entry]);
       return { saved: true, section: "reminders", entry };
     }
     if (kind === "anniversary") {
       const title = String(input.title || input.text || "").trim();
       const date = String(input.date || "");
       if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Anniversary title/date is invalid");
-      const anniversaries = (await readDocument("anniversaries")) as Array<Record<string, unknown>>;
       const entry = { id: crypto.randomUUID(), title, date, repeats: input.repeats !== false };
-      await writeDocument("anniversaries", [...anniversaries, entry]);
+      await (await documents()).update("anniversaries", value => [...value as Array<Record<string, unknown>>, entry]);
       return { saved: true, section: "anniversaries", entry };
     }
     if (kind === "journal") {
       const date = String(input.date || "");
       const text = String(input.text || "").trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !text) throw new Error("Journal date/text is invalid");
-      const diary = { ...await readDocument("diary") as Record<string, unknown> };
-      diary[date] = { ...(diary[date] as Record<string, unknown> || {}), agent: text, updatedAt: now };
-      await writeDocument("diary", diary);
+      await (await documents()).update("diary", value => {
+        const diary = { ...value as Record<string, unknown> };
+        return { ...diary, [date]: { ...(diary[date] as Record<string, unknown> || {}), agent: text, updatedAt: now } };
+      });
       return { saved: true, section: "journal", date };
     }
     throw new Error(`Unsupported write kind: ${kind}`);

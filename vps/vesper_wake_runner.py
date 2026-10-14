@@ -2,6 +2,7 @@
 """Vesper unattended executor. Uses the installed Codex + its existing ChatGPT login.
 No model API key. Model runs are never automatically replayed after an uncertain failure.
 """
+from vesper_backend.codex_provider import Rpc as CodexRpc, CONFIG
 import argparse, fcntl, json, os, queue, random, signal, sqlite3, subprocess, threading, time, tempfile, tomllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,10 +25,6 @@ ALLOWED={'letter_list','letter_create','letter_read','letter_keep','jotting_list
          'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
 READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','album_search_photos','sticker_search'}
-CONFIG={'apps._default.enabled':False,
-        'apps.asdk_app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
-        'apps.app_6a92be9d9e1c819197f58017d0e2b985.enabled':False,
-        'features.shell_tool':False}
 INSTRUCTIONS=policy.WAKE_PROMPT
 
 def iso():return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
@@ -52,38 +49,8 @@ def http(path, body=None, history=False):
     if r.returncode or not status.startswith('2'):raise RuntimeError(f'HTTP {path.split("?")[0]} failed ({status or "network"})')
     return json.loads(payload)
 
-class Rpc:
-    def __init__(self):
-        WORK.mkdir(parents=True,exist_ok=True)
-        # stdio is owned by the VPS runner, never by a browser socket.
-        clean_env={k:v for k,v in os.environ.items() if k not in {'OPENAI_API_KEY','CODEX_API_KEY'}}
-        self.p=subprocess.Popen(['/usr/bin/codex','app-server'],cwd=WORK,env=clean_env,
-            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,bufsize=1)
-        self.q=queue.Queue();self.seq=0;self.pending=[];self.handler=lambda m:None
-        def reader():
-            for line in self.p.stdout:
-                try:self.q.put(json.loads(line))
-                except ValueError:pass
-            self.q.put({'_closed':True})
-        threading.Thread(target=reader,daemon=True).start()
-    def send(self,msg):self.p.stdin.write(json.dumps(msg,ensure_ascii=False)+'\n');self.p.stdin.flush()
-    def next(self,timeout=30):
-        msg=self.q.get(timeout=timeout)
-        if msg.get('_closed'):raise RuntimeError('Codex process closed')
-        return msg
-    def call(self,method,params,timeout=90):
-        self.seq+=1;ident=self.seq;self.send({'id':ident,'method':method,'params':params});end=time.time()+timeout
-        while time.time()<end:
-            msg=self.next(max(.1,end-time.time()))
-            if msg.get('id')==ident and 'method' not in msg:
-                if 'error' in msg:raise RuntimeError(f'Codex {method}: {str(msg["error"].get("message","failed"))[:180]}')
-                return msg.get('result',{})
-            self.handler(msg)
-        raise TimeoutError(method)
-    def close(self):
-        self.p.terminate()
-        try:self.p.wait(timeout=10)
-        except subprocess.TimeoutExpired:self.p.kill();self.p.wait()
+class Rpc(CodexRpc):
+    def __init__(self): super().__init__(WORK)
 
 def save_message(job,ident,role,content,metadata,status='delivered'):
     return http('/conversations/'+job['conversation_id']+'/messages',{

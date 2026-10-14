@@ -1,5 +1,5 @@
 import { registerPhotoSource } from './photo-album';
-import { env } from 'cloudflare:workers';
+import { media } from './backend/services';
 export async function createChatFile(input: Record<string, unknown>, owner: string, origin: string) {
   const name = String(input.name || '').replace(/[\r\n\0/\\]/g, '_').slice(0, 160);
   if (!name) throw new Error('File name required');
@@ -22,7 +22,7 @@ export async function createChatFile(input: Record<string, unknown>, owner: stri
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', identity)), x => x.toString(16).padStart(2, '0')).join('');
   const extension = name.split('.').pop()?.replace(/[^a-z0-9]/gi, '').slice(0, 12) || 'bin';
   const key = `${hash}.${extension}`;
-  await (env as unknown as { MEDIA: R2Bucket }).MEDIA.put(key, bytes, { httpMetadata: { contentType: type, contentDisposition: `${type.startsWith('image/') || type.startsWith('audio/') || type.startsWith('video/') ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}` } });
+  await media().put(key, bytes, type, `${type.startsWith('image/') || type.startsWith('audio/') || type.startsWith('video/') ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`);
   if (type.startsWith('image/')) await registerPhotoSource(owner, { key, name, type, size: bytes.length }, 'agent');
   return { key, url: `${origin}/api/media/${key}`, name, type, size: bytes.length };
 }

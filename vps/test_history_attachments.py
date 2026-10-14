@@ -6,6 +6,7 @@ import codex_history_server as server
 
 
 class Request:
+    services = server.Handler.services
     path = '/conversations/test'
 
     def __init__(self, body=None):

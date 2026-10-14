@@ -92,7 +92,7 @@ def enqueue(db, body):
 
 
 def generate(payload, messages):
-    from vesper_wake_runner import Rpc, CONFIG, WORK
+    from vesper_backend.codex_provider import Rpc, CONFIG, WORK
     rpc = Rpc()
     finished = False
     failed = False

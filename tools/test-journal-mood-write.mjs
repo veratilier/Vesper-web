@@ -32,7 +32,9 @@ function evaluate(path, mocks, suffix = '') {
     {exports,console,crypto,require:name => mocks[name] || {}});
   return exports;
 }
+const repository = evaluate('lib/backend/documents.ts', {'@/db/schema':{allowedDocumentKeys:new Set(['diary'])},'@/lib/music-data':{cleanMusicDocument:(_key,value)=>value}});
 const native = evaluate('lib/codex-tools.ts', {
+  './backend/services':{documents:async()=>new repository.DocumentRepository(db)},
   './journal-moods':moods,
   '@/db/schema':{allowedDocumentKeys:new Set(['diary'])},
   '@/lib/db':{ensureSchema:async()=>{},getDb:()=>db},

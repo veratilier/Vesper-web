@@ -3,6 +3,7 @@ import json, tempfile
 from pathlib import Path
 import codex_history_server as server
 class Request:
+    services = server.Handler.services
     def send_json(self,status,value):self.status,self.value=status,value
 with tempfile.TemporaryDirectory() as directory:
     server.DB_PATH=Path(directory)/'history.sqlite3'
