@@ -6,6 +6,7 @@ import codex_history_server as server
 from vesper_browser_body import visible_body, patch_source
 
 class Request:
+    services = server.Handler.services
     path = '/conversations/deleted?latest=1&limit=40'
     def send_json(self, status, value): self.status, self.value = status, value
 

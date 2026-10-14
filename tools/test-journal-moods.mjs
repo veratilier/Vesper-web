@@ -14,9 +14,13 @@ assert.equal(original.moodLabels,undefined);
 assert.deepEqual(read['2026-10-06'].moodLabels,{user:[],agent:[]});
 assert.equal(journalEntryForRead(null),null);
 assert.equal(Object.keys(journalMoodLabels).length,24);
+const db={prepare:()=>({bind:key=>({first:async()=>({value:JSON.stringify(key==='diary'?diary:[])})})})};
+const repository={};
+vm.runInNewContext(ts.transpileModule(readFileSync('lib/backend/documents.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:repository,require:name=>name==='@/db/schema'?{allowedDocumentKeys:new Set(['diary','todos','notes','anniversaries','settings','music'])}:{cleanMusicDocument:(_key,value)=>value}});
 const exports = {};
 vm.runInNewContext(ts.transpileModule(readFileSync('lib/codex-tools.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText, {exports,console,crypto,require(name) {
   if(name==='./journal-moods') return {journalForRead};
+  if(name==='./backend/services') return {documents:async()=>new repository.DocumentRepository(db)};
   if(name==='@/db/schema') return {allowedDocumentKeys:new Set(['diary','todos','notes','anniversaries','settings','music'])};
   if(name==='@/lib/db') return {ensureSchema:async()=>{},getDb:()=>({prepare:()=>({bind:key=>({first:async()=>({value:JSON.stringify(key==='diary'?diary:[])})})})})};
   if(name==='./desire/tools') return {desireTools:[]};

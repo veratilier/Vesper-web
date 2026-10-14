@@ -128,7 +128,7 @@ def poll(db, session, request):
 
 
 def generate(config, context, raw, alive):
-    from vesper_wake_runner import Rpc, CONFIG, WORK
+    from vesper_backend.codex_provider import Rpc, CONFIG, WORK
     rpc = Rpc()
     finished, failed, replies = False, False, []
     def handle(event):
