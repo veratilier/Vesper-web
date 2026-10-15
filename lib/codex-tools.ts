@@ -388,6 +388,22 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!already) await mergeMusicLibrary([track], musicKeys.library);
     return { ok: true, alreadyInPlaylist: already, trackId: track.id, playlist: "Vesper music" };
   }
+  if (name === "music_playlist_remove") {
+    const playlists = await readVesperPlaylists();
+    const playlist = playlists.find(item => item.id === input.playlistId);
+    if (!playlist) throw new Error("Unknown Vesper playlistId; list playlists first");
+    const trackId = String(input.trackId || "");
+    if (!trackId) throw new Error("trackId is required");
+    const originalLength = playlist.tracks.length;
+    playlist.tracks = playlist.tracks.filter(track =>
+      track.id !== trackId && track.appleMusicId !== trackId && `apple-${track.appleMusicId}` !== trackId);
+    const removed = playlist.tracks.length !== originalLength;
+    if (removed) {
+      playlist.updatedAt = new Date().toISOString();
+      await writeDocument("musicPlaylists", playlists);
+    }
+    return { saved: true, removed, playlist };
+  }
   if (name === "sticker_search") {
     if (!memoryScope) throw new Error("Sticker scope is unavailable");
     const query = String(input.query || "").trim();

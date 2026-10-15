@@ -86,6 +86,13 @@ try {
   assert.deepEqual(playbackRequest.command.queue.map(t=>t.id),[apple.id,apple2.id]);
   assert.deepEqual((await get('musicQueue')).value.map(t=>t.id),[apple.id,apple2.id]);
   assert.equal((await get('webMusicQueue')).value[0].id,net.id);
+  const removed=await tool('music_playlist_remove',{playlistId:playlist.id,trackId:apple2.id},null);
+  assert.equal((await removed.json()).result.removed,true);
+  assert.deepEqual((await get('musicPlaylists')).value[0].tracks.map(t=>t.id),[apple.id]);
+  assert.deepEqual((await get('musicQueue')).value.map(t=>t.id),[apple.id,apple2.id], 'removing from a playlist must leave playback alone');
+  const removedAgain=await tool('music_playlist_remove',{playlistId:playlist.id,trackId:apple2.id},null);
+  assert.equal((await removedAgain.json()).result.removed,false);
+  assert.equal((await tool('music_playlist_remove',{playlistId:'missing',trackId:apple.id},null)).status,400);
   await put('musicPlayback',{trackId:apple.id,positionSeconds:10,durationSeconds:180});
   const seek=await tool('music_seek',{positionSeconds:45},null);
   assert.equal(seek.status,200);assert.equal((await seek.json()).result.command.trackId,apple.id);
