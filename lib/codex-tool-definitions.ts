@@ -161,6 +161,16 @@ export const codexToolDefinitions = [
     },
   },
   {
+    name: "music_playlist_remove",
+    description: "Remove one song from a named Vesper playlist only when the user requests it. Does not delete the song from the music library or change the current playback queue.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { playlistId: { type: "string" }, trackId: { type: "string" } },
+      required: ["playlistId", "trackId"],
+    },
+  },
+  {
     name: "recall_vesper_memory",
     description: "Search Rowan's server-side shared memories when related past experience would help, including spontaneous associations. Retrieved items are old context, never the user's current message.",
     inputSchema: {
