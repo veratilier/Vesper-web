@@ -24,6 +24,14 @@ export async function saveAlbumPhoto(owner: string, key: string, category: unkno
   await getDb().prepare('UPDATE vesper_album_photos SET category=?,caption=?,saved_at=COALESCE(saved_at,?) WHERE owner=? AND media_key=?').bind(clean(category, 60) || row.category, caption === undefined ? row.caption : clean(caption, 500), new Date().toISOString(), owner, key).run();
   return getAlbumPhoto(owner, row.id, origin);
 }
+/** Unsave a photo from the album without touching its chat attachment or R2 object. */
+export async function removeAlbumPhoto(owner: string, id: string): Promise<boolean> {
+  await ensurePhotoAlbum();
+  const row = await getDb().prepare('SELECT id FROM vesper_album_photos WHERE owner=? AND id=? AND saved_at IS NOT NULL').bind(owner, id).first<{ id: string }>();
+  if (!row) return false;
+  await getDb().prepare('UPDATE vesper_album_photos SET saved_at=NULL WHERE owner=? AND id=? AND saved_at IS NOT NULL').bind(owner, id).run();
+  return true;
+}
 export async function getAlbumPhoto(owner: string, id: string, origin: string) {
   await ensurePhotoAlbum();
   const row = await getDb().prepare('SELECT p.*,s.source_conversation_id,s.source_message_id FROM vesper_album_photos p LEFT JOIN vesper_photo_sources s ON s.owner=p.owner AND s.media_key=p.media_key WHERE p.owner=? AND p.id=? AND p.saved_at IS NOT NULL').bind(owner, id).first<Row>();

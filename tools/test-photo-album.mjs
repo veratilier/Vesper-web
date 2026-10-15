@@ -10,7 +10,7 @@ const db = { prepare(sql) {
 } };
 const exports = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/photo-album.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports, require(name) { assert.equal(name, './db'); return { getDb: () => db }; }, crypto: globalThis.crypto });
-const { registerPhotoSource, saveAlbumPhoto, listAlbumPhotos, getAlbumPhoto } = exports;
+const { registerPhotoSource, saveAlbumPhoto, removeAlbumPhoto, listAlbumPhotos, getAlbumPhoto } = exports;
 const origin = 'https://example.test';
 await registerPhotoSource('vera', { key: 'abc-123.jpg', name: '100% sky.jpg', type: 'image/jpeg', size: 20 }, 'user');
 assert.equal((await listAlbumPhotos('vera', {}, origin)).photos.length, 0, 'upload must not archive');
@@ -39,3 +39,9 @@ await exports.linkPhotoSource('vera', saved.key, { conversationId: 'real-chat', 
 assert.equal((await getAlbumPhoto('vera', saved.id, origin)).sourceMessageId, 'real-message');
 assert.equal((await listAlbumPhotos('vera', { query: '100%' }, origin)).photos[0].sourceConversationId, 'real-chat');
 assert.equal((await listAlbumPhotos('other', {}, origin)).photos.length, 0, 'provenance must not cross owners');
+assert.equal(await removeAlbumPhoto('other', saved.id), false, 'another owner cannot remove the photo');
+assert.equal(await removeAlbumPhoto('vera', saved.id), true);
+assert.equal(await removeAlbumPhoto('vera', saved.id), false, 'a repeated removal is not reported as new');
+assert.equal((await listAlbumPhotos('vera', { query: '100%' }, origin)).photos.length, 0, 'removed photo leaves album results');
+await assert.rejects(getAlbumPhoto('vera', saved.id, origin));
+assert.equal(sqlite.prepare('SELECT media_key FROM vesper_album_photos WHERE id=?').get(saved.id).media_key, saved.key, 'underlying chat media registration remains');
