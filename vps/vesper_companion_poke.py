@@ -47,7 +47,13 @@ def write_message(con, job, suffix, role, text, extra=None):
     if con.execute('SELECT 1 FROM message_tombstones WHERE vesper_conversation_id=? AND stable_id=?', (room, ident)).fetchone():
         return False
     at = stamp()
-    meta = {'companionPokeId': job['id'], 'source': 'lockscreen', **(extra or {})}
+    # A typed watch message shares this queue with taps, but is ordinary chat.
+    # Giving its user row companionPokeId makes native clients render the text
+    # as a "pat" notice instead of showing the message body.
+    if role == 'user' and (extra or {}).get('watchMessage') is True:
+        meta = {'watchMessageId': job['id'], 'source': 'watch', **extra}
+    else:
+        meta = {'companionPokeId': job['id'], 'source': 'lockscreen', **(extra or {})}
     con.execute('''INSERT OR IGNORE INTO messages
       (id,vesper_conversation_id,role,content,status,metadata_json,created_at,updated_at,source,time_source,message_type)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (ident, room, role, text, 'delivered', json.dumps(meta, ensure_ascii=False), at, at, 'codex', 'message', 'text'))
