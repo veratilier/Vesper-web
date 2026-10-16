@@ -146,6 +146,20 @@ export const codexToolDefinitions = [
     }, required: ["name", "requestId"] },
   },
   {
+    name: "music_playlist_rename",
+    description: "Rename a Vesper playlist by its exact playlistId. Its songs and ID stay the same; Apple Music playlists are not changed.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      playlistId: { type: "string" }, name: { type: "string", minLength: 1, maxLength: 100 },
+    }, required: ["playlistId", "name"] },
+  },
+  {
+    name: "music_playlist_delete",
+    description: "Delete a named Vesper playlist only when the user explicitly requests it. Songs stay in the music library and the current playback queue; Apple Music playlists are not changed.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      playlistId: { type: "string" },
+    }, required: ["playlistId"] },
+  },
+  {
     name: "music_playlist_play",
     description: "Replace the device playback queue with a named Vesper playlist and play its first song. Use the exact playlistId returned by music_playlist_list. This requests playback; only device confirmation establishes success.",
     inputSchema: { type: "object", additionalProperties: false, properties: { playlistId: { type: "string" } }, required: ["playlistId"] },

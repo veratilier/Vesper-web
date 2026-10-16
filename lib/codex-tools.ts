@@ -357,6 +357,30 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     await writeDocument("musicPlaylists", [...playlists, playlist]);
     return { saved: true, playlist };
   }
+  if (name === "music_playlist_rename") {
+    const playlistId = String(input.playlistId || "");
+    const title = typeof input.name === "string" ? input.name.trim() : "";
+    if (!playlistId || !title || title.length > 100) throw new Error("Provide a playlistId and a name of up to 100 characters");
+    const playlists = await readVesperPlaylists();
+    const playlist = playlists.find(item => item.id === playlistId);
+    if (!playlist) throw new Error("Unknown Vesper playlistId; list playlists first");
+    const renamed = playlist.name !== title;
+    if (renamed) {
+      playlist.name = title;
+      playlist.updatedAt = new Date().toISOString();
+      await writeDocument("musicPlaylists", playlists);
+    }
+    return { saved: true, renamed, playlist };
+  }
+  if (name === "music_playlist_delete") {
+    const playlistId = String(input.playlistId || "");
+    if (!playlistId) throw new Error("playlistId is required");
+    const playlists = await readVesperPlaylists();
+    const remaining = playlists.filter(item => item.id !== playlistId);
+    const deleted = remaining.length !== playlists.length;
+    if (deleted) await writeDocument("musicPlaylists", remaining);
+    return { saved: true, deleted, playlistId };
+  }
   if (name === "music_playlist_play") {
     if (context.musicSurface === "web") throw new Error("Play Vesper playlists in the native app.");
     const playlist = (await readVesperPlaylists()).find(item => item.id === input.playlistId);
