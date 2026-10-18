@@ -1,9 +1,9 @@
 import json
 import sqlite3
 import unittest
-import subprocess
 from io import BytesIO
-from unittest.mock import patch, Mock
+from PIL import Image
+from unittest.mock import patch
 import vesper_chat_screenshot as screenshot
 
 
@@ -26,46 +26,17 @@ class OriginalScreenshotTests(unittest.TestCase):
         self.assertEqual(data['messages'][0]['content'],'你好 <script>steal()</script>')
         self.assertEqual(data['conversationId'], 'one')
         self.assertEqual(data['messages'][1]['role'], 'agent')
-        self.assertIn('capture=agent', screenshot.capture_url(data))
+        with patch.object(screenshot, '_capture_appearance', return_value={'palette': 'blue', 'shade': 0.28, 'backgroundUrl': ''}):
+            result = screenshot.render(data, 'not-used')
+        picture = Image.open(BytesIO(__import__('base64').b64decode(result['base64'])))
+        self.assertEqual(picture.size[0], screenshot.PHONE_WIDTH)
+        self.assertEqual(result['messageIds'], ['u', 'a'])
+        self.assertEqual(result['mimeType'], 'image/jpeg')
 
     def test_wrong_missing_duplicate_reordered_private_ids(self):
         for ids in (['other'],['missing'],['u','u'],['a','u'],['hidden'],[]):
             with self.subTest(ids=ids),self.assertRaises(ValueError):
                 screenshot.select_messages(self.db,'one',ids)
-
-    def test_capture_uses_only_authorized_original_snapshot(self):
-        data = screenshot.select_messages(self.db, 'one', ['u', 'a'])
-        self.db.execute('UPDATE messages SET content="later edit" WHERE id="u"')
-        history = screenshot.capture_history(data)
-        self.assertEqual([m['id'] for m in history['messages']], ['u', 'a'])
-        self.assertEqual(history['messages'][0]['content'], '你好 <script>steal()</script>')
-        self.assertFalse(history['hasMore'])
-        self.assertEqual(history['messages'][0]['metadata'], {'attachments': []})
-
-    def test_capture_state_exposes_only_appearance_and_profile(self):
-        opener = Mock()
-        opener.open.return_value = BytesIO(json.dumps({'documents': {
-            'profile': {'value': {'userName': 'Vera'}},
-            'appearance': {'value': {'accent': '#fff'}},
-            'private-notes': {'value': 'not needed by capture'},
-        }}).encode())
-        with patch.object(screenshot, 'build_opener', return_value=opener) as factory:
-            state = screenshot.capture_appearance('fixture-token')
-        self.assertEqual(set(state['documents']), {'profile', 'appearance'})
-        request = opener.open.call_args.args[0]
-        self.assertEqual(request.full_url, screenshot.API_ORIGIN + '/api/state')
-        self.assertEqual(request.get_header('X-vesper-device-token'), 'fixture-token')
-        self.assertIsNone(factory.call_args.args[0].redirect_request(None, None, 302, '', {}, 'https://other.test'))
-
-    def test_timeout_cleans_up_browser_process_group(self):
-        process = Mock(pid=12345)
-        process.communicate.side_effect = subprocess.TimeoutExpired('renderer', 40)
-        with patch.object(screenshot.subprocess, 'Popen', return_value=process) as launch, patch.object(screenshot.os, 'killpg') as kill:
-            with self.assertRaises(screenshot.ScreenshotUnavailable):
-                screenshot._render({'messageIds': ['u']}, 'fixture-token')
-        self.assertTrue(launch.call_args.kwargs['start_new_session'])
-        kill.assert_called_once_with(12345, screenshot.signal.SIGKILL)
-        process.wait.assert_called_once()
 
     def test_archived_and_deleted_conversation(self):
         self.db.execute('UPDATE conversations SET archived_at="now" WHERE vesper_conversation_id="one"')
@@ -76,14 +47,22 @@ class OriginalScreenshotTests(unittest.TestCase):
         self.db.execute('UPDATE messages SET content=? WHERE id="u"',('字'*16001,))
         with self.assertRaises(ValueError): screenshot.select_messages(self.db,'one',['u'])
 
-    def test_browser_request_policy_and_credentials_scope(self):
-        data=screenshot.select_messages(self.db,'one',['u','a'])
-        exact='https://codex.r-vera.com/history/conversations/one?captureMessageId=u&captureMessageId=a'
-        self.assertEqual(screenshot.request_policy(exact,'GET',data),'history')
-        self.assertEqual(screenshot.request_policy('https://api.vesper.r-vera.com/api/state','GET',data),'app')
-        self.assertEqual(screenshot.request_policy('https://vesper.r-vera.com/backgrounds/vesper-marble-20260908.jpg','GET',data),'asset')
-        for url,method in [(exact,'POST'),(exact.replace('one','two'),'GET'),(exact.replace('&captureMessageId=a',''),'GET'),('http://127.0.0.1/private','GET'),('https://evil.test/photo.jpg','GET'),('https://api.vesper.r-vera.com/api/codex/tools','GET'),('https://vesper.r-vera.com/api/state','PUT')]:
-            with self.subTest(url=url,method=method): self.assertIsNone(screenshot.request_policy(url,method,data))
+    def test_explicit_bubbles_are_original_and_separate(self):
+        self.db.execute('UPDATE messages SET content=?,metadata_json=? WHERE id="a"', (
+            '第一句。\n\n第二句。', json.dumps({'bubbles': [{'text': '第一句。'}, {'text': '第二句。'}]})))
+        data = screenshot.select_messages(self.db, 'one', ['a'])
+        self.assertEqual(data['messages'][0]['textBubbles'], ['第一句。', '第二句。'])
+        self.db.execute('UPDATE messages SET metadata_json=? WHERE id="a"', (
+            json.dumps({'bubbles': [{'text': '替换原文'}]}),))
+        data = screenshot.select_messages(self.db, 'one', ['a'])
+        self.assertEqual(data['messages'][0]['textBubbles'], [])
+
+    def test_photo_origin_is_fixed(self):
+        for url in ('http://127.0.0.1/private', 'https://evil.test/api/media/a.jpg',
+                    'https://api.vesper.r-vera.com/api/state',
+                    'https://api.vesper.r-vera.com/api/media/a.jpg?redirect=1'):
+            with self.subTest(url=url), self.assertRaises(screenshot.ScreenshotUnavailable):
+                screenshot._photo_bytes({'url': url})
 
 
 if __name__ == '__main__': unittest.main()
