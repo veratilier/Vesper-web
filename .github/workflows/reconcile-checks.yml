@@ -40,6 +40,8 @@ jobs:
       - run: node --test tests/service-worker.test.mjs tests/browser-storage.test.mjs
       - name: VPS isolated regression tests
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk
           python3 -m pip install aiohttp==3.14.3 Pillow
           for test in vps/test_*.py; do
             python3 "$test" || exit 1
