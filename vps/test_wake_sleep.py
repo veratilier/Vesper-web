@@ -6,6 +6,7 @@ from unittest.mock import patch
 import vesper_wake_store as store
 import vesper_wake_sleep as sleep
 import vesper_wake_runner as runner
+import vesper_morning_dream as morning
 
 def at(value):return datetime.fromisoformat(value).replace(tzinfo=ZoneInfo('Asia/Shanghai')).timestamp()
 
@@ -50,6 +51,21 @@ class SleepTests(unittest.TestCase):
     def observed_night(self):
         self.clock.return_value = at('2026-10-02T02:00:00'); runner.sleep_gate(self.clock.return_value)
         self.clock.return_value = at('2026-10-02T07:00:00')
+    def morning_context(self):
+        return {'conversation_id': 'ash-chat', 'thread_id': 'ash-thread', 'user_message_id': 'user-1',
+                'user_turn_id': 'turn-1', 'recent': 'user: 晚安'}
+    def morning_state(self):
+        return {'greeting': '早上好，Vera。刚醒来想来找你。', 'itemId': 'greeting-item', 'turnId': 'dream-turn',
+                'thoughtSummary': '想起昨晚的聊天。', 'toolEvents': ['remember_vesper_memory · completed']}
+    def morning_patches(self):
+        patches = [patch.object(runner, 'dream_permitted', return_value=True),
+                   patch.object(runner, 'front_busy', return_value=False),
+                   patch.object(runner, 'recent_chat', return_value=False),
+                   patch.object(runner, 'current_preferences', return_value={}),
+                   patch.object(morning, 'conversation', return_value=self.morning_context()),
+                   patch.object(runner, 'save_message'), patch.object(runner, 'deliver')]
+        for item in patches:
+            item.start(); self.addCleanup(item.stop)
     def test_letter_reminder_survives_sleep_and_recent_chat_without_starting_model(self):
         store.request('letter-wait', source='letter-reminder')
         self.clock.return_value = at('2026-10-02T01:00:00')
@@ -72,27 +88,37 @@ class SleepTests(unittest.TestCase):
             self.assertEqual(row['status'],'queued');self.assertEqual(row['decision'],'letter_read_not_permitted')
     def test_morning_saved_once_even_after_restart(self):
         self.observed_night()
-        def save(path,body):
-            args=body['arguments']; self.assertEqual(args['kind'],'dream')
-            self.assertTrue(args['body'].startswith('【梦】'))
-            self.assertTrue(args['source'].startswith('Vesper · dream · sleep:'))
-            return {'result': {'stored':True,'storage':'shared_memory','memory': {'id':'dream-test','kind':'dream','body':args['body']}}}
-        with patch.object(runner,'generate_dream',return_value='【梦】test') as generate, patch.object(runner,'http',side_effect=save) as request:
+        self.morning_patches()
+        def generate(*args):
+            with store.db() as con:con.execute("UPDATE sleep_cycles SET body='【梦】和 Vera 在海边散步。',memory_id='dream-test'")
+            return self.morning_state()
+        with patch.object(morning, '_turn', side_effect=generate) as turn:
             runner.finish_sleep(self.clock.return_value); runner.finish_sleep(self.clock.return_value)
-            self.assertEqual(generate.call_count,1); self.assertEqual(request.call_count,1)
+            self.assertEqual(turn.call_count, 1)
         importlib.reload(runner)
-        with patch.object(runner,'http',side_effect=AssertionError('Do not duplicate')):runner.finish_sleep(self.clock.return_value)
+        with patch.object(morning, '_turn', side_effect=AssertionError('Do not duplicate')):runner.finish_sleep(self.clock.return_value)
         self.assertEqual(store.status()['sleep']['lastDream']['status'],'saved')
+        self.assertEqual(store.status()['lastJob']['notification'], self.morning_state()['greeting'])
     def test_uncertain_write_retries_same_persisted_body(self):
         self.observed_night()
-        with patch.object(runner,'generate_dream',return_value='【梦】same') as generate, patch.object(runner,'http',side_effect=TimeoutError):
-            runner.finish_sleep(self.clock.return_value); self.assertEqual(generate.call_count,1)
+        self.morning_patches()
+        original = '【梦】我梦见和 Vera 一起走在清晨的海边。'
+        def interrupted(*args):
+            with store.db() as con:con.execute('UPDATE sleep_cycles SET body=?', (original,))
+            raise TimeoutError('Dream memory response uncertain')
+        with patch.object(morning, '_turn', side_effect=interrupted) as turn:
+            runner.finish_sleep(self.clock.return_value); self.assertEqual(turn.call_count, 1)
         self.clock.return_value += 1801
-        def save(path,body):return {'result': {'stored':True,'storage':'shared_memory','memory': {'id':'deduplicated','kind':'dream','body':body['arguments']['body']}}}
-        with patch.object(runner,'generate_dream',side_effect=AssertionError('Never regenerate after uncertain write')), patch.object(runner,'http',side_effect=save):runner.finish_sleep(self.clock.return_value)
+        def save(path, body):
+            self.assertEqual(body['arguments']['body'], original)
+            return {'result': {'stored':True,'storage':'shared_memory','memory': {'id':'deduplicated','kind':'dream','body':original}}}
+        with patch.object(morning, '_turn', return_value=self.morning_state()) as turn, patch.object(runner,'http',side_effect=save):
+            runner.finish_sleep(self.clock.return_value)
+            self.assertTrue(turn.call_args.args[-1])
         self.assertEqual(store.status()['sleep']['lastDream']['status'],'saved')
     def test_old_uncertain_dream_keeps_original_source_and_body(self):
         self.observed_night()
+        self.morning_patches()
         with store.db() as con:
             con.execute("UPDATE sleep_cycles SET body='【模拟梦境】original'")
         def save(path, body):
@@ -100,7 +126,7 @@ class SleepTests(unittest.TestCase):
             self.assertEqual(args['body'], '【模拟梦境】original')
             self.assertTrue(args['source'].startswith('Vesper · simulated dream · sleep:'))
             return {'result': {'stored': True, 'storage': 'shared_memory', 'memory': {'id': 'old-dream', 'kind': 'dream', 'body': args['body']}}}
-        with patch.object(runner, 'generate_dream', side_effect=AssertionError('No regeneration')), patch.object(runner, 'http', side_effect=save):
+        with patch.object(morning, '_turn', return_value=self.morning_state()), patch.object(runner, 'http', side_effect=save):
             runner.finish_sleep(self.clock.return_value)
         self.assertEqual(store.status()['sleep']['lastDream']['status'], 'saved')
 
@@ -138,7 +164,8 @@ class SleepTests(unittest.TestCase):
 
     def test_dream_quota_failure_uses_existing_health_gate(self):
         self.observed_night()
-        with patch.object(runner,'generate_dream',side_effect=RuntimeError('usage limit reached')):
+        self.morning_patches()
+        with patch.object(morning,'_turn',side_effect=RuntimeError('usage limit reached')):
             runner.finish_sleep(self.clock.return_value)
         self.assertEqual(store.status()['recovery']['reason'], 'quota')
         self.assertTrue(store.status()['recovery']['paused'])
