@@ -226,6 +226,7 @@ export const allowedDocumentKeys = new Set([
   "readingRoom",
   "profile",
   "appearance",
+  "chatCaptureAppearance",
   "notes",
   "todos",
   "anniversaries",

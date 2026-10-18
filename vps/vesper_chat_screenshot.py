@@ -1,31 +1,47 @@
-"""Render only verified chat records. No model HTML, arbitrary URL or shell input."""
+"""Render verified original chat records directly, without opening Vesper Web."""
 import base64
 import hashlib
+import io
 import json
+from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
-import os
-import signal
-from io import BytesIO
-from urllib.parse import urlencode, urlparse, parse_qs, quote
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 RENDER_LOCK = threading.BoundedSemaphore(1)
+PHONE_WIDTH = 786
+MAX_HEIGHT = 18000
+MAX_BYTES = 4 * 1024 * 1024
+MAX_MEDIA_BYTES = 8 * 1024 * 1024
+MEDIA_HOSTS = {'api.vesper.r-vera.com', 'vesper.r-vera.com'}
+ASSET = Path(__file__).with_name('vesper-chat-background.jpg')
+WHITE_ASSET = Path(__file__).with_name('vesper-chat-background-white.jpg')
+BLACK_ASSET = Path(__file__).with_name('vesper-chat-background-black.jpg')
+APPEARANCE_URL = 'https://api.vesper.r-vera.com/api/state?key=chatCaptureAppearance'
 
 
 class ScreenshotUnavailable(Exception):
     pass
 
 
-def select_messages(connection, conversation_id, ids):
-    if not isinstance(ids, list) or not 1 <= len(ids) <= 12 or any(not isinstance(i, str) or not i or len(i) > 256 for i in ids) or len(set(ids)) != len(ids):
+def select_messages(connection: sqlite3.Connection, conversation_id: str, ids: list[str]) -> dict:
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= 12
+            or any(not isinstance(i, str) or not i or len(i) > 256 for i in ids)
+            or len(set(ids)) != len(ids)):
         raise ValueError('Choose 1–12 unique original message IDs')
-    conversation = connection.execute('SELECT title FROM conversations WHERE vesper_conversation_id=? AND archived_at IS NULL', (conversation_id,)).fetchone()
+    conversation = connection.execute(
+        'SELECT title FROM conversations WHERE vesper_conversation_id=? AND archived_at IS NULL',
+        (conversation_id,)).fetchone()
     if not conversation:
         raise ValueError('Original conversation is unavailable')
-    rows = connection.execute('SELECT * FROM messages WHERE vesper_conversation_id=? AND id IN (' + ','.join('?' for _ in ids) + ') ORDER BY created_at,rowid', (conversation_id, *ids)).fetchall()
+    rows = connection.execute(
+        'SELECT * FROM messages WHERE vesper_conversation_id=? AND id IN ('
+        + ','.join('?' for _ in ids) + ') ORDER BY created_at,rowid',
+        (conversation_id, *ids)).fetchall()
     if [r['id'] for r in rows] != ids:
         raise ValueError('Messages must exist in this conversation, in chronological order')
     messages = []
@@ -33,255 +49,306 @@ def select_messages(connection, conversation_id, ids):
         metadata = json.loads(row['metadata_json'] or '{}')
         if (row['role'] == 'user' and metadata.get('wake')) or metadata.get('sticker') or metadata.get('musicCard'):
             raise ValueError('Select visible text or photo messages; control messages and rich cards cannot be captured')
-        if row['role'] not in ('user', 'agent') or metadata.get('blockType', '') not in ('', 'agentMessage', 'assistantMessage', 'userMessage', 'text') or metadata.get('hidden') or metadata.get('internal'):
+        if (row['role'] not in ('user', 'agent')
+                or metadata.get('blockType', '') not in ('', 'agentMessage', 'assistantMessage', 'userMessage', 'text')
+                or metadata.get('hidden') or metadata.get('internal')):
             raise ValueError('Only visible original chat messages can be captured')
-        messages.append({'id': row['id'], 'role': row['role'], 'content': row['content'], 'createdAt': row['created_at'], 'attachments': metadata.get('attachments', []), 'metadata': {key: metadata[key] for key in ('bubbles', 'replyTo', 'turnId', 'showTurnStatus') if key in metadata}})
+        attachments = metadata.get('attachments', [])
+        if not isinstance(attachments, list) or len(attachments) > 12:
+            raise ValueError('Invalid original photo attachments')
+        if any(not isinstance(a, dict) or not str(a.get('type', '')).startswith('image/') for a in attachments):
+            raise ValueError('Only original photo attachments can be captured')
+        explicit = metadata.get('bubbles', [])
+        text_bubbles = ([bubble.get('text') for bubble in explicit]
+                        if isinstance(explicit, list) and explicit
+                        and all(isinstance(bubble, dict) and isinstance(bubble.get('text'), str) for bubble in explicit)
+                        else [])
+        if text_bubbles and '\n\n'.join(text_bubbles) != row['content']:
+            text_bubbles = []
+        messages.append({
+            'id': row['id'], 'role': row['role'], 'content': row['content'],
+            'createdAt': row['created_at'], 'attachments': attachments, 'textBubbles': text_bubbles,
+        })
     if sum(len(m['content']) for m in messages) > 16000:
         raise ValueError('Choose a shorter excerpt; original text will not be truncated')
-    return {'title': conversation['title'], 'conversationId': conversation_id, 'messages': messages, 'messageIds': ids}
+    return {'title': conversation['title'], 'conversationId': conversation_id,
+            'messages': messages, 'messageIds': ids}
 
 
-def render(data, token):
+def render(data: dict, token: str) -> dict:
+    # The token stays in the history service. Original media URLs are public,
+    # fixed-origin reads; neither the model nor the image renderer gets the token.
     if not RENDER_LOCK.acquire(blocking=False):
-        raise ScreenshotUnavailable("Screenshot renderer is busy; retry shortly")
+        raise ScreenshotUnavailable('Screenshot renderer is busy; retry shortly')
     try:
-        return _render(data, token)
+        data = {**data, 'appearance': _capture_appearance(token)}
+        result = subprocess.run(
+            [sys.executable, __file__, '--render'], input=json.dumps(data, ensure_ascii=False),
+            capture_output=True, text=True, timeout=40,
+        )
+        if result.returncode:
+            raise ScreenshotUnavailable('Screenshot renderer is unavailable')
+        output = json.loads(result.stdout)
+        if 'error' in output:
+            raise ScreenshotUnavailable(output['error'])
+        output['messageIds'] = data['messageIds']
+        return output
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        raise ScreenshotUnavailable('Screenshot renderer timed out or is unavailable') from exc
     finally:
         RENDER_LOCK.release()
 
 
-def _render(data, token):
-    process = None
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def _capture_appearance(token: str) -> dict:
+    fallback = {'palette': 'blue', 'shade': 0.16, 'backgroundUrl': '',
+                'glassStyle': 'classic', 'glassFrost': False,
+                'glassTransparency': 0.0, 'reduceTransparency': False}
     try:
-        process = subprocess.Popen([sys.executable, __file__, '--render'], stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                   start_new_session=True)
-        stdout, _ = process.communicate(json.dumps({'data': data, 'token': token}, ensure_ascii=False), timeout=40)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ScreenshotUnavailable('Screenshot renderer timed out or is unavailable') from exc
-    finally:
-        # Chrome and the Playwright driver are grandchildren. Killing just the
-        # Python process leaves them consuming memory after a timeout.
-        if process is not None:
-            try: os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError: pass
-            process.wait()
-    if process.returncode:
-        raise ScreenshotUnavailable('Screenshot renderer unavailable. Install Playwright, Google Chrome and CJK fonts; deploy the matching Vesper Web capture view. No screenshot was created.')
-    output = json.loads(stdout)
-    output.update(messageIds=data['messageIds'])
-    return output
+        request = Request(APPEARANCE_URL, headers={
+            'x-vesper-device-token': token, 'Accept': 'application/json',
+            'User-Agent': 'VesperHistory/1.0',
+        })
+        with build_opener(_NoRedirect()).open(request, timeout=5) as response:
+            if response.status != 200:
+                return fallback
+            value = json.load(response).get('value')
+        if not isinstance(value, dict):
+            return fallback
+        palette = value.get('palette')
+        shade = value.get('shade')
+        background = value.get('backgroundUrl')
+        if palette not in ('blue', 'white', 'black') or not isinstance(shade, (int, float)) or not 0 <= shade <= 0.7:
+            return fallback
+        if not isinstance(background, str) or len(background) > 1024:
+            return fallback
+        if background:
+            # The image subprocess performs the exact fixed-origin media check.
+            parsed = urlparse(background)
+            if parsed.scheme != 'https' or parsed.hostname not in MEDIA_HOSTS or not parsed.path.startswith('/api/media/'):
+                return fallback
+        style = value.get('glassStyle', 'classic')
+        frost = value.get('glassFrost', False)
+        transparency = value.get('glassTransparency', 0.0)
+        reduce_transparency = value.get('reduceTransparency', False)
+        if (style not in ('liquid', 'classic') or not isinstance(frost, bool)
+                or isinstance(transparency, bool) or not isinstance(transparency, (int, float))
+                or not 0 <= transparency <= 1 or not isinstance(reduce_transparency, bool)):
+            return fallback
+        return {'palette': palette, 'shade': shade, 'backgroundUrl': background,
+                'glassStyle': style, 'glassFrost': frost,
+                'glassTransparency': transparency, 'reduceTransparency': reduce_transparency}
+    except (OSError, ValueError, KeyError, TypeError):
+        return fallback
 
 
-PHONE_WIDTH = 393
-PHONE_HEIGHT = 852
-
-WEB_ORIGIN = 'https://vesper.r-vera.com'
-API_ORIGIN = 'https://api.vesper.r-vera.com'
-HISTORY_ORIGIN = 'https://codex.r-vera.com'
-
-
-def capture_url(data):
-    return WEB_ORIGIN + '/?' + urlencode([('capture', 'agent'), ('conversation', data['conversationId']), *[('message', i) for i in data['messageIds']]])
-
-
-def request_policy(url, method, data):
-    """Credentials are added only to the precise read endpoints, never assets."""
+def _photo_bytes(attachment: dict) -> bytes:
+    url = str(attachment.get('url') or '')
     parsed = urlparse(url)
-    origin = parsed.scheme + '://' + parsed.netloc
-    if method != 'GET' or parsed.username or parsed.password:
-        return None
-    if origin == HISTORY_ORIGIN and parsed.path == '/history/conversations/' + quote(data['conversationId'], safe=''):
-        if parse_qs(parsed.query).get('captureMessageId') == data['messageIds']:
-            return 'history'
-        return None
-    if origin == API_ORIGIN and parsed.path == '/api/state':
-        return 'app'
-    if origin in (API_ORIGIN, WEB_ORIGIN) and re.fullmatch(r'/api/media/[a-zA-Z0-9-]+\.[a-zA-Z0-9]+', parsed.path):
-        return 'media'
-    if origin == WEB_ORIGIN and not parsed.path.startswith('/api/'):
-        return 'asset'
-    return None
+    if (parsed.scheme != 'https' or parsed.hostname not in MEDIA_HOSTS
+            or parsed.port is not None or parsed.username or parsed.password
+            or not re.fullmatch(r'/api/media/[a-zA-Z0-9-]+\.[a-zA-Z0-9]+', parsed.path)
+            or parsed.query or parsed.fragment):
+        raise ScreenshotUnavailable('Original photo URL is unavailable for capture')
+    try:
+        with build_opener(_NoRedirect()).open(
+            Request(url, headers={'Accept': 'image/*', 'User-Agent': 'VesperHistory/1.0'}), timeout=7
+        ) as response:
+            if response.status != 200 or not response.headers.get('content-type', '').startswith('image/'):
+                raise ScreenshotUnavailable('Original photo could not be loaded')
+            payload = response.read(MAX_MEDIA_BYTES + 1)
+    except ScreenshotUnavailable:
+        raise
+    except Exception as exc:
+        raise ScreenshotUnavailable('Original photo could not be loaded') from exc
+    if len(payload) > MAX_MEDIA_BYTES:
+        raise ScreenshotUnavailable('Original photo is too large to capture')
+    return payload
 
 
-VISIBLE_IMAGES_READY = 'Array.from(document.querySelectorAll(".chat-capture img")).filter(i => i.checkVisibility()).every(i => i.complete && i.naturalWidth > 0)'
+def _font(size: int):
+    from PIL import ImageFont
+    candidates = (
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        '/System/Library/Fonts/PingFang.ttc',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+    )
+    for path in candidates:
+        if Path(path).is_file():
+            return ImageFont.truetype(path, size)
+    raise ScreenshotUnavailable('A Chinese font is required for chat screenshots')
 
 
-def capture_history(data):
-    """Serve the exact database snapshot already authorized by select_messages.
+def _lines(content: str, font, max_width: int) -> list[str]:
+    # Pixel measured wrapping preserves original words, line breaks and symbols.
+    result = []
+    for paragraph in content.replace('\r\n', '\n').split('\n'):
+        if not paragraph:
+            result.append('')
+            continue
+        rest = paragraph
+        while rest:
+            low, high = 1, len(rest)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if font.getlength(rest[:middle]) <= max_width:
+                    low = middle
+                else:
+                    high = middle - 1
+            count = max(1, low)
+            if count < len(rest):
+                break_at = max(rest.rfind(' ', 0, count + 1), rest.rfind('\t', 0, count + 1))
+                if break_at > count // 2:
+                    count = break_at + 1
+            result.append(rest[:count])
+            rest = rest[count:]
+    return result
 
-    Rendering must not re-fetch the same history through the public proxy: that
-    adds a second network/auth boundary and can race later edits to the records.
-    """
+
+def _load_photos(attachments: list[dict]) -> list:
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    Image.MAX_IMAGE_PIXELS = 20_000_000
+    photos = []
+    for attachment in attachments:
+        try:
+            payload = _photo_bytes(attachment)
+            with Image.open(io.BytesIO(payload)) as source:
+                picture = ImageOps.exif_transpose(source).convert('RGB')
+                picture.thumbnail((560, 620), Image.Resampling.LANCZOS)
+                photos.append(picture)
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise ScreenshotUnavailable('Original photo could not be decoded') from exc
+    return photos
+
+
+def _draw_glass_bubble(canvas, box: tuple[int, int, int, int], role: str,
+                       palette: str, appearance: dict) -> None:
+    from PIL import Image, ImageDraw, ImageFilter
+    left, top, right, bottom = box
+    size = (right - left, bottom - top)
+    mask = Image.new('L', size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=34, fill=255)
+    original = canvas.crop(box)
+    dark = palette == 'black'
+    outgoing = role == 'agent'
+    if appearance.get('reduceTransparency', False):
+        blur_radius, blur_mix = 0, 0
+        tint = (30, 30, 30, 255) if dark else (255, 255, 255, 255)
+        border_alpha = 70
+    elif appearance.get('glassStyle') == 'liquid':
+        hazy = appearance.get('glassFrost', False)
+        blur_radius, blur_mix = (12, 0.78) if hazy else (2, 0.3)
+        if dark:
+            tint = (230, 230, 230, 55 if hazy else 27)
+        elif outgoing:
+            tint = (159, 198, 220, 118 if hazy else 72)
+        else:
+            tint = (255, 255, 255, 120 if hazy else 64)
+        border_alpha = 150 if hazy else 175
+    else:
+        transparency = appearance.get('glassTransparency', 0.0)
+        strength = 1 - max(0, min(1, transparency))
+        blur_radius, blur_mix = 13, 0.84 * strength
+        if dark:
+            tint = (230, 230, 230, round(70 * strength))
+        elif outgoing:
+            tint = (171, 205, 224, round(143 * strength))
+        else:
+            tint = (255, 255, 255, round(169 * strength))
+        border_alpha = round(130 * strength)
+    glass = Image.blend(original, original.filter(ImageFilter.GaussianBlur(blur_radius)), blur_mix) if blur_mix else original
+    glass = Image.alpha_composite(glass, Image.new('RGBA', size, tint))
+    if border_alpha:
+        edge = Image.new('RGBA', size, (0, 0, 0, 0))
+        ImageDraw.Draw(edge).rounded_rectangle(
+            (1, 1, size[0] - 2, size[1] - 2), radius=33,
+            outline=(255, 255, 255, border_alpha) if not dark else (255, 255, 255, border_alpha // 2), width=2)
+        glass = Image.alpha_composite(glass, edge)
+    canvas.paste(glass, (left, top), mask)
+
+
+def render_child(data: dict) -> dict:
+    from PIL import Image, ImageDraw, ImageOps
+    appearance = data.get('appearance') or {}
+    palette = appearance.get('palette', 'blue')
+    asset = {'blue': ASSET, 'white': WHITE_ASSET, 'black': BLACK_ASSET}.get(palette, ASSET)
+    background_url = appearance.get('backgroundUrl', '')
+    if not background_url and not asset.is_file():
+        raise ScreenshotUnavailable('Chat screenshot background is unavailable')
+    body_font = _font(30)
+    line_height = 43
+    edge = 40
+    bubble_max = 624
+    blocks = []
+    y = 44
+    for message in data['messages']:
+        role = message['role']
+        photos = _load_photos(message.get('attachments') or [])
+        for photo in photos:
+            x = PHONE_WIDTH - edge - photo.width if role == 'agent' else edge
+            blocks.append(('photo', x, y, photo.width, photo.height, photo, role))
+            y += photo.height + 16
+        content = message.get('content') or ''
+        bubbles = message.get('textBubbles') or [
+            part for part in re.split(r'\n[ \t]*\n', content) if part
+        ]
+        for text in bubbles:
+            if not text:
+                continue
+            lines = _lines(text, body_font, bubble_max - 56)
+            text_width = max((body_font.getlength(line) for line in lines), default=0)
+            width = max(100, min(bubble_max, int(text_width + 56)))
+            height = len(lines) * line_height + 34
+            x = PHONE_WIDTH - edge - width if role == 'agent' else edge
+            blocks.append(('text', x, y, width, height, lines, role))
+            y += height + 16
+        if not photos and not bubbles:
+            raise ScreenshotUnavailable('A selected original message is empty')
+        y += 8
+        if y > MAX_HEIGHT:
+            raise ScreenshotUnavailable('Excerpt is too tall; select fewer original messages')
+    height = max(420, y + 28)
+    if background_url:
+        source_bytes = _photo_bytes({'url': background_url})
+        source = Image.open(io.BytesIO(source_bytes))
+    else:
+        source = Image.open(asset)
+    with source:
+        canvas = ImageOps.fit(ImageOps.exif_transpose(source).convert('RGB'),
+                              (PHONE_WIDTH, height), method=Image.Resampling.LANCZOS).convert('RGBA')
+    shade = appearance.get('shade', 0.28)
+    shade = max(0, min(0.7, float(shade))) if isinstance(shade, (float, int)) else 0.28
+    tint = (0, 0, 0, round(shade * 255)) if palette == 'black' else (255, 255, 255, round(shade * 255))
+    canvas = Image.alpha_composite(canvas, Image.new('RGBA', canvas.size, tint))
+    for kind, x, top, width, h, value, role in blocks:
+        if kind == 'photo':
+            rounded = Image.new('L', value.size)
+            ImageDraw.Draw(rounded).rounded_rectangle((0, 0, width, h), radius=30, fill=255)
+            canvas.paste(value.convert('RGBA'), (x, top), rounded)
+            continue
+        _draw_glass_bubble(canvas, (x, top, x + width, top + h), role, palette, appearance)
+        draw = ImageDraw.Draw(canvas)
+        for index, line in enumerate(value):
+            draw.text((x + 28, top + 14 + index * line_height), line, font=body_font,
+                      fill='#f0f0f0' if palette == 'black' else '#20242b')
+    image = canvas.convert('RGB')
+    output = io.BytesIO()
+    image.save(output, 'JPEG', quality=83, optimize=True)
+    picture = output.getvalue()
+    if len(picture) > MAX_BYTES:
+        raise ScreenshotUnavailable('Screenshot exceeds attachment size; select fewer messages')
     return {
-        'conversation': {'id': data['conversationId'], 'title': data['title']},
-        'messages': [dict(m, conversationId=data['conversationId'], status='delivered',
-                          metadata={**m.get('metadata', {}), 'attachments': m.get('attachments', [])}) for m in data['messages']],
-        'tombstones': [], 'hasMore': False,
+        'mimeType': 'image/jpeg', 'base64': base64.b64encode(picture).decode('ascii'),
+        'digest': hashlib.sha256(picture).hexdigest()[:24],
     }
 
 
-def capture_appearance(token):
-    # Fetch once before routing the page, avoiding nested synchronous route.fetch
-    # calls for every mounted (including hidden) section of the application.
-    class NoRedirects(HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
-    request = Request(API_ORIGIN + '/api/state', headers={
-        'x-vesper-device-token': token, 'User-Agent': 'Vesper-Capture/1.0',
-    })
-    with build_opener(NoRedirects()).open(request, timeout=10) as response:
-        state = json.load(response)
-    documents = {key: value for key, value in state['documents'].items()
-                 if key in ('profile', 'appearance')}
-    profile = documents.get('profile', {}).get('value')
-    if isinstance(profile, dict):
-        profile = dict(profile)
-        for key in ('userAvatar', 'agentAvatar'):
-            profile[key] = capture_avatar(profile.get(key, ''))
-        documents['profile'] = dict(documents['profile'], value=profile)
-    return {'documents': documents}
-
-
-def capture_avatar(value):
-    # Uploaded avatars can be multi-megabyte originals. The header displays
-    # 40 CSS pixels; keep a 4x thumbnail only in this transient capture snapshot.
-    if not isinstance(value, str) or not re.match(r'^data:image/(png|jpe?g|webp);base64,', value):
-        return value
-    from PIL import Image, ImageOps
-    with Image.open(BytesIO(base64.b64decode(value.split(',', 1)[1]))) as original:
-        image = ImageOps.exif_transpose(original)
-        image.thumbnail((160, 160))
-        output = BytesIO()
-        image.convert('RGBA').save(output, format='PNG')
-    return 'data:image/png;base64,' + base64.b64encode(output.getvalue()).decode('ascii')
-
-
-def render_child(data, token, *, asset_proxy=None, fixtures=None):
-    # asset_proxy/fixtures are only supplied directly by the isolated CI test.
-    # Production stdin cannot select a host, proxy or fixture.
-    from playwright.sync_api import sync_playwright
-    appearance = fixtures['app'] if fixtures is not None else capture_appearance(token)
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel='chrome', headless=True)
-        context = browser.new_context(viewport={'width': PHONE_WIDTH, 'height': PHONE_HEIGHT}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
-        # A routed socket without connect_to_server is isolated and drops its
-        # messages. Closing inside the route callback can stall Chrome's route
-        # handshake; no actual backend connection is made here.
-        context.route_web_socket('**/*', lambda socket: None)
-        context.add_init_script("localStorage.setItem('vesper-device-token','capture-session');")
-        loaded = {'history': False, 'app': False}
-        def route_request(route):
-            if route.request.method == 'OPTIONS' and request_policy(route.request.url, 'GET', data) in ('history', 'app', 'media'):
-                route.fulfill(status=204, headers={'access-control-allow-origin': WEB_ORIGIN, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'authorization,content-type,x-vesper-device-token'}); return
-            kind = request_policy(route.request.url, route.request.method, data)
-            if kind == 'asset' and urlparse(route.request.url).path.startswith('/opening/'):
-                # The capture has no opening animation; avoid decoding its large
-                # initial SSR images before the client switches to chat mode.
-                route.abort(); return
-            if kind is None or route.request.redirected_from is not None:
-                route.abort(); return
-            if kind == 'history':
-                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(capture_history(data), ensure_ascii=False))
-                loaded['history'] = True; return
-            headers = {k: v for k, v in route.request.headers.items() if k not in ('authorization', 'x-vesper-device-token')}
-            if kind == 'app':
-                payload = appearance
-                key = parse_qs(urlparse(route.request.url).query).get('key', [None])[0]
-                if key:
-                    payload = {'key': key, 'value': payload['documents'].get(key, {}).get('value'), 'updatedAt': '2026-10-03T12:00:00+08:00'}
-                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(payload, ensure_ascii=False))
-                loaded[kind] = True; return
-            url = route.request.url
-            if asset_proxy and kind == 'asset':
-                parsed = urlparse(url)
-                url = asset_proxy + parsed.path + ('?' + parsed.query if parsed.query else '')
-                # Dev servers reject a forwarded production Origin. This is
-                # confined to the isolated local-application integration test.
-                headers['origin'] = asset_proxy
-                headers['referer'] = asset_proxy + '/'
-            response = route.fetch(url=url, headers=headers, max_redirects=0, timeout=15000)
-            if response.status != 200:
-                route.abort(); return
-            if kind in loaded: loaded[kind] = True
-            route.fulfill(response=response)
-        context.route('**/*', route_request)
-        page = context.new_page()
-        def phase(name):
-            if fixtures is not None: print('Capture fixture phase:', name, file=sys.stderr, flush=True)
-        if fixtures is not None:
-            page.on('pageerror', lambda error: print('Capture fixture page error:', str(error), file=sys.stderr))
-            page.on('console', lambda message: print('Capture fixture console:', message.text[:600], file=sys.stderr) if message.type == 'error' else None)
-        phase('navigation')
-        page.goto(capture_url(data), wait_until='domcontentloaded', timeout=20000)
-        phase('chat readiness')
-        try:
-            page.locator('.chat-capture[data-capture-ready="true"] .codex-chat[data-capture-history="ready"]').wait_for(timeout=20000)
-        except Exception:
-            if fixtures is not None:
-                print('Capture fixture DOM:', page.locator('body').inner_text()[:2000], 'Read APIs:', loaded, file=sys.stderr)
-            raise
-        if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
-        phase('original text verification')
-        # Verify that the real UI rendered precisely the selected original text.
-        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.dataset.sourceContent}))")
-        if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
-            raise ValueError('Webpage messages do not match the selected originals')
-        # The live component splits and trims bubble boundaries; verify every
-        # visible non-whitespace character against its original source as well.
-        visible = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => Array.from(row.querySelectorAll('[data-message-text]')).map(p => p.textContent).join(''))")
-        if [re.sub(r'\s+', '', text) for text in visible] != [re.sub(r'\s+', '', m['content']) for m in data['messages']]:
-            raise ValueError('Visible chat text does not match the original records')
-        if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
-            if (row.dataset.captureLayout !== 'live-chat-v3') return false;
-            const r = row.getBoundingClientRect(), own = row.dataset.messageRole === 'agent';
-            const stamp = row.querySelector('.chat-activity-inline > summary');
-            if (own && stamp && Math.abs(stamp.getBoundingClientRect().right - r.right) >= 4) return false;
-            return Array.from(row.querySelectorAll('.text-bubble-target')).every(bubble => {
-                const b = bubble.getBoundingClientRect();
-                return own ? Math.abs(b.right - r.right) < 4 : Math.abs(b.left - r.left) < 4;
-            });
-        })"""):
-            raise ValueError('Webpage capture must use live chat components in Rowan’s perspective')
-        phase('fonts and images')
-        page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
-        page.wait_for_function(VISIBLE_IMAGES_READY, timeout=10000)
-        # Wait for the actual saved background, including a data-URI upload.
-        page.evaluate(r"""async () => {
-          const bg = getComputedStyle(document.querySelector('.chat-capture')).backgroundImage;
-          await Promise.race([Promise.all([...bg.matchAll(/url\(["']?(.+?)["']?\)/g)].map(match => new Promise((resolve,reject) => {
-            const image = new Image(); image.onload=resolve; image.onerror=reject; image.src=match[1];
-          }))), new Promise((_,reject)=>setTimeout(()=>reject(new Error('Background did not load')),10000))]);
-        }""")
-        # Expand only the browser viewport when the selected excerpt is long.
-        # Header, composer, fonts, glass and message layout remain the live UI.
-        target = page.locator('.chat-capture > .app-shell')
-        height = PHONE_HEIGHT
-        for _ in range(4):
-            page.locator('.chat-stream').evaluate('el => { el.scrollTop = 0; }')
-            page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-            extra = page.evaluate("""() => {
-                const stream = document.querySelector('.chat-stream');
-                const composer = document.querySelector('.chat-compose').getBoundingClientRect();
-                const rows = [...document.querySelectorAll('[data-message-id]')];
-                const bottom = Math.max(...rows.map(row => row.getBoundingClientRect().bottom));
-                return Math.ceil(Math.max(0, stream.scrollHeight - stream.clientHeight, bottom + 20 - composer.top));
-            }""")
-            if extra <= 1: break
-            height += extra
-            if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
-            page.set_viewport_size({'width': PHONE_WIDTH, 'height': height})
-        else: raise ValueError('The selected messages do not fit without clipping')
-        if not page.locator('.chat-compose').is_visible() or not page.locator('.app-header.chat-mode').is_visible():
-            raise ValueError('The real chat header and composer must remain visible')
-        phase('screenshot')
-        picture = target.screenshot(type='jpeg', quality=82)
-        browser.close()
-    if len(picture) > 4 * 1024 * 1024:
-        raise ValueError('Screenshot exceeds attachment size; select fewer messages')
-    return {'mimeType': 'image/jpeg', 'base64': base64.b64encode(picture).decode('ascii'), 'digest': hashlib.sha256(picture).hexdigest()[:24]}
-
-
 if __name__ == '__main__' and '--render' in sys.argv:
-    payload = json.load(sys.stdin)
-    print(json.dumps(render_child(payload['data'], payload['token'])))
+    try:
+        print(json.dumps(render_child(json.load(sys.stdin)), ensure_ascii=False))
+    except (ScreenshotUnavailable, ValueError) as error:
+        print(json.dumps({'error': str(error)}, ensure_ascii=False))

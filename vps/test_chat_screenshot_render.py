@@ -1,82 +1,76 @@
-"""Browser integration: real Vesper app served locally, fixture read APIs only."""
+"""The renderer must create a real image without loading a Web page."""
 import base64
-import faulthandler
-import os
-import subprocess
-import time
+from io import BytesIO
 import unittest
-import urllib.request
-from pathlib import Path
+from unittest.mock import patch
+
+from PIL import Image
 import vesper_chat_screenshot as screenshot
 
 
-@unittest.skipUnless(os.environ.get('VESPER_TEST_SCREENSHOT_RENDER') == '1', 'real Chrome integration runs in screenshot CI')
 class ScreenshotRenderTests(unittest.TestCase):
-    def test_large_avatar_becomes_temporary_header_thumbnail(self):
-        from PIL import Image
-        from io import BytesIO
-        source = BytesIO()
-        Image.new('RGB', (1920, 1920), '#647e94').save(source, format='PNG')
-        value = 'data:image/png;base64,' + base64.b64encode(source.getvalue()).decode()
-        result = screenshot.capture_avatar(value)
-        self.assertEqual(Image.open(BytesIO(base64.b64decode(result.split(',', 1)[1]))).size, (160, 160))
-        self.assertLess(len(result), len(value))
-        self.assertEqual(screenshot.capture_avatar('/avatar.png'), '/avatar.png')
+    def test_explicit_bubbles_are_drawn_separately_and_palette_changes_background(self):
+        parts = ['第一句。', '第二句。', '第三句。', '第四句。', '第五句。']
+        message = {'id': 'a', 'role': 'agent', 'content': '\n\n'.join(parts),
+                   'createdAt': '2026-10-19T02:36:30+08:00', 'attachments': [],
+                   'textBubbles': parts}
+        blue = screenshot.render_child({'messages': [message], 'appearance': {'palette': 'blue', 'shade': 0.28}})
+        white = screenshot.render_child({'messages': [message], 'appearance': {'palette': 'white', 'shade': 0.28}})
+        blue_image = Image.open(BytesIO(base64.b64decode(blue['base64'])))
+        white_image = Image.open(BytesIO(base64.b64decode(white['base64'])))
+        self.assertNotEqual(blue_image.getpixel((5, 5)), white_image.getpixel((5, 5)))
+        joined = {**message, 'textBubbles': ['\n\n'.join(parts)]}
+        joined_image = Image.open(BytesIO(base64.b64decode(
+            screenshot.render_child({'messages': [joined]})['base64'])))
+        self.assertGreater(blue_image.height, joined_image.height)
 
-    def test_hidden_broken_images_do_not_block_visible_excerpt(self):
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel='chrome', headless=True)
-            page = browser.new_page()
-            page.set_content('<main class="chat-capture"><section hidden><img src="data:image/png;base64,invalid"></section></main>')
-            self.assertTrue(page.evaluate(screenshot.VISIBLE_IMAGES_READY))
-            page.locator('section').evaluate('el => el.hidden = false')
-            self.assertFalse(page.evaluate(screenshot.VISIBLE_IMAGES_READY))
-            page.locator('img').evaluate("el => el.src = 'data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>'")
-            page.wait_for_function(screenshot.VISIBLE_IMAGES_READY)
-            browser.close()
+    def test_user_paragraphs_are_separate_bubbles(self):
+        content = '好萌呀好萌呀…\n\n咋这么萌…\n\n我打字的时候都是笑眯眯的'
+        message = {'id': 'u', 'role': 'user', 'content': content,
+                   'createdAt': '2026-10-19T03:25:00+08:00', 'attachments': []}
+        tail = {'id': 'a', 'role': 'agent', 'content': '回应。' * 30, 'attachments': []}
+        split = screenshot.render_child({'messages': [message, tail]})
+        joined = screenshot.render_child({'messages': [{**message, 'textBubbles': [content]}, tail]})
+        split_image = Image.open(BytesIO(base64.b64decode(split['base64'])))
+        joined_image = Image.open(BytesIO(base64.b64decode(joined['base64'])))
+        self.assertGreater(split_image.height, joined_image.height)
 
-    def test_jpeg_from_actual_webpage(self):
-        faulthandler.dump_traceback_later(75, exit=True)
-        data = {'title': '截图测试', 'conversationId': 'capture-fixture', 'messageIds': ['u', 'a'], 'messages': [
-            {'id': 'u', 'role': 'user', 'content': '哥哥，记得这个下午吗？\n测试消息 <script>不会执行</script>', 'createdAt': '2026-10-03T12:00:00+08:00', 'attachments': []},
-            {'id': 'a', 'role': 'agent', 'content': '  记得。\n\n把这段留在相册里。  ', 'createdAt': '2026-10-03T12:01:00+08:00', 'attachments': []}]}
-        history = {'conversation': {'id': data['conversationId'], 'title': data['title']}, 'messages': [dict(m, conversationId=data['conversationId'], status='delivered', metadata={'attachments': m['attachments']}) for m in data['messages']], 'tombstones': []}
-        app = {'documents': {'profile': {'value': {'userName': 'Vera', 'agentName': 'Rowan'}}, 'appearance': {'value': {'accent': '#b8dce8', 'background': 'url("/backgrounds/vesper-marble-20260908.jpg")'}}}}
-        with open('/tmp/vesper-capture-web.log', 'w') as log:
-            server = subprocess.Popen(['npm', 'run', 'start', '--', '-H', '127.0.0.1', '-p', '5173'], stdout=log, stderr=log)
-            try:
-                for attempt in range(60):
-                    try:
-                        urllib.request.urlopen('http://127.0.0.1:5173/', timeout=2).close(); break
-                    except Exception:
-                        if server.poll() is not None: self.fail(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
-                        time.sleep(0.5)
-                result = screenshot.render_child(data, 'fixture-only-token', asset_proxy='http://127.0.0.1:5173', fixtures={'history': history, 'app': app})
-                picture = base64.b64decode(result['base64'])
-                self.assertTrue(picture.startswith(b'\xff\xd8'))
-                self.assertGreater(len(picture), 10000)
-                from io import BytesIO
-                from PIL import Image
-                width, height = Image.open(BytesIO(picture)).size
-                self.assertEqual(width, screenshot.PHONE_WIDTH * 2)
-                self.assertGreaterEqual(height, screenshot.PHONE_HEIGHT * 2)
-                Path('screenshot-fixture.jpg').write_bytes(picture)
-                # Longer originals should expand the browser without hiding the
-                # composer, clipping rows, or switching to export-only bubbles.
-                data['messages'][1]['content'] = ('这是长聊天截图，文字应当完整显示。' * 30 + '\n\n') * 3
-                result = screenshot.render_child(data, 'fixture-only-token', asset_proxy='http://127.0.0.1:5173', fixtures={'history': history, 'app': app})
-                long_picture = base64.b64decode(result['base64'])
-                self.assertGreater(Image.open(BytesIO(long_picture)).height, height)
-                Path('screenshot-long-fixture.jpg').write_bytes(long_picture)
-            except Exception:
-                print(Path('/tmp/vesper-capture-web.log').read_text()[-6000:])
-                raise
-            finally:
-                faulthandler.cancel_dump_traceback_later()
-                server.terminate()
-                try: server.wait(timeout=5)
-                except subprocess.TimeoutExpired: server.kill()
+    def test_glass_settings_change_the_bubble_surface(self):
+        message = {'id': 'u', 'role': 'user', 'content': '玻璃质感', 'attachments': []}
+        base = {'palette': 'white', 'shade': 0.28}
+        appearances = [
+            {**base, 'glassStyle': 'liquid', 'glassFrost': False},
+            {**base, 'glassStyle': 'liquid', 'glassFrost': True},
+            {**base, 'glassStyle': 'classic', 'glassTransparency': 0.0},
+            {**base, 'glassStyle': 'classic', 'glassTransparency': 1.0},
+            {**base, 'glassStyle': 'liquid', 'reduceTransparency': True},
+        ]
+        images = [Image.open(BytesIO(base64.b64decode(
+            screenshot.render_child({'messages': [message], 'appearance': appearance})['base64'])))
+            for appearance in appearances]
+        self.assertEqual(len({image.getpixel((115, 105)) for image in images}), len(images))
+        self.assertEqual(len({image.getpixel((10, 10)) for image in images}), 1)
+
+    def test_original_photo_and_text_render_together(self):
+        photo = BytesIO()
+        Image.new('RGB', (200, 130), '#ba4320').save(photo, 'JPEG')
+        data = {
+            'messageIds': ['u', 'a'],
+            'messages': [
+                {'id': 'u', 'role': 'user', 'content': '这张照片\n你还记得吗？',
+                 'createdAt': '2026-10-19T02:36:19+08:00',
+                 'attachments': [{'url': 'https://api.vesper.r-vera.com/api/media/a.jpg', 'type': 'image/jpeg'}]},
+                {'id': 'a', 'role': 'agent', 'content': '记得。', 'createdAt': '2026-10-19T02:36:30+08:00',
+                 'attachments': []},
+            ],
+        }
+        with patch.object(screenshot, '_photo_bytes', return_value=photo.getvalue()):
+            result = screenshot.render_child(data)
+        picture = Image.open(BytesIO(base64.b64decode(result['base64'])))
+        self.assertEqual(picture.width, screenshot.PHONE_WIDTH)
+        self.assertGreater(picture.height, 420)
+        self.assertEqual(result['mimeType'], 'image/jpeg')
 
 
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+    unittest.main()
