@@ -1,0 +1,17 @@
+[Unit]
+Description=Vesper Desire semantic assessment (no messages or tools)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/vesper-codex-history
+ExecStart=/usr/bin/python3 /home/ubuntu/vesper-codex-history/vesper_emotion_settler.py
+TimeoutStartSec=5min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=600M
+CPUQuota=50%

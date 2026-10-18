@@ -32,7 +32,9 @@ function evaluate(path, mocks, suffix = '') {
     {exports,console,crypto,require:name => mocks[name] || {}});
   return exports;
 }
+const repository = evaluate('lib/backend/documents.ts', {'@/db/schema':{allowedDocumentKeys:new Set(['diary'])},'@/lib/music-data':{cleanMusicDocument:(_key,value)=>value}});
 const native = evaluate('lib/codex-tools.ts', {
+  './backend/services':{documents:async()=>new repository.DocumentRepository(db)},
   './journal-moods':moods,
   '@/db/schema':{allowedDocumentKeys:new Set(['diary'])},
   '@/lib/db':{ensureSchema:async()=>{},getDb:()=>db},
@@ -87,3 +89,13 @@ for (const send of [args=>native.executeCodexTool('journal_set_moods',args), asy
   assert.equal(first.verified,true); assert.deepEqual(first.entry.moodLabels.agent,['好奇']);
 }
 console.log('PASS native/MCP mood writes: readback, deduplication, clearing, calendar/ID validation, concurrent-edit preservation, new documents and failed saves');
+
+// Existing threads may still try a cached note-writing tool: reject it without touching stored records.
+reset();
+await assert.rejects(native.executeCodexTool('write_vesper_state', {kind:'note',text:'Legacy request'}), /Notes feature has been removed/);
+assert.equal(writes,0);
+assert.equal(stored,JSON.stringify(original));
+assert.ok(!registrations.has('save_note') && !registrations.has('list_notes'));
+assert.ok(!catalog.find(tool=>tool.name==='write_vesper_state').inputSchema.properties.kind.enum.includes('note'));
+assert.ok(!catalog.find(tool=>tool.name==='read_vesper_state').inputSchema.properties.section.enum.includes('notes'));
+console.log('PASS retired Notes catalog and cached-call rejection without data writes');

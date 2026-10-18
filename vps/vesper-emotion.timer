@@ -1,0 +1,11 @@
+[Unit]
+Description=Assess Vesper emotions every fifteen minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+AccuracySec=10s
+Unit=vesper-emotion.service
+
+[Install]
+WantedBy=timers.target

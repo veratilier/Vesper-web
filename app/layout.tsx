@@ -19,10 +19,13 @@ import "./compact-interface.css";
 import "./chat-capture.css";
 import "./home-desktop.css";
 import "./control-glass.css";
+import "./ios-parity.css";
+import "./web-proportions.css";
+import "./pwa-viewport.css";
 
 export const metadata: Metadata = {
   title: "Vesper — Your private corner",
-  description: "Weather, notes, meaningful dates, reminders and music in a quiet space.",
+  description: "Weather, meaningful dates, reminders and music in a quiet space.",
   manifest: "/manifest.webmanifest?v=11",
   appleWebApp: {
     capable: true,

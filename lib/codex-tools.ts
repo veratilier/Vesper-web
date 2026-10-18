@@ -1,6 +1,5 @@
 import { createChatKeep, historyRead, verifyPhotoSource } from './chat-keeps';
 import { WEB_MUSIC, neteaseTrackId, initializeWebMusicQueue } from "./web-music";
-import { cleanMusicDocument } from '@/lib/music-data';
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
@@ -14,7 +13,6 @@ import { memoryScopeFromRequest } from './memory';
 import { listAlbumPhotos, saveAlbumPhoto, getAlbumPhoto } from '@/lib/photo-album';
 import { deliverChatFiles } from './generated-chat-files';
 import { readExecutions } from '@/lib/codex-events';
-import { allowedDocumentKeys } from "@/db/schema";
 import { ensureSchema, getDb } from "@/lib/db";
 import { callConfiguredMcpTool, configuredMcpTools } from "@/lib/mcp-connections";
 import { type MemoryScope } from "@/lib/memory";
@@ -29,7 +27,6 @@ export type CodexToolContext = { conversationId?: string; threadId?: string; tur
 
 const sectionToKey: Record<string, string> = {
   today: "todos",
-  notes: "notes",
   reminders: "todos",
   dates: "anniversaries",
   anniversaries: "anniversaries",
@@ -42,22 +39,9 @@ const sectionToKey: Record<string, string> = {
 import { codexToolDefinitions } from "./codex-tool-definitions";
 export { codexToolDefinitions };
 
-async function readDocument(key: string): Promise<unknown> {
-  if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
-  const row = await getDb().prepare("SELECT value FROM vesper_documents WHERE key = ?")
-    .bind(key).first<{ value: string }>();
-  if (!row) return key === "diary" || key === "settings" ? {} : [];
-  try { return JSON.parse(row.value); } catch { return null; }
-}
-
-async function writeDocument(key: string, value: unknown) {
-  value = cleanMusicDocument(key, value);
-  if (!allowedDocumentKeys.has(key)) throw new Error("Unsupported Vesper document");
-  await getDb().prepare(`INSERT INTO vesper_documents(key,value,updated_at) VALUES(?,?,?)
-    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
-    .bind(key, JSON.stringify(value), new Date().toISOString()).run();
-  return value;
-}
+import { documents } from './backend/services';
+async function readDocument(key: string): Promise<unknown> { return (await documents()).value(key); }
+async function writeDocument(key: string, value: unknown) { return (await (await documents()).write(key, value)).value; }
 
 async function readMusicTracks(key: string) {
   const value = await readDocument(key);
@@ -143,8 +127,6 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (owner.userId !== memoryScope.userId) throw new Error('Owner context mismatch');
     // Never initialize defaults when production storage or existing state is missing.
     if (!bindings.DB) throw new Error('Vesper Desire storage is unavailable');
-    const existing = await bindings.DB.prepare('SELECT user_id FROM vesper_desire_state WHERE user_id = ?').bind('vesper').first();
-    if (!existing) throw new Error('Existing Vesper Desire state was not found; no values have been initialized.');
     return executeDesire(bindings, name, input);
   }
   if (["recall_vesper_memory", "remember_vesper_memory", "manage_vesper_memory"].includes(name)) {
@@ -225,7 +207,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     return name === 'jotting_create' ? createJotting(memoryScope.userId, input) : listJottings(memoryScope.userId, Number(input.limit || 30), String(input.before || ''),'Rowan');
   }
   if (name === "read_vesper_state") {
-    const section = String(input.section || "notes").toLowerCase();
+    const section = String(input.section || "today").toLowerCase();
     if (section === "memory") {
       if (!memoryScope) throw new Error("Memory scope is unavailable");
       return { section, value: (await recallSharedMemory("")).memories };
@@ -255,38 +237,30 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "write_vesper_state") {
     const kind = String(input.kind || "").toLowerCase();
     const now = new Date().toISOString();
-    if (kind === "note") {
-      const text = String(input.text || input.title || "").trim();
-      if (!text) throw new Error("Note text is required");
-      const notes = (await readDocument("notes")) as Array<Record<string, unknown>>;
-      const entry = { id: crypto.randomUUID(), text, kind: "agent", tone: "cool", createdAt: now };
-      await writeDocument("notes", [...notes, entry]);
-      return { saved: true, section: "notes", entry };
-    }
+    if (kind === "note") throw new Error("The Notes feature has been removed. No note was saved. Use Sketch only when the user wants free writing.");
     if (kind === "reminder") {
       const title = String(input.title || input.text || "").trim();
       if (!title) throw new Error("Reminder title is required");
-      const todos = (await readDocument("todos")) as Array<Record<string, unknown>>;
       const entry = { id: crypto.randomUUID(), title, done: false, due: String(input.due || input.date || ""), tag: String(input.tag || "Agent"), createdAt: now };
-      await writeDocument("todos", [...todos, entry]);
+      await (await documents()).update("todos", value => [...value as Array<Record<string, unknown>>, entry]);
       return { saved: true, section: "reminders", entry };
     }
     if (kind === "anniversary") {
       const title = String(input.title || input.text || "").trim();
       const date = String(input.date || "");
       if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Anniversary title/date is invalid");
-      const anniversaries = (await readDocument("anniversaries")) as Array<Record<string, unknown>>;
       const entry = { id: crypto.randomUUID(), title, date, repeats: input.repeats !== false };
-      await writeDocument("anniversaries", [...anniversaries, entry]);
+      await (await documents()).update("anniversaries", value => [...value as Array<Record<string, unknown>>, entry]);
       return { saved: true, section: "anniversaries", entry };
     }
     if (kind === "journal") {
       const date = String(input.date || "");
       const text = String(input.text || "").trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !text) throw new Error("Journal date/text is invalid");
-      const diary = { ...await readDocument("diary") as Record<string, unknown> };
-      diary[date] = { ...(diary[date] as Record<string, unknown> || {}), agent: text, updatedAt: now };
-      await writeDocument("diary", diary);
+      await (await documents()).update("diary", value => {
+        const diary = { ...value as Record<string, unknown> };
+        return { ...diary, [date]: { ...(diary[date] as Record<string, unknown> || {}), agent: text, updatedAt: now } };
+      });
       return { saved: true, section: "journal", date };
     }
     throw new Error(`Unsupported write kind: ${kind}`);
@@ -383,6 +357,30 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     await writeDocument("musicPlaylists", [...playlists, playlist]);
     return { saved: true, playlist };
   }
+  if (name === "music_playlist_rename") {
+    const playlistId = String(input.playlistId || "");
+    const title = typeof input.name === "string" ? input.name.trim() : "";
+    if (!playlistId || !title || title.length > 100) throw new Error("Provide a playlistId and a name of up to 100 characters");
+    const playlists = await readVesperPlaylists();
+    const playlist = playlists.find(item => item.id === playlistId);
+    if (!playlist) throw new Error("Unknown Vesper playlistId; list playlists first");
+    const renamed = playlist.name !== title;
+    if (renamed) {
+      playlist.name = title;
+      playlist.updatedAt = new Date().toISOString();
+      await writeDocument("musicPlaylists", playlists);
+    }
+    return { saved: true, renamed, playlist };
+  }
+  if (name === "music_playlist_delete") {
+    const playlistId = String(input.playlistId || "");
+    if (!playlistId) throw new Error("playlistId is required");
+    const playlists = await readVesperPlaylists();
+    const remaining = playlists.filter(item => item.id !== playlistId);
+    const deleted = remaining.length !== playlists.length;
+    if (deleted) await writeDocument("musicPlaylists", remaining);
+    return { saved: true, deleted, playlistId };
+  }
   if (name === "music_playlist_play") {
     if (context.musicSurface === "web") throw new Error("Play Vesper playlists in the native app.");
     const playlist = (await readVesperPlaylists()).find(item => item.id === input.playlistId);
@@ -413,6 +411,22 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const already = Boolean(findMusicTrack(library, track.id));
     if (!already) await mergeMusicLibrary([track], musicKeys.library);
     return { ok: true, alreadyInPlaylist: already, trackId: track.id, playlist: "Vesper music" };
+  }
+  if (name === "music_playlist_remove") {
+    const playlists = await readVesperPlaylists();
+    const playlist = playlists.find(item => item.id === input.playlistId);
+    if (!playlist) throw new Error("Unknown Vesper playlistId; list playlists first");
+    const trackId = String(input.trackId || "");
+    if (!trackId) throw new Error("trackId is required");
+    const originalLength = playlist.tracks.length;
+    playlist.tracks = playlist.tracks.filter(track =>
+      track.id !== trackId && track.appleMusicId !== trackId && `apple-${track.appleMusicId}` !== trackId);
+    const removed = playlist.tracks.length !== originalLength;
+    if (removed) {
+      playlist.updatedAt = new Date().toISOString();
+      await writeDocument("musicPlaylists", playlists);
+    }
+    return { saved: true, removed, playlist };
   }
   if (name === "sticker_search") {
     if (!memoryScope) throw new Error("Sticker scope is unavailable");

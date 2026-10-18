@@ -12,7 +12,7 @@ export function ensureSchema(): Promise<void> {
     schemaReady = (async () => {
       const db = getDb();
       await db.batch(schemaStatements.map((sql) => db.prepare(sql)));
-    })();
+    })().catch(error => { schemaReady = null; throw error; });
   }
   return schemaReady;
 }

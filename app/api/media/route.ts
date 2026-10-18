@@ -1,54 +1,15 @@
 import { registerPhotoSource } from '@/lib/photo-album';
-import { memoryScopeFromRequest } from '@/lib/memory';
-import { env } from "cloudflare:workers";
-import { corsHeaders, optionsResponse } from "@/lib/cors";
-import { authorizeApp } from "@/lib/bridge-auth";
-
+import { optionsResponse } from '@/lib/cors';
+import { appRoute, APIError } from '@/lib/backend/http';
+import { media } from '@/lib/backend/services';
 export const OPTIONS = optionsResponse;
-
-function mediaBucket(): R2Bucket {
-  return (env as unknown as { MEDIA: R2Bucket }).MEDIA;
-}
-
-export async function POST(request: Request) {
-  if (!(await authorizeApp(request)))
-    return Response.json(
-      { error: "Device not paired" },
-      { status: 401, headers: corsHeaders(request) },
-    );
-  const data = await request.formData();
-  const file = data.get("file");
-  if (!(file instanceof File)) {
-    return Response.json(
-      { error: "File required" },
-      { status: 400, headers: corsHeaders(request) },
-    );
-  }
-  if (file.size > 32 * 1024 * 1024) {
-    return Response.json(
-      { error: "Image is too large" },
-      { status: 413, headers: corsHeaders(request) },
-    );
-  }
-  const extension =
-    file.name
-      .split(".")
-      .pop()
-      ?.replace(/[^a-z0-9]/gi, "")
-      .toLowerCase() || "image";
+export const POST = appRoute({ service: 'media', methods: ['POST'], errorMessage: 'Media upload failed; completion not confirmed', errorStatus: 500 }, async context => {
+  const form = await context.request.formData(), file = form.get('file');
+  if (!(file instanceof File)) throw new APIError('File required');
+  if (file.size > 32 * 1024 * 1024) throw new APIError('Image is too large', 413);
+  const extension = file.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'image';
   const key = `${crypto.randomUUID()}.${extension}`;
-  await mediaBucket().put(key, file.stream(), {
-    httpMetadata: { contentType: file.type },
-  });
-  if (file.type.startsWith('image/')) await registerPhotoSource((await memoryScopeFromRequest(request)).userId, { key, name: file.name, type: file.type, size: file.size }, 'user');
-  return Response.json(
-    {
-      key,
-      url: `${new URL(request.url).origin}/api/media/${key}`,
-      name: file.name,
-      type: file.type || "application/octet-stream",
-      size: file.size,
-    },
-    { headers: corsHeaders(request) },
-  );
-}
+  await media().put(key, file.stream(), file.type);
+  if (file.type.startsWith('image/')) await registerPhotoSource((await context.scope()).userId, { key, name: file.name, type: file.type, size: file.size }, 'user');
+  return context.json({ key, url: `${context.url.origin}/api/media/${key}`, name: file.name, type: file.type || 'application/octet-stream', size: file.size });
+});

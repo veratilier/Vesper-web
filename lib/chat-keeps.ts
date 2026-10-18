@@ -12,7 +12,11 @@ export async function historyRead(path: string, body?: unknown) {
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(45000),
   });
   if (response.status >= 300 && response.status < 400) throw new Error('History redirect blocked; screenshot access was not confirmed');
-  const data = await response.json() as { error?: string; mimeType?: string; base64?: string; digest?: string; messageIds?: string[]; results?: Record<string, unknown>[]; hasMore?: boolean; messages?: { id: string; metadata?: { attachments?: { key?: string }[] } }[] };
+  const responseText = await response.text();
+  let decoded: unknown;
+  try { decoded = JSON.parse(responseText); }
+  catch { throw new Error(`Screenshot/history service returned HTTP ${response.status}; no image was delivered. Please retry shortly.`); }
+  const data = decoded as { error?: string; mimeType?: string; base64?: string; digest?: string; messageIds?: string[]; results?: Record<string, unknown>[]; hasMore?: boolean; messages?: { id: string; metadata?: { attachments?: { key?: string }[] } }[] };
   if (!response.ok) throw new Error(data.error || 'History request failed');
   return data;
 }

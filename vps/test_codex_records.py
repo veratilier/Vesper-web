@@ -92,6 +92,15 @@ class CodexRecordsTests(unittest.TestCase):
             self.assertEqual(latest['records'][-1]['output'],'synthetic.txt')
             self.assertFalse(first['hasMore'])
 
+    def test_cold_read_skips_noncompleted_rollout_json(self):
+        irrelevant = {'type': 'event_msg', 'payload': {'type': 'token_delta', 'thread_id': self.thread}}
+        self.path.write_text((json.dumps(irrelevant) + '\n') * 500 + json.dumps(self.event()) + '\n')
+        decoder = json.loads
+        with patch.object(records.json, 'loads', wraps=decoder) as decode:
+            items, _ = records.records(self.thread)
+        self.assertEqual([item['id'] for item in items], ['reply'])
+        self.assertEqual(decode.call_count, 1)
+
     def test_incremental_read_waits_for_complete_line_and_resets_on_source_replacement(self):
         encoded=json.dumps(self.event()).encode()
         self.path.write_bytes(encoded[:40]); self.assertEqual(records.records(self.thread)[0],[])

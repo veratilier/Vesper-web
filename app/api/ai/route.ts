@@ -14,8 +14,6 @@ function parseMcpText(value: unknown): string {
 }
 
 const toolDefinitions = [
-  ["list_notes", "读取 Vesper 便笺", {}],
-  ["save_note", "给用户保存一张 Agent 便笺", { text: { type: "string" }, tone: { type: "string" } }],
   ["list_todos", "读取 Vesper 提醒", {}],
   ["save_todo", "创建 Vesper 提醒", { title: { type: "string" }, due: { type: "string" }, tag: { type: "string" } }],
   ["complete_todo", "完成或重新打开提醒", { id: { type: "string" }, done: { type: "boolean" } }],
@@ -23,13 +21,13 @@ const toolDefinitions = [
   ["save_anniversary", "创建 Vesper 纪念日，date 使用 YYYY-MM-DD", { title: { type: "string" }, date: { type: "string" }, repeats: { type: "boolean" } }],
   ["get_diary", "读取指定日期的 Vesper 日记", { date: { type: "string" } }],
   ["write_agent_diary", "写入指定日期的 Agent 日记", { date: { type: "string" }, content: { type: "string" } }],
-  ["search_memory", "搜索 Vesper 的便笺、日记、提醒和纪念日", { query: { type: "string" } }],
+  ["search_memory", "搜索 Vesper 的日记、提醒和纪念日", { query: { type: "string" } }],
   ["list_music", "读取 Vesper 播放器的歌曲", {}],
   ["control_music", "控制 Vesper 播放器", { action: { type: "string", enum: ["play", "pause", "next", "previous", "play_track"] }, trackId: { type: "string" } }],
 ] as const;
 
 const required: Record<string, string[]> = {
-  save_note: ["text"], save_todo: ["title"], complete_todo: ["id"],
+  save_todo: ["title"], complete_todo: ["id"],
   save_anniversary: ["title", "date"], get_diary: ["date"],
   write_agent_diary: ["date", "content"], search_memory: ["query"], control_music: ["action"],
 };
@@ -66,13 +64,7 @@ async function executeTool(
     changed[key] = value;
     if (persist) await writeDoc(key, value);
   };
-  if (name === "list_notes") return read("notes", []);
-  if (name === "save_note") {
-    const items = [...await read<Array<Record<string, unknown>>>("notes", [])];
-    const entry = { id: crypto.randomUUID(), text: String(input.text || ""), kind: "agent", tone: String(input.tone || "cool"), createdAt: now };
-    if (!entry.text) throw new Error("Note content is required.");
-    items.push(entry); await write("notes", items); return entry;
-  }
+  if (name === "list_notes" || name === "save_note") throw new Error("The Notes feature has been removed. No note was saved.");
   if (name === "list_todos") return read("todos", []);
   if (name === "save_todo") {
     const items = [...await read<Array<Record<string, unknown>>>("todos", [])];
@@ -104,7 +96,7 @@ async function executeTool(
   if (name === "search_memory") {
     const query = String(input.query || "").toLowerCase();
     const result: Array<{ source: string; value: unknown }> = [];
-    for (const key of ["notes", "diary", "todos", "anniversaries"]) {
+    for (const key of ["diary", "todos", "anniversaries"]) {
       const value = await read<unknown>(key, key === "diary" ? {} : []);
       if (JSON.stringify(value).toLowerCase().includes(query)) result.push({ source: key, value });
     }

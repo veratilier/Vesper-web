@@ -1,16 +1,17 @@
 'use client';
 import { useState } from 'react';
-export const desireMetrics = [['longing', "Longing"], ['tenderness', "Tenderness"], ['playfulness', "Playfulness"], ['intensity', "Intensity"], ['attachment', "Attachment"], ['possessiveness', "Possessiveness"]] as const;
-const positions = [{ angle: -30, x: 66, y: 35 }, { angle: 30, x: 294, y: 35 }, { angle: -90, x: 30, y: 151 }, { angle: 90, x: 330, y: 151 }, { angle: -150, x: 65, y: 267 }, { angle: 150, x: 295, y: 267 }];
+import { emotions, emotionLabels } from '@/lib/desire/emotion-keys';
+export const desireMetrics = emotions.map((key,i)=>[key,emotionLabels[i]] as const);
+const positions = emotions.map((_,i)=>({angle:i*45-22.5,x:180+145*Math.sin((i*45-22.5)*Math.PI/180),y:153-137*Math.cos((i*45-22.5)*Math.PI/180)}));
 export function metricValue(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null; }
 export function DesireFlower({ data }: { data: Record<string, unknown> | null }) {
   const [selected, setSelected] = useState(1);
-  const value = metricValue(data?.[desireMetrics[selected][0]]);
+  const value = metricValue((data?.values as Record<string,unknown>|undefined)?.[desireMetrics[selected][0]]);
   return <div className="desire-flower">
-    <svg viewBox="0 0 360 310" role="group" aria-label="Six-petal mood flower; select a petal to view its value">
+    <svg viewBox="0 0 360 310" role="group" aria-label="Eight-emotion flower; select a petal to view its value">
       <g className="desire-flower-breath">
         {desireMetrics.map(([key, label], index) => {
-          const number = metricValue(data?.[key]);
+          const number = metricValue((data?.values as Record<string,unknown>|undefined)?.[key]);
           const position = positions[index];
           // Map each metric independently: 0 → 45%, 100 → 100%.
           // Single-argument CSS scale is valid; overlapping bases stay under the center.
@@ -24,7 +25,7 @@ export function DesireFlower({ data }: { data: Record<string, unknown> | null })
         })}
         <circle cx="180" cy="153" r="8" className="desire-flower-heart" />
       </g>
-      {desireMetrics.map(([key, label], index) => <g key={key} className={`desire-petal-label${selected === index ? ' selected' : ''}`} onClick={() => setSelected(index)} aria-hidden="true"><text x={positions[index].x} y={positions[index].y} textAnchor="middle">{label}</text><text x={positions[index].x} y={positions[index].y + 19} textAnchor="middle" className="desire-petal-number">{metricValue(data?.[key]) ?? '—'}</text></g>)}
+      {desireMetrics.map(([key, label], index) => <g key={key} className={`desire-petal-label${selected === index ? ' selected' : ''}`} onClick={() => setSelected(index)} aria-hidden="true"><text x={positions[index].x} y={positions[index].y} textAnchor="middle">{label}</text><text x={positions[index].x} y={positions[index].y + 19} textAnchor="middle" className="desire-petal-number">{metricValue((data?.values as Record<string,unknown>|undefined)?.[key]) ?? '—'}</text></g>)}
     </svg>
     <div className="desire-selection" aria-live="polite"><span>{desireMetrics[selected][1]} · {value ?? '—'}</span><small>Select a petal to explore the mood</small></div>
   </div>;

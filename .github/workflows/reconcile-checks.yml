@@ -22,6 +22,7 @@ jobs:
       - run: npm run test:desire
       - run: node --experimental-strip-types tools/test-voice-recognition.ts
       - run: node tools/test-voice-http.mjs
+      - run: node --experimental-strip-types tools/test-web-chat-presentation.ts
       - run: node --experimental-strip-types tools/test-web-chat-context.ts
       - run: node --experimental-strip-types tools/test-chat-terminal-feed.ts
       - run: npm run test:codex
@@ -32,12 +33,14 @@ jobs:
       - run: node tools/test-jottings.mjs
       - run: node tools/test-letters.mjs
       - run: node tools/test-chat-keeps.mjs
+      - run: node tools/test-backend-boundaries.mjs
       - run: node tools/test-codex-artifacts.mjs
       - run: node tools/test-generated-chat-files.mjs
       - run: node tools/test-reconcile.mjs
       - run: node --test tests/service-worker.test.mjs tests/browser-storage.test.mjs
       - name: VPS isolated regression tests
         run: |
+          python3 -m pip install aiohttp==3.14.3 Pillow
           for test in vps/test_*.py; do
             python3 "$test" || exit 1
           done

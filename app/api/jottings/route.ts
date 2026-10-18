@@ -1,18 +1,9 @@
-import { authorizeApp } from '@/lib/bridge-auth';
-import { memoryScopeFromRequest } from '@/lib/memory';
-import { corsHeaders, optionsResponse } from '@/lib/cors';
 import { createJotting, listJottings, deleteJotting, getJotting } from '@/lib/jottings';
+import { optionsResponse } from '@/lib/cors';
+import { appRoute } from '@/lib/backend/http';
 export const OPTIONS = optionsResponse;
-async function handle(request: Request) {
-  const headers = corsHeaders(request); headers.set('cache-control','no-store');
-  if (!(await authorizeApp(request))) return Response.json({ error: 'Device not paired' }, { status:401, headers });
-  try {
-    const { userId } = await memoryScopeFromRequest(request), url = new URL(request.url);
-    const result = request.method === 'GET'
-      ? url.searchParams.has('id') ? await getJotting(userId, url.searchParams.get('id') || '') : await listJottings(userId, Number(url.searchParams.get('limit') || 30), url.searchParams.get('before') || '')
-      : request.method === 'DELETE' ? await deleteJotting(userId, url.searchParams.get('id') || '')
-      : await createJotting(userId, await request.json(), 'Vera');
-    return Response.json(result, { headers });
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Jotting request failed' }, { status:400, headers }); }
-}
+const handle = appRoute({ service: 'writing', methods: ['GET', 'POST', 'DELETE'], errorMessage: 'Jotting request failed' }, async context => {
+  const { userId } = await context.scope(), request = context.request, query = context.url.searchParams;
+  return context.json(request.method === 'GET' ? query.has('id') ? await getJotting(userId, query.get('id') || '') : await listJottings(userId, Number(query.get('limit') || 30), query.get('before') || '') : request.method === 'DELETE' ? await deleteJotting(userId, query.get('id') || '') : await createJotting(userId, await request.json(), 'Vera'));
+});
 export const GET = handle, POST = handle, DELETE = handle;

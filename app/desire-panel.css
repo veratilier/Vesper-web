@@ -39,3 +39,5 @@
 .desire-timeline-empty { color: var(--ui-muted); font-size: 12px; }
 @media(prefers-reduced-motion:reduce) { .desire-flower-breath { animation: none; } .desire-petal { transition: none; } }
 .scroll-view[hidden] .desire-flower-breath { animation-play-state: paused; }
+
+.desire-sea { display:block; width:100%; height:clamp(260px,48vw,340px); border-radius:16px; }

@@ -6,7 +6,11 @@ import re
 import subprocess
 import sys
 import threading
+import os
+import signal
+from io import BytesIO
 from urllib.parse import urlencode, urlparse, parse_qs, quote
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 RENDER_LOCK = threading.BoundedSemaphore(1)
 
@@ -31,7 +35,7 @@ def select_messages(connection, conversation_id, ids):
             raise ValueError('Select visible text or photo messages; control messages and rich cards cannot be captured')
         if row['role'] not in ('user', 'agent') or metadata.get('blockType', '') not in ('', 'agentMessage', 'assistantMessage', 'userMessage', 'text') or metadata.get('hidden') or metadata.get('internal'):
             raise ValueError('Only visible original chat messages can be captured')
-        messages.append({'id': row['id'], 'role': row['role'], 'content': row['content'], 'createdAt': row['created_at'], 'attachments': metadata.get('attachments', [])})
+        messages.append({'id': row['id'], 'role': row['role'], 'content': row['content'], 'createdAt': row['created_at'], 'attachments': metadata.get('attachments', []), 'metadata': {key: metadata[key] for key in ('bubbles', 'replyTo', 'turnId', 'showTurnStatus') if key in metadata}})
     if sum(len(m['content']) for m in messages) > 16000:
         raise ValueError('Choose a shorter excerpt; original text will not be truncated')
     return {'title': conversation['title'], 'conversationId': conversation_id, 'messages': messages, 'messageIds': ids}
@@ -47,13 +51,24 @@ def render(data, token):
 
 
 def _render(data, token):
+    process = None
     try:
-        result = subprocess.run([sys.executable, __file__, '--render'], input=json.dumps({'data': data, 'token': token}, ensure_ascii=False), capture_output=True, text=True, timeout=40)
+        process = subprocess.Popen([sys.executable, __file__, '--render'], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   start_new_session=True)
+        stdout, _ = process.communicate(json.dumps({'data': data, 'token': token}, ensure_ascii=False), timeout=40)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ScreenshotUnavailable('Screenshot renderer timed out or is unavailable') from exc
-    if result.returncode:
+    finally:
+        # Chrome and the Playwright driver are grandchildren. Killing just the
+        # Python process leaves them consuming memory after a timeout.
+        if process is not None:
+            try: os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            process.wait()
+    if process.returncode:
         raise ScreenshotUnavailable('Screenshot renderer unavailable. Install Playwright, Google Chrome and CJK fonts; deploy the matching Vesper Web capture view. No screenshot was created.')
-    output = json.loads(result.stdout)
+    output = json.loads(stdout)
     output.update(messageIds=data['messageIds'])
     return output
 
@@ -92,10 +107,61 @@ def request_policy(url, method, data):
 VISIBLE_IMAGES_READY = 'Array.from(document.querySelectorAll(".chat-capture img")).filter(i => i.checkVisibility()).every(i => i.complete && i.naturalWidth > 0)'
 
 
+def capture_history(data):
+    """Serve the exact database snapshot already authorized by select_messages.
+
+    Rendering must not re-fetch the same history through the public proxy: that
+    adds a second network/auth boundary and can race later edits to the records.
+    """
+    return {
+        'conversation': {'id': data['conversationId'], 'title': data['title']},
+        'messages': [dict(m, conversationId=data['conversationId'], status='delivered',
+                          metadata={**m.get('metadata', {}), 'attachments': m.get('attachments', [])}) for m in data['messages']],
+        'tombstones': [], 'hasMore': False,
+    }
+
+
+def capture_appearance(token):
+    # Fetch once before routing the page, avoiding nested synchronous route.fetch
+    # calls for every mounted (including hidden) section of the application.
+    class NoRedirects(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    request = Request(API_ORIGIN + '/api/state', headers={
+        'x-vesper-device-token': token, 'User-Agent': 'Vesper-Capture/1.0',
+    })
+    with build_opener(NoRedirects()).open(request, timeout=10) as response:
+        state = json.load(response)
+    documents = {key: value for key, value in state['documents'].items()
+                 if key in ('profile', 'appearance')}
+    profile = documents.get('profile', {}).get('value')
+    if isinstance(profile, dict):
+        profile = dict(profile)
+        for key in ('userAvatar', 'agentAvatar'):
+            profile[key] = capture_avatar(profile.get(key, ''))
+        documents['profile'] = dict(documents['profile'], value=profile)
+    return {'documents': documents}
+
+
+def capture_avatar(value):
+    # Uploaded avatars can be multi-megabyte originals. The header displays
+    # 40 CSS pixels; keep a 4x thumbnail only in this transient capture snapshot.
+    if not isinstance(value, str) or not re.match(r'^data:image/(png|jpe?g|webp);base64,', value):
+        return value
+    from PIL import Image, ImageOps
+    with Image.open(BytesIO(base64.b64decode(value.split(',', 1)[1]))) as original:
+        image = ImageOps.exif_transpose(original)
+        image.thumbnail((160, 160))
+        output = BytesIO()
+        image.convert('RGBA').save(output, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(output.getvalue()).decode('ascii')
+
+
 def render_child(data, token, *, asset_proxy=None, fixtures=None):
     # asset_proxy/fixtures are only supplied directly by the isolated CI test.
     # Production stdin cannot select a host, proxy or fixture.
     from playwright.sync_api import sync_playwright
+    appearance = fixtures['app'] if fixtures is not None else capture_appearance(token)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel='chrome', headless=True)
         context = browser.new_context(viewport={'width': PHONE_WIDTH, 'height': PHONE_HEIGHT}, device_scale_factor=2, timezone_id='Asia/Shanghai', service_workers='block')
@@ -109,15 +175,20 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             if route.request.method == 'OPTIONS' and request_policy(route.request.url, 'GET', data) in ('history', 'app', 'media'):
                 route.fulfill(status=204, headers={'access-control-allow-origin': WEB_ORIGIN, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'authorization,content-type,x-vesper-device-token'}); return
             kind = request_policy(route.request.url, route.request.method, data)
+            if kind == 'asset' and urlparse(route.request.url).path.startswith('/opening/'):
+                # The capture has no opening animation; avoid decoding its large
+                # initial SSR images before the client switches to chat mode.
+                route.abort(); return
             if kind is None or route.request.redirected_from is not None:
                 route.abort(); return
+            if kind == 'history':
+                route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(capture_history(data), ensure_ascii=False))
+                loaded['history'] = True; return
             headers = {k: v for k, v in route.request.headers.items() if k not in ('authorization', 'x-vesper-device-token')}
-            if kind == 'history': headers['authorization'] = 'Bearer ' + token
-            if kind == 'app': headers['x-vesper-device-token'] = token
-            if fixtures is not None and kind in fixtures:
-                payload = fixtures[kind]
+            if kind == 'app':
+                payload = appearance
                 key = parse_qs(urlparse(route.request.url).query).get('key', [None])[0]
-                if kind == 'app' and key:
+                if key:
                     payload = {'key': key, 'value': payload['documents'].get(key, {}).get('value'), 'updatedAt': '2026-10-03T12:00:00+08:00'}
                 route.fulfill(status=200, content_type='application/json', headers={'access-control-allow-origin': WEB_ORIGIN}, body=json.dumps(payload, ensure_ascii=False))
                 loaded[kind] = True; return
@@ -153,22 +224,25 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
         if not all(loaded.values()): raise ValueError('Authenticated theme or original history failed to load')
         phase('original text verification')
         # Verify that the real UI rendered precisely the selected original text.
-        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.querySelector('.message > div > p')?.textContent || ''}))")
+        actual = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => ({id:row.dataset.messageId,content:row.dataset.sourceContent}))")
         if actual != [{'id': m['id'], 'content': m['content']} for m in data['messages']]:
-            raise ValueError('Rendered webpage messages do not match the selected originals')
-        if not page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.every(row => { const p=row.querySelector('.message > div > p'); return !p || getComputedStyle(p).textAlign === (row.classList.contains('agent-turn') ? 'right' : 'left'); })"):
-            raise ValueError('Webpage did not apply the requested agent perspective')
-        # Both the text and its actual timestamp must follow the chosen side.
+            raise ValueError('Webpage messages do not match the selected originals')
+        # The live component splits and trims bubble boundaries; verify every
+        # visible non-whitespace character against its original source as well.
+        visible = page.locator('.chat-capture [data-message-id]').evaluate_all("rows => rows.map(row => Array.from(row.querySelectorAll('[data-message-text]')).map(p => p.textContent).join(''))")
+        if [re.sub(r'\s+', '', text) for text in visible] != [re.sub(r'\s+', '', m['content']) for m in data['messages']]:
+            raise ValueError('Visible chat text does not match the original records')
         if not page.locator('.chat-capture [data-message-id]').evaluate_all("""rows => rows.every(row => {
-            const stamp = row.querySelector('.capture-message-time');
-            const text = row.querySelector('.message > div > p');
-            if (!stamp || getComputedStyle(stamp).opacity !== "1" || getComputedStyle(stamp).animationName !== "none") return false;
-            const r = row.getBoundingClientRect(), t = stamp.getBoundingClientRect();
-            const own = row.classList.contains('agent-turn');
-            return (!text || getComputedStyle(text).fontSize === '17px') &&
-                (own ? Math.abs(t.right - r.right) < 4 : Math.abs(t.left - r.left) < 4);
+            if (row.dataset.captureLayout !== 'live-chat-v3') return false;
+            const r = row.getBoundingClientRect(), own = row.dataset.messageRole === 'agent';
+            const stamp = row.querySelector('.chat-activity-inline > summary');
+            if (own && stamp && Math.abs(stamp.getBoundingClientRect().right - r.right) >= 4) return false;
+            return Array.from(row.querySelectorAll('.text-bubble-target')).every(bubble => {
+                const b = bubble.getBoundingClientRect();
+                return own ? Math.abs(b.right - r.right) < 4 : Math.abs(b.left - r.left) < 4;
+            });
         })"""):
-            raise ValueError('Capture timestamp alignment or phone text sizing was not applied')
+            raise ValueError('Webpage capture must use live chat components in Rowan’s perspective')
         phase('fonts and images')
         page.evaluate("Promise.race([document.fonts.ready,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fonts did not load')),10000))])")
         page.wait_for_function(VISIBLE_IMAGES_READY, timeout=10000)
@@ -179,10 +253,27 @@ def render_child(data, token, *, asset_proxy=None, fixtures=None):
             const image = new Image(); image.onload=resolve; image.onerror=reject; image.src=match[1];
           }))), new Promise((_,reject)=>setTimeout(()=>reject(new Error('Background did not load')),10000))]);
         }""")
+        # Expand only the browser viewport when the selected excerpt is long.
+        # Header, composer, fonts, glass and message layout remain the live UI.
         target = page.locator('.chat-capture > .app-shell')
-        height = target.evaluate('el => Math.ceil(el.scrollHeight)')
-        if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
-        page.set_viewport_size({'width': PHONE_WIDTH, 'height': max(PHONE_HEIGHT, height)})
+        height = PHONE_HEIGHT
+        for _ in range(4):
+            page.locator('.chat-stream').evaluate('el => { el.scrollTop = 0; }')
+            page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+            extra = page.evaluate("""() => {
+                const stream = document.querySelector('.chat-stream');
+                const composer = document.querySelector('.chat-compose').getBoundingClientRect();
+                const rows = [...document.querySelectorAll('[data-message-id]')];
+                const bottom = Math.max(...rows.map(row => row.getBoundingClientRect().bottom));
+                return Math.ceil(Math.max(0, stream.scrollHeight - stream.clientHeight, bottom + 20 - composer.top));
+            }""")
+            if extra <= 1: break
+            height += extra
+            if height > 10000: raise ValueError('Excerpt is too tall; select fewer original messages')
+            page.set_viewport_size({'width': PHONE_WIDTH, 'height': height})
+        else: raise ValueError('The selected messages do not fit without clipping')
+        if not page.locator('.chat-compose').is_visible() or not page.locator('.app-header.chat-mode').is_visible():
+            raise ValueError('The real chat header and composer must remain visible')
         phase('screenshot')
         picture = target.screenshot(type='jpeg', quality=82)
         browser.close()

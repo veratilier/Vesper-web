@@ -4,6 +4,7 @@ from pathlib import Path
 import codex_history_server as server
 
 class Request:
+    services = server.Handler.services
     path = ''
     def send_json(self, status, value): self.status, self.value = status, value
 
