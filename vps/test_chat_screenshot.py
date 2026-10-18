@@ -24,6 +24,7 @@ class OriginalScreenshotTests(unittest.TestCase):
     def test_original_order_and_perspective(self):
         data = screenshot.select_messages(self.db,'one',['u','a'])
         self.assertEqual(data['messages'][0]['content'],'你好 <script>steal()</script>')
+        self.assertEqual(data['title'], 'Our chat')
         self.assertEqual(data['conversationId'], 'one')
         self.assertEqual(data['messages'][1]['role'], 'agent')
         with patch.object(screenshot, '_capture_appearance', return_value={'palette': 'blue', 'shade': 0.28, 'backgroundUrl': ''}):
