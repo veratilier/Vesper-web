@@ -71,7 +71,8 @@ def select_messages(connection: sqlite3.Connection, conversation_id: str, ids: l
         })
     if sum(len(m['content']) for m in messages) > 16000:
         raise ValueError('Choose a shorter excerpt; original text will not be truncated')
-    return {'conversationId': conversation_id, 'messages': messages, 'messageIds': ids}
+    return {'title': conversation['title'], 'conversationId': conversation_id,
+            'messages': messages, 'messageIds': ids}
 
 
 def render(data: dict, token: str) -> dict:
