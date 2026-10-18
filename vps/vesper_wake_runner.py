@@ -3,7 +3,7 @@
 No model API key. Model runs are never automatically replayed after an uncertain failure.
 """
 from vesper_backend.codex_provider import Rpc as CodexRpc, CONFIG
-import argparse, fcntl, json, os, queue, random, signal, sqlite3, subprocess, threading, time, tempfile, tomllib
+import argparse, fcntl, json, os, queue, random, signal, sqlite3, subprocess, threading, time, tempfile, tomllib, sys
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,6 +14,7 @@ import vesper_wake_policy as policy
 import vesper_wake_tools as permissions
 import vesper_wake_workflow as workflow
 import vesper_letter_reminders as letter_reminders
+import vesper_morning_dream
 import vesper_wake_plan as plan
 import vesper_wake_activity_context as activity_context
 
@@ -616,34 +617,7 @@ def generate_dream(cycle):
 
 
 def finish_sleep(now):
-    if not dream_permitted():return
-    with store.db() as con:
-        row = con.execute("SELECT * FROM sleep_cycles WHERE end<=? AND status='pending' AND COALESCE(retry_at,0)<=? ORDER BY end LIMIT 1", (now,now)).fetchone()
-    if not row:return
-    cycle = dict(row)
-    try:
-        if not cycle['body']:
-            body = generate_dream(cycle)
-            with store.db() as con:con.execute('UPDATE sleep_cycles SET body=? WHERE id=?', (body,cycle['id']))
-            cycle['body'] = body
-        if not dream_permitted():return
-        # Persisted body + stable source/time makes a timeout retry deduplicate in
-        # the existing shared-memory database. Never generate another body on retry.
-        result = http('/api/codex/tools', {'name': 'remember_vesper_memory', 'arguments': {
-            'body': cycle['body'], 'kind': 'dream', 'source': ('Vesper · dream · sleep:' if cycle['body'].startswith('【梦】') else 'Vesper · simulated dream · sleep:') + cycle['id'],
-            'occurred_at': datetime.fromtimestamp(cycle['end'], timezone.utc).isoformat().replace('+00:00', 'Z')}})['result']
-        memory = result.get('memory') or {}
-        if not result.get('stored') or result.get('storage') != 'shared_memory' or memory.get('kind') != 'dream' or memory.get('body') != cycle['body']:
-            raise RuntimeError('Shared memory did not confirm the simulated dream')
-        with store.db() as con:con.execute("UPDATE sleep_cycles SET status='saved',memory_id=?,error=NULL,retry_at=NULL WHERE id=?", (memory['id'],cycle['id']))
-    except Exception as error:
-        with store.db() as con:
-            con.execute('UPDATE sleep_cycles SET retry_at=?,error=? WHERE id=?', (time.time()+1800,str(error)[:180],cycle['id']))
-            reason = recovery.kind(error)
-            if reason in {'quota', 'authentication'}:
-                state = store.get(con, 'recovery', {})
-                state.update(reason=reason, retryAt=time.time()+1800, lastEvent='sleep:' + cycle['id'])
-                store.put(con, 'recovery', state)
+    return vesper_morning_dream.finish_sleep(now, sys.modules[__name__])
 
 
 def tick():

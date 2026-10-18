@@ -47,6 +47,8 @@ def step(name, args=None, result=None, failed=False, uncertain=False):
         count = next((len(result[k]) for k in ('letters','jottings','bookmarks','matches','memories','tracks','photos','stickers','connections') if isinstance(result.get(k),list)), None)
         value.update(completion='completed', result=('读取完成，返回 ' + str(count) + ' 条结果。') if count is not None else '读取完成。')
     if name == 'desire_encounter': value.update(completion='completed', result='Desire 接口已确认本次评估。')
+    if name == 'remember_vesper_memory' and result.get('stored') is True and (result.get('memory') or {}).get('kind') == 'dream':
+        value.update(completion='completed', result='完整的梦已保存到 Dreams。')
     if name in {'letter_read','letter_keep'} and isinstance(result.get('letter'), dict):
         letter = result['letter']
         value.update(completion='completed', result='信件仍在封存，未返回正文。' if letter.get('locked') and name == 'letter_read' else '信件状态已确认。')
@@ -54,6 +56,14 @@ def step(name, args=None, result=None, failed=False, uncertain=False):
 
 
 def describe(job, calls):
+    if job.get('source') == 'morning-dream':
+        status = job['status']
+        outcome = ('running' if status in {'queued', 'running', 'saved'} else
+                   'failure' if status == 'failed' else 'partial_failure' if status == 'push_failed' else
+                   'silent' if status == 'silent' else 'success')
+        return {'title': '晨间的梦', 'summary': '梦已保存，早安消息已写入聊天。' if job.get('notification') else
+                '梦与早安消息正在准备。' if outcome == 'running' else '晨间梦未完成。',
+                'outcome': outcome, 'silentReason': job.get('silent_reason') or ''}
     meaningful = [c for c in calls if c.get('name') not in {'desire_status','desire_encounter'}]
     actions = list(dict.fromkeys(c['action'] for c in meaningful))
     bad = any(c.get('status') in {'failed','started'} for c in calls)
