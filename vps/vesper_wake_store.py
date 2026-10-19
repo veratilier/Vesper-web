@@ -1,5 +1,5 @@
 """Durable wake queue. Separate SQLite file; never rewrites chat history."""
-import json, os, sqlite3, time, uuid
+import json, os, re, sqlite3, time, uuid
 from pathlib import Path
 
 PATH = Path(os.environ.get('VESPER_WAKE_DB', str(Path.home()/'.vesper/wake.sqlite3')))
@@ -153,8 +153,13 @@ def db():
       CREATE TABLE IF NOT EXISTS sleep_cycles (id TEXT PRIMARY KEY, start REAL NOT NULL, end REAL NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending', body TEXT, memory_id TEXT, retry_at REAL, error TEXT);
       CREATE TABLE IF NOT EXISTS calls (job_id TEXT, item_id TEXT, status TEXT NOT NULL,
-        result TEXT, PRIMARY KEY(job_id,item_id));''')
-    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT','incoming_plan':'TEXT','next_plan':'TEXT','plan_error':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
+        result TEXT, PRIMARY KEY(job_id,item_id));
+      CREATE TABLE IF NOT EXISTS arrival_intents (
+        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, user_message_id TEXT NOT NULL,
+        place_name TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL,
+        status TEXT NOT NULL, event_id TEXT, arrived REAL, evidence_json TEXT,
+        job_id TEXT);''')
+    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT','incoming_plan':'TEXT','next_plan':'TEXT','plan_error':'TEXT','arrival_json':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
         existing={row[1] for row in con.execute('PRAGMA table_info('+table+')')}
         for name,kind in fields.items():
             if name not in existing:con.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+kind)
@@ -175,10 +180,79 @@ def request(request_id=None, source='manual', delay=0):
         old=con.execute('SELECT id FROM jobs WHERE id=?',(ident,)).fetchone()
         if old:return old[0]
         # Repeated taps/devices join the pending work, rather than spawning it twice.
-        old=con.execute("SELECT id FROM jobs WHERE status IN ('queued','running') AND source!='letter-reminder' ORDER BY created LIMIT 1").fetchone()
+        old=con.execute("SELECT id FROM jobs WHERE status IN ('queued','running') AND source NOT IN ('letter-reminder','place-arrival') ORDER BY created LIMIT 1").fetchone()
         if old:return old[0]
         con.execute('INSERT INTO jobs(id,source,due,status,created) VALUES(?,?,?,?,?)',(ident,source,now+delay,'queued',now))
     return ident
+
+
+def _arrival_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9:_-]{1,128}', value):
+        raise ValueError('Invalid arrival ID')
+    return value
+
+
+def arm_arrival(body):
+    ident = _arrival_id(body.get('intentId'))
+    conversation_id = body.get('conversationId')
+    user_message_id = body.get('userMessageId')
+    place_name = body.get('placeName')
+    expires = body.get('expiresAt')
+    now = time.time()
+    if (not isinstance(conversation_id, str) or not 1 <= len(conversation_id) <= 128
+            or not isinstance(user_message_id, str) or not 1 <= len(user_message_id) <= 128
+            or not isinstance(place_name, str) or not 1 <= len(place_name.strip()) <= 80
+            or type(expires) not in (int, float) or not now + 300 <= expires <= now + 86400):
+        raise ValueError('Invalid arrival intent')
+    with db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        old = con.execute('SELECT * FROM arrival_intents WHERE id=?', (ident,)).fetchone()
+        if old:
+            if (old['conversation_id'], old['user_message_id'], old['place_name']) != (conversation_id, user_message_id, place_name.strip()):
+                raise ValueError('Arrival ID already used')
+            return {'intentId': ident, 'status': old['status'], 'expiresAt': old['expires']}
+        con.execute("UPDATE arrival_intents SET status='cancelled' WHERE status='armed'")
+        con.execute('INSERT INTO arrival_intents(id,conversation_id,user_message_id,place_name,created,expires,status) VALUES(?,?,?,?,?,?,?)',
+                    (ident, conversation_id, user_message_id, place_name.strip(), now, expires, 'armed'))
+    return {'intentId': ident, 'status': 'armed', 'expiresAt': expires}
+
+
+def cancel_arrival(body):
+    ident = _arrival_id(body.get('intentId'))
+    with db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        row = con.execute('SELECT job_id FROM arrival_intents WHERE id=?', (ident,)).fetchone()
+        if row:
+            con.execute("UPDATE arrival_intents SET status='cancelled' WHERE id=? AND status IN ('armed','arrived')", (ident,))
+            if row['job_id']:
+                con.execute("UPDATE jobs SET status='cancelled',finished=?,decision='arrival_cancelled' WHERE id=? AND status='queued'", (time.time(), row['job_id']))
+    return {'intentId': ident, 'status': 'cancelled'}
+
+
+def record_arrival(body):
+    ident = _arrival_id(body.get('intentId'))
+    event_id = _arrival_id(body.get('eventId'))
+    evidence = body.get('evidence')
+    if not isinstance(evidence, dict) or set(evidence) != {'geofence', 'wifiMatched'} or evidence['geofence'] is not True or type(evidence['wifiMatched']) is not bool:
+        raise ValueError('Invalid arrival evidence')
+    now = time.time()
+    with db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        intent = con.execute('SELECT * FROM arrival_intents WHERE id=?', (ident,)).fetchone()
+        if not intent:
+            raise ValueError('Arrival intent unavailable')
+        if intent['status'] == 'arrived' and intent['event_id'] == event_id:
+            return {'accepted': True, 'intentId': ident, 'jobId': intent['job_id']}
+        if intent['status'] != 'armed' or now > intent['expires']:
+            raise ValueError('Arrival intent is no longer armed')
+        job_id = 'arrival:' + ident
+        detail = {'placeName': intent['place_name'], 'geofence': True,
+                  'wifiMatched': evidence['wifiMatched'], 'detectedAt': now}
+        con.execute('INSERT INTO jobs(id,source,due,status,created,conversation_id,user_message_id,arrival_json) VALUES(?,?,?,?,?,?,?,?)',
+                    (job_id, 'place-arrival', now, 'queued', now, intent['conversation_id'], intent['user_message_id'], json.dumps(detail, ensure_ascii=False)))
+        con.execute("UPDATE arrival_intents SET status='arrived',event_id=?,arrived=?,evidence_json=?,job_id=? WHERE id=?",
+                    (event_id, now, json.dumps(evidence), job_id, ident))
+    return {'accepted': True, 'intentId': ident, 'jobId': job_id}
 
 def presence(device,busy):
     with db() as con:
