@@ -11,6 +11,7 @@ import { executeDesire, type NativeDesireEnv } from './desire/native';
 import { desireTools } from './desire/tools';
 import { memoryScopeFromRequest } from './memory';
 import { listAlbumPhotos, saveAlbumPhoto, getAlbumPhoto } from '@/lib/photo-album';
+import { browseSystemPhotos, viewSystemPhoto } from '@/lib/system-photos';
 import { deliverChatFiles } from './generated-chat-files';
 import { readExecutions } from '@/lib/codex-events';
 import { ensureSchema, getDb } from "@/lib/db";
@@ -147,6 +148,12 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === 'chat_capture_messages') {
     if (!memoryScope || !context.origin || !context.conversationId) throw new Error('Conversation context required');
     return createChatKeep(memoryScope.userId, input, context.origin);
+  }
+  if (name === 'browse_system_photos' || name === 'view_system_photo') {
+    if (!memoryScope) throw new Error('Account context required');
+    return name === 'browse_system_photos'
+      ? browseSystemPhotos(memoryScope.userId, input)
+      : viewSystemPhoto(memoryScope.userId, input.id);
   }
   await ensureSchema();
   if (['album_save_photo', 'album_search_photos', 'album_send_photos'].includes(name)) {
