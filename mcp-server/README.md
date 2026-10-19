@@ -9,7 +9,8 @@ Keep the existing Bearer access token and shared `vesper-db` D1 binding.
 
 ## Tools
 
-- Notes: `list_notes`, `save_note`.
+- Retired Notes: `list_notes` and `save_note` are no longer exposed. Existing
+  `notes` documents are preserved for backups and compatibility.
 - Reminders: `list_todos`, `save_todo`, `complete_todo`.
 - Diary: `list_diaries`, `get_diary`, `write_agent_diary`.
   Writing now appends by default. `mode: replace` is only for an explicitly
@@ -18,7 +19,7 @@ Keep the existing Bearer access token and shared `vesper-db` D1 binding.
 - Memory library: `list_memories`, `save_memory`, using the app's existing memory
   service, scope, deduplication and core-candidate workflow. Source is
   `vesper-mcp:chatgpt` or `vesper-mcp:automation`; choose automation for wake-ups.
-  `search_memory` remains the legacy search across notes/diaries/todos/dates.
+  `search_memory` searches diaries, reminders and dates, excluding retired Notes.
 - Notifications: `send_notification` sends immediately to subscribed devices.
   Saving a reminder does not itself schedule a push. Existing VAPID keys must
   match those used to subscribe the devices; don't generate replacement keys.
@@ -54,9 +55,9 @@ npx wrangler deploy --dry-run --config mcp-server/wrangler.jsonc
 ```
 
 After authorized deployment, verify `/health`, authenticated initialize and
-`tools/list`, then read existing notes/diary/memory through the client. Refresh
-its tool catalog. Do not send test notifications or create sample private
-entries without an explicit test request.
+`tools/list`, confirm `list_notes` and `save_note` are absent, then read existing
+diary/memory through the client. Refresh its tool catalog. Do not send test
+notifications or create sample private entries without an explicit test request.
 
 Current storage limitation: legacy document tools use read-modify-write JSON;
 concurrent app/MCP writes can conflict. MCP diary writes check for changes since
