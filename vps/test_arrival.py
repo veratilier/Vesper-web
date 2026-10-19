@@ -72,6 +72,26 @@ class ArrivalTests(unittest.TestCase):
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0][1]['conversationId'], 'ash-chat')
 
+    def test_automatic_place_events_are_idempotent_and_cooled_down(self):
+        first = {'eventId': 'entry-1', 'placeId': 'school', 'placeName': 'School'}
+        receipt = store.record_place_event(first)
+        self.assertEqual(receipt, store.record_place_event(first))
+        second = store.record_place_event({'eventId': 'entry-2', 'placeId': 'school', 'placeName': 'School'})
+        other = store.record_place_event({'eventId': 'entry-3', 'placeId': 'cafe', 'placeName': 'Cafe'})
+        self.assertTrue(receipt['jobId'])
+        self.assertIsNone(second['jobId'])
+        self.assertTrue(other['jobId'])
+        with store.db() as con:
+            jobs = con.execute("SELECT arrival_json FROM jobs WHERE source='place-arrival'").fetchall()
+        self.assertEqual(len(jobs), 2)
+        self.assertNotIn('latitude', str(jobs))
+
+    def test_automatic_event_validates_identity_and_label(self):
+        for event in ({'eventId': '../bad', 'placeId': 'school', 'placeName': 'School'},
+                      {'eventId': 'entry-1', 'placeId': 'school', 'placeName': ''}):
+            with self.assertRaises(ValueError):
+                store.record_place_event(event)
+
 
 if __name__ == '__main__':
     unittest.main()

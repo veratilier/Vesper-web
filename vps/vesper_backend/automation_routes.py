@@ -20,6 +20,8 @@ def dispatch(self, path, services):
                 self.send_json(200, wake_store.arm_arrival(body))
             elif action == 'arrived':
                 self.send_json(202, wake_store.record_arrival(body))
+            elif action == 'placeEvent':
+                self.send_json(202, wake_store.record_place_event(body))
             elif action == 'cancel':
                 self.send_json(200, wake_store.cancel_arrival(body))
             else:

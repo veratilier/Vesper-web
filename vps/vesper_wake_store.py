@@ -158,7 +158,10 @@ def db():
         id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, user_message_id TEXT NOT NULL,
         place_name TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL,
         status TEXT NOT NULL, event_id TEXT, arrived REAL, evidence_json TEXT,
-        job_id TEXT);''')
+        job_id TEXT);
+      CREATE TABLE IF NOT EXISTS arrival_events (
+        event_id TEXT PRIMARY KEY, place_id TEXT NOT NULL, place_name TEXT NOT NULL,
+        created REAL NOT NULL, job_id TEXT);''')
     for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT','incoming_plan':'TEXT','next_plan':'TEXT','plan_error':'TEXT','arrival_json':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
         existing={row[1] for row in con.execute('PRAGMA table_info('+table+')')}
         for name,kind in fields.items():
@@ -253,6 +256,34 @@ def record_arrival(body):
         con.execute("UPDATE arrival_intents SET status='arrived',event_id=?,arrived=?,evidence_json=?,job_id=? WHERE id=?",
                     (event_id, now, json.dumps(evidence), job_id, ident))
     return {'accepted': True, 'intentId': ident, 'jobId': job_id}
+
+
+def record_place_event(body):
+    """Accept a phone geofence event without an advance chat message or trip."""
+    event_id = _arrival_id(body.get('eventId'))
+    place_id = _arrival_id(body.get('placeId'))
+    place_name = body.get('placeName')
+    if not isinstance(place_name, str) or not 1 <= len(place_name.strip()) <= 80:
+        raise ValueError('Invalid place name')
+    place_name = place_name.strip()
+    now = time.time()
+    with db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        old = con.execute('SELECT * FROM arrival_events WHERE event_id=?', (event_id,)).fetchone()
+        if old:
+            if old['place_id'] != place_id or old['place_name'] != place_name:
+                raise ValueError('Arrival event ID already used')
+            return {'accepted': True, 'eventId': event_id, 'jobId': old['job_id']}
+        recent = con.execute('SELECT job_id FROM arrival_events WHERE place_id=? AND created>? ORDER BY created DESC LIMIT 1',
+                             (place_id, now - 6 * 3600)).fetchone()
+        job_id = None if recent else 'arrival-event:' + event_id
+        con.execute('INSERT INTO arrival_events(event_id,place_id,place_name,created,job_id) VALUES(?,?,?,?,?)',
+                    (event_id, place_id, place_name, now, job_id))
+        if job_id:
+            detail = {'placeName': place_name, 'geofence': True, 'detectedAt': now}
+            con.execute('INSERT INTO jobs(id,source,due,status,created,arrival_json) VALUES(?,?,?,?,?,?)',
+                        (job_id, 'place-arrival', now, 'queued', now, json.dumps(detail, ensure_ascii=False)))
+    return {'accepted': True, 'eventId': event_id, 'jobId': job_id}
 
 def presence(device,busy):
     with db() as con:
