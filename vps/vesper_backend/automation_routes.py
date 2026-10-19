@@ -7,6 +7,26 @@ def dispatch(self, path, services):
     db = services.db
     message = services.message
     wake_store = services.wake_store
+    if path == ['arrival'] and self.command == 'POST':
+        body = self.body()
+        action = body.get('action')
+        try:
+            if action == 'arm':
+                with db() as con:
+                    row = con.execute("SELECT role,status FROM messages WHERE id=? AND vesper_conversation_id=?",
+                                      (body.get('userMessageId'), body.get('conversationId'))).fetchone()
+                if not row or row['role'] != 'user' or row['status'] not in ('completed', 'delivered'):
+                    self.send_json(409, {'error': 'The original chat request is not saved'}); return True
+                self.send_json(200, wake_store.arm_arrival(body))
+            elif action == 'arrived':
+                self.send_json(202, wake_store.record_arrival(body))
+            elif action == 'cancel':
+                self.send_json(200, wake_store.cancel_arrival(body))
+            else:
+                self.send_json(400, {'error': 'Unknown arrival action'})
+        except ValueError as error:
+            self.send_json(400, {'error': str(error)})
+        return True
     if path == ['wake'] and self.command == 'GET':
         query = parse_qs(urlparse(self.path).query)
         if query.get('view') == ['workflow']:
