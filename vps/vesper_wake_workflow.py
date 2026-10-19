@@ -11,6 +11,7 @@ ACTIONS = {
     'music_search': '搜索音乐', 'music_get_status': '查看音乐状态',
     'chat_search_messages': '查找旧聊天', 'chat_capture_messages': '保存聊天截图',
     'album_save_photo': '保存相册图片', 'album_search_photos': '查找相册图片',
+    'browse_system_photos': '浏览 iPhone 相册预览', 'view_system_photo': '查看照片预览',
     'album_send_photos': '分享相册图片', 'send_chat_file': '分享文件',
     'sticker_search': '查找贴纸', 'sticker_send': '发送贴纸',
     'list_configured_mcp_tools': '查看已授权的论坛工具', 'call_configured_mcp_tool': '使用已授权的论坛工具',
@@ -43,7 +44,7 @@ def step(name, args=None, result=None, failed=False, uncertain=False):
         section = result.get('section')
         if section in {'notes','journal'}:
             value.update(completion='completed', result='已保存到便签。' if section == 'notes' else '已保存到日记。')
-    if name in {'desire_status','read_vesper_state','search_vesper_state','letter_list','jotting_list','bookmark_list','reading_room_read','recall_vesper_memory','music_search','music_get_status','chat_search_messages','album_search_photos','sticker_search','list_configured_mcp_tools'}:
+    if name in {'desire_status','read_vesper_state','search_vesper_state','letter_list','jotting_list','bookmark_list','reading_room_read','recall_vesper_memory','music_search','music_get_status','chat_search_messages','album_search_photos','browse_system_photos','view_system_photo','sticker_search','list_configured_mcp_tools'}:
         count = next((len(result[k]) for k in ('letters','jottings','bookmarks','matches','memories','tracks','photos','stickers','connections') if isinstance(result.get(k),list)), None)
         value.update(completion='completed', result=('读取完成，返回 ' + str(count) + ' 条结果。') if count is not None else '读取完成。')
     if name == 'desire_encounter': value.update(completion='completed', result='Desire 接口已确认本次评估。')

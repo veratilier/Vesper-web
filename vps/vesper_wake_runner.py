@@ -23,11 +23,29 @@ TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-
 HISTORY=Path(os.environ.get('VESPER_HISTORY_DB',str(Path.home()/'.vesper/chat-history.sqlite3')))
 WORK=Path.home()/'.vesper/wake-workspace'
 ALLOWED={'letter_list','letter_create','letter_read','letter_keep','jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
-         'chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
+         'chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','browse_system_photos','view_system_photo','send_chat_file','sticker_search','sticker_send',
          'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
-READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','album_search_photos','sticker_search'}
+READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','album_search_photos','browse_system_photos','view_system_photo','sticker_search'}
+PHOTO_READ_TOOLS={'browse_system_photos','view_system_photo'}
 INSTRUCTIONS=policy.WAKE_PROMPT
+
+def photo_result_without_pixels(result):
+    clean=json.loads(json.dumps(result,ensure_ascii=False))
+    if isinstance(clean,dict):
+        photos=clean.get('photos') if isinstance(clean.get('photos'),list) else [clean.get('photo')]
+        for photo in photos:
+            if isinstance(photo,dict):photo.pop('imageDataUrl',None)
+    return clean
+
+def photo_content_items(result):
+    clean=photo_result_without_pixels(result)
+    items=[{'type':'inputText','text':json.dumps(clean,ensure_ascii=False)}]
+    photos=result.get('photos') if isinstance(result,dict) and isinstance(result.get('photos'),list) else [result.get('photo') if isinstance(result,dict) else None]
+    for photo in photos:
+        if isinstance(photo,dict) and isinstance(photo.get('imageDataUrl'),str) and photo['imageDataUrl'].startswith('data:image/jpeg;base64,'):
+            items.append({'type':'inputImage','imageUrl':photo['imageDataUrl']})
+    return items
 
 def iso():return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
 
@@ -291,7 +309,9 @@ def execute(job):
                 raise RuntimeError('Tool temporarily paused: ' + key)
             if not old and write_risk and mark in store.get(con, 'uncertain_writes', {}):
                 raise RuntimeError('Previous external action outcome requires owner confirmation; not replayed')
-        if old:result=json.loads(old['result'])
+        if old:
+            result=(http('/api/codex/tools',{'name':name,'arguments':args,'threadId':thread_id,'itemId':item,'turnId':turn_id,'conversationId':job['conversation_id']})['result']
+                    if name in PHOTO_READ_TOOLS else json.loads(old['result']))
         else:
             if write_risk:
                 # Persist intent before sending: a killed executor cannot replay an uncertain write.
@@ -319,7 +339,8 @@ def execute(job):
                         uncertain.pop(mark, None)
                         store.put(con, 'uncertain_writes', uncertain)
                 store.put(con, 'tool_recovery', pauses)
-            with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=?,workflow_json=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(result),time.time(),json.dumps(workflow.step(name,args,result,failed=isinstance(result,dict) and bool(result.get('isError'))),ensure_ascii=False),ident,item))
+            saved_result=photo_result_without_pixels(result) if name in PHOTO_READ_TOOLS else result
+            with store.db() as con:con.execute("UPDATE calls SET status=?,result=?,finished=?,workflow_json=? WHERE job_id=? AND item_id=?",('failed' if isinstance(result,dict) and result.get('isError') else 'done',json.dumps(saved_result),time.time(),json.dumps(workflow.step(name,args,result,failed=isinstance(result,dict) and bool(result.get('isError'))),ensure_ascii=False),ident,item))
             tool_count+=1;update(ident,tools=tool_count)
         if name=='list_configured_mcp_tools':
             external_tools=permissions.external_catalog(result, store.forum_connections());result=external_tools
@@ -336,7 +357,8 @@ def execute(job):
             try:
                 if required_desire and name=="desire_encounter":raise RuntimeError("Desire write is reserved for the optional final assessment")
                 result=run_tool(name,args,item)
-                rpc.send({'id':msg['id'],'result':{'contentItems':[{'type':'inputText','text':json.dumps(result,ensure_ascii=False)}],'success':True}})
+                content=photo_content_items(result) if name in PHOTO_READ_TOOLS else [{'type':'inputText','text':json.dumps(result,ensure_ascii=False)}]
+                rpc.send({'id':msg['id'],'result':{'contentItems':content,'success':True}})
             except Exception as error:
                 with store.db() as con:
                     con.execute('INSERT OR IGNORE INTO calls(job_id,item_id,status,name,started,finished) VALUES(?,?,?,?,?,?)',(ident,item,'failed',name,time.time(),time.time()))
