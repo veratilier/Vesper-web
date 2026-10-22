@@ -7,6 +7,7 @@ CONVERSATION = 'vesper-autonomous-wake'
 import vesper_wake_sleep as sleep
 import vesper_wake_workflow as workflow
 import vesper_wake_plan as plan
+import vesper_token_usage as token_usage
 from vesper_wake_policy import WAKE_PROMPT
 DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
@@ -162,7 +163,7 @@ def db():
       CREATE TABLE IF NOT EXISTS arrival_events (
         event_id TEXT PRIMARY KEY, place_id TEXT NOT NULL, place_name TEXT NOT NULL,
         created REAL NOT NULL, job_id TEXT);''')
-    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','silent_reason':'TEXT','incoming_plan':'TEXT','next_plan':'TEXT','plan_error':'TEXT','arrival_json':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
+    for table,fields in {'jobs':{'notification':'TEXT','conversation_id':'TEXT','user_message_id':'TEXT','user_turn_id':'TEXT','scheduled_at':'REAL','decision':'TEXT','tokens':'INTEGER DEFAULT 0','budget_tokens':'INTEGER','usage_json':'TEXT','silent_reason':'TEXT','incoming_plan':'TEXT','next_plan':'TEXT','plan_error':'TEXT','arrival_json':'TEXT'},'calls':{'name':'TEXT','started':'REAL','finished':'REAL','workflow_json':'TEXT'}}.items():
         existing={row[1] for row in con.execute('PRAGMA table_info('+table+')')}
         for name,kind in fields.items():
             if name not in existing:con.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+kind)
@@ -355,6 +356,7 @@ def workflow_jobs(con, limit=50, offset=0):
         for field in ('incoming_plan', 'next_plan'):
             job[field] = json.loads(original[field]) if original[field] else None
         job['plan_error'] = original['plan_error']
+        job['tokenUsage'] = token_usage.stored(original['usage_json'], complete=job['status'] not in {'queued','running'})
         calls = []
         for row in con.execute('SELECT item_id,name,status,started,finished,workflow_json FROM calls WHERE job_id=? ORDER BY rowid', (job['id'],)):
             call = dict(row)

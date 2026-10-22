@@ -42,6 +42,22 @@ class CodexRecordsTests(unittest.TestCase):
             self.assertEqual(body['messages'][0]['metadata']['phase'],'final_answer')
         with history.db() as con: self.assertEqual(con.execute('SELECT count(*) FROM messages').fetchone()[0],1)
 
+    def test_saved_reply_gains_usage_without_replacing_content_or_advancing_unread_time(self):
+        self.append({'type':'event_msg','payload':{'type':'task_started','turn_id':'test-turn'}})
+        self.append(self.event())
+        with history.db() as con:records.sync(con,'test')
+        counts={'input_tokens':1000,'cached_input_tokens':800,'output_tokens':100,'reasoning_output_tokens':30,'total_tokens':1100}
+        self.append({'type':'event_msg','payload':{'type':'token_count','info':{'total_token_usage':counts,'last_token_usage':counts}}})
+        self.append({'type':'event_msg','payload':{'type':'task_complete','turn_id':'test-turn'}})
+        with history.db() as con:
+            con.execute("UPDATE messages SET content='USER_EDIT',updated_at='keep-time' WHERE id='reply'")
+        for _ in range(2):
+            with history.db() as con:
+                self.assertEqual(records.sync(con,'test')['restored'],0)
+                row=con.execute("SELECT * FROM messages WHERE id='reply'").fetchone()
+                self.assertEqual(row['content'],'USER_EDIT');self.assertEqual(row['updated_at'],'keep-time')
+                self.assertEqual(json.loads(row['metadata_json'])['tokenUsage']['cachedInputTokens'],800)
+
     def test_only_completed_public_same_thread_items_are_recovered(self):
         self.append(self.event(thread=self.other))
         self.append({'type':'response_item','payload':{'type':'message','role':'assistant','content':[{'text':'RAW_PRIVATE_CONTEXT'}]}})

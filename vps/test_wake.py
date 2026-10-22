@@ -65,7 +65,9 @@ class WakeTests(unittest.TestCase):
                     for n,tool in enumerate(['desire_status','read_vesper_state']):
                         message={'id':100+n,'method':'item/tool/call','params':{'name':tool,'itemId':str(n),'arguments':{}}}
                         self.queue.extend([message,message])
-                    self.queue.extend([{'method':'item/completed','params':{'item':{'id':'answer','type':'agentMessage','text':json.dumps({'share':share,'message':'A real saved reply' if share else ''})}}},
+                    counts={'inputTokens':1000,'cachedInputTokens':800,'outputTokens':100,'reasoningOutputTokens':20,'totalTokens':1100}
+                    self.queue.extend([{'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'total':counts,'last':counts}}},
+                        {'method':'item/completed','params':{'item':{'id':'answer','type':'agentMessage','text':json.dumps({'share':share,'message':'A real saved reply' if share else ''})}}},
                         {'method':'turn/completed','params':{'turn':{'status':'completed'}}}])
                     return {'turn':{'id':'turn'}}
                 return {}
@@ -87,6 +89,7 @@ class WakeTests(unittest.TestCase):
         with patch.object(runner,'datetime',Night),patch.object(runner,'Rpc',Rpc),patch.object(runner,'http',http),patch.object(runner,'context',lambda job:''),patch.object(runner,'front_busy',lambda n:False),patch.object(policy,'history',lambda p,**kw:[{'id':'real-user','vesper_conversation_id':'chat-existing','metadata_json':'{}','content':'Hello'}]):
             runner.execute(job)
         self.assertEqual(len(calls),2)
+        self.assertEqual(store.status()['lastJob']['tokenUsage']['cachedInputTokens'],800)
         if not share:
             self.assertEqual(push,[])
             self.assertFalse(any(m['role']=='agent' for m in messages.values()))
@@ -98,6 +101,7 @@ class WakeTests(unittest.TestCase):
         self.assertEqual(len(push),1)
         self.assertEqual(store.status()['lastJob']['status'],'completed')
         self.assertEqual(sum(m['role']=='agent' for m in messages.values()),1)
+        self.assertEqual(next(m for m in messages.values() if m['role']=='agent')['metadata']['tokenUsage']['totalTokens'],1100)
         self.assertEqual(len(messages),1)
     def test_silent_round_records_tools_without_message_or_push(self):
         self.test_full_runner_saves_before_push_and_deduplicates_tools(False)

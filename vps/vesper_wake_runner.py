@@ -17,6 +17,7 @@ import vesper_letter_reminders as letter_reminders
 import vesper_morning_dream
 import vesper_wake_plan as plan
 import vesper_wake_activity_context as activity_context
+import vesper_token_usage as token_usage
 
 ORIGIN=os.environ.get('VESPER_API_ORIGIN','https://vesper.r-vera.com')
 TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-token')))
@@ -371,7 +372,10 @@ def execute(job):
         elif method=='thread/tokenUsage/updated':
             usage=p.get('tokenUsage',{}).get('total',{})
             tokens,fresh=token_budget(usage)
-            update(ident,tokens=tokens,budget_tokens=fresh)
+            counts=token_usage.snapshot(usage)
+            fields={'tokens':tokens,'budget_tokens':fresh}
+            if counts is not None:fields['usage_json']=json.dumps(counts)
+            update(ident,**fields)
             if fresh>32000 or tokens>128000:raise RuntimeError('Wake token budget exceeded (32000 new / 128000 total); no retry')
         elif method=='turn/started':
             turn_id=p.get('turn',{}).get('id',turn_id);update(ident,turn_id=turn_id)
@@ -503,6 +507,8 @@ def execute(job):
             update(ident,status='silent',finished=time.time(),decision='recent_chat_messages_muted' if muted_at_end else 'nothing_to_share',silent_reason=('近期正在聊天，本轮仅在后台活动，未发送额外消息。' if muted_at_end else decision.get('silentReason') or workflow.REASONS['nothing_to_share'])[:200]);return
         metadata={'source':job['source'],'wakeRunId':ident,'threadId':thread_id,
                   'turnId':turn_id,'blockType':'agentMessage','showTurnStatus':False}
+        with store.db() as con:counts=token_usage.stored(con.execute('SELECT usage_json FROM jobs WHERE id=?',(ident,)).fetchone()[0],complete=True)
+        if counts is not None:metadata['tokenUsage']=counts
         notification=message
         if voice_available and decision.get('voice') is True and len(message) <= 220:
             connection=store.background_voice()

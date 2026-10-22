@@ -9,6 +9,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 import vesper_conversation_delete as deletion
+import vesper_token_usage as token_usage
 
 LOCK = threading.Lock()
 CACHE = OrderedDict()
@@ -61,19 +62,21 @@ def records(thread_id):
         stat = path.stat()
         state = CACHE.get(ident)
         if not state or state['file'] != (str(path), stat.st_ino) or stat.st_size < state['offset']:
-            state = {'file': (str(path), stat.st_ino), 'offset': 0, 'items': OrderedDict(), 'bytes': 0, 'truncated': False}
+            state = {'file': (str(path), stat.st_ino), 'offset': 0, 'items': OrderedDict(), 'bytes': 0, 'truncated': False,
+                     'usage': token_usage.RolloutUsage()}
         stream.seek(state['offset'])
         while line := stream.readline():
             if not line.endswith(b'\n'):
                 break  # Retry a currently-being-written item on the next read.
             state['offset'] = stream.tell()
-            # Most rollout lines are tokens, state updates or tool progress.
-            # Only completed items from this thread can change saved chat history.
-            if b'"item_completed"' not in line or ident.encode('ascii') not in line:
+            if not any(marker in line for marker in (b'"item_completed"', b'"token_count"', b'"task_started"', b'"task_complete"')):
                 continue
             try:
                 event = json.loads(line)
                 payload = event.get('payload', {})
+                if event.get('type') == 'event_msg' and payload.get('type') in {'task_started','task_complete','token_count'}:
+                    state['usage'].observe(payload)
+                    continue
                 if event.get('type') != 'event_msg' or payload.get('type') != 'item_completed' or payload.get('thread_id') != ident:
                     continue
                 item = payload.get('item', {})
@@ -111,7 +114,8 @@ def records(thread_id):
         CACHE[ident] = state; CACHE.move_to_end(ident)
         while len(CACHE) > 4:
             CACHE.popitem(last=False)
-        return list(state['items'].values()), state['truncated']
+        return [dict(item, **({'tokenUsage': state['usage'].turns[item['turnId']]} if item['turnId'] in state['usage'].turns else {}))
+                for item in state['items'].values()], state['truncated']
 
 
 def forget(thread_id):
@@ -149,6 +153,11 @@ def sync(con, conversation_id):
             continue
         saved = saved_by_key.get(item['id'])
         if saved and saved['status'] == 'delivered':
+            metadata = json.loads(saved['metadata_json'])
+            counts = item.get('tokenUsage')
+            if counts and metadata.get('tokenUsage') != counts:
+                metadata['tokenUsage'] = counts
+                con.execute('UPDATE messages SET metadata_json=? WHERE id=?', (json.dumps(metadata,ensure_ascii=False),saved['id']))
             continue  # Preserve saved/edited content, timestamps, attachment and call metadata.
         if saved and saved['id'] in deleted:
             continue
@@ -156,6 +165,7 @@ def sync(con, conversation_id):
         metadata.update(itemId=item['id'], threadId=thread, turnId=item['turnId'], blockType='agentMessage')
         if item['phase']:
             metadata['phase'] = item['phase']
+        if item.get('tokenUsage'):metadata['tokenUsage'] = item['tokenUsage']
         at = (saved['created_at'] if saved else '') or item['createdAt']
         values = (item['text'], json.dumps(metadata, ensure_ascii=False), at)
         if saved:
