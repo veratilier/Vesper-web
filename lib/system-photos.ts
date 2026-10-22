@@ -26,8 +26,8 @@ export async function knownSystemPhotoIDs(owner: string, ids: unknown, scan: unk
   const marks = ids.map(() => '?').join(',');
   const rows = await getDb().prepare(`SELECT asset_id FROM vesper_system_photos WHERE owner=? AND asset_id IN (${marks})`)
     .bind(owner,...ids).all<{asset_id:string}>();
-  await getDb().prepare(`UPDATE vesper_system_photos SET scan_id=? WHERE owner=? AND asset_id IN (${marks})`)
-    .bind(scan,owner,...ids).run();
+  await getDb().prepare(`UPDATE vesper_system_photos SET scan_id=? WHERE owner=? AND scan_id<>? AND asset_id IN (${marks})`)
+    .bind(scan,owner,scan,...ids).run();
   return { known: rows.results.map(row => row.asset_id) };
 }
 
