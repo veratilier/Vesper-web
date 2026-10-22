@@ -10,7 +10,7 @@ import vesper_wake_plan as plan
 from vesper_wake_policy import WAKE_PROMPT
 DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
-TOOL_OPTIONS = ['letter_list','letter_create','letter_read','letter_keep','jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','browse_system_photos','view_system_photo','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
+TOOL_OPTIONS = ['letter_list','letter_create','letter_read','letter_keep','jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
 MESSAGE_OPTIONS = ['text', 'photos', 'files', 'stickers']
 
 
@@ -366,7 +366,9 @@ def workflow_jobs(con, limit=50, offset=0):
             if not raw and call['status']=='done': call.update(completion='unknown', result='旧记录只保存了接口返回状态，具体完成情况未核对。')
             calls.append(call)
         job['calls'] = calls
+        job['error'] = original['error']
         job.update(workflow.describe(job, calls))
+        job.pop('error', None)
     return jobs
 
 
