@@ -23,11 +23,11 @@ TOKEN=Path(os.environ.get('CODEX_TOKEN_FILE',str(Path.home()/'.codex/app-server-
 HISTORY=Path(os.environ.get('VESPER_HISTORY_DB',str(Path.home()/'.vesper/chat-history.sqlite3')))
 WORK=Path.home()/'.vesper/wake-workspace'
 ALLOWED={'letter_list','letter_create','letter_read','letter_keep','jotting_list','jotting_create','read_vesper_state','search_vesper_state','desire_status','desire_history','write_vesper_state',
-         'chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','browse_system_photos','view_system_photo','send_chat_file','sticker_search','sticker_send',
+         'chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send',
          'reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory',
          'list_configured_mcp_tools','call_configured_mcp_tool','desire_encounter'}
-READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','album_search_photos','browse_system_photos','view_system_photo','sticker_search'}
-PHOTO_READ_TOOLS={'browse_system_photos','view_system_photo'}
+READ_ONLY={'letter_list','jotting_list','bookmark_list','read_vesper_state','search_vesper_state','desire_status','desire_history','album_search_photos','sticker_search'}
+PHOTO_READ_TOOLS=set()
 INSTRUCTIONS=policy.WAKE_PROMPT
 
 def photo_result_without_pixels(result):

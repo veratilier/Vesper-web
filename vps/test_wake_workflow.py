@@ -30,11 +30,23 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(store.workflow_run('2')['job']['id'],'2')
         with self.assertRaises(ValueError):store.workflow_run('missing')
     def test_silent_and_partial_failure_are_readable(self):
+        quiet=workflow.describe({'status':'silent','decision':'nothing_to_share','notification':None},[])
+        self.assertEqual(quiet['outcome'],'silent')
+        self.assertEqual(quiet['title'],'安静醒来')
+        failed=workflow.describe({'status':'failed','error':'Wake token budget exceeded (32000 new / 128000 total); no retry','notification':None},[])
+        self.assertEqual(failed['outcome'],'failure')
+        self.assertEqual(failed['title'],'唤醒未完成')
+        self.assertIn('token 预算',failed['summary'])
         for status in ['started','failed']:
             call=dict(workflow.step('music_search',failed=True),name='music_search',status=status)
             result=workflow.describe({'status':'silent','decision':'nothing_to_share','notification':None},[call])
             self.assertEqual(result['outcome'],'partial_failure')
             self.assertTrue(result['silentReason'])
+    def test_system_photo_tools_are_unavailable_to_unattended_wakes(self):
+        for name in ('browse_system_photos','view_system_photo'):
+            self.assertNotIn(name,runner.ALLOWED)
+            self.assertNotIn(name,runner.READ_ONLY)
+            self.assertNotIn(name,store.TOOL_OPTIONS)
     def test_jotting_ids_are_stable_and_writes_require_authorization(self):
         a=permissions.tool_input('jotting_create',{'id':'model','text':'x'},'job','item',{})
         b=permissions.tool_input('jotting_create',{'id':'another','text':'x'},'job','item',{})

@@ -69,8 +69,14 @@ def describe(job, calls):
     actions = list(dict.fromkeys(c['action'] for c in meaningful))
     bad = any(c.get('status') in {'failed','started'} for c in calls)
     status = job['status']
-    outcome = 'running' if status in {'queued','running','saved'} else 'failure' if status == 'failed' else 'interrupted' if status in {'cancelled','interrupted'} else 'partial_failure' if bad else 'success'
+    outcome = ('running' if status in {'queued','running','saved'} else
+               'failure' if status == 'failed' else
+               'interrupted' if status in {'cancelled','interrupted'} else
+               'partial_failure' if bad else 'silent' if status == 'silent' else 'success')
     reason = REASONS.get(job.get('decision'), '本轮未发送聊天消息。') if not job.get('notification') else ''
-    return {'title': ' · '.join(actions[:2]) or ('留一句话' if job.get('notification') else '安静醒来'),
-            'summary': '；'.join(c['result'] for c in meaningful[:3]) or ('已留下一条聊天消息。' if job.get('notification') else reason),
+    if status == 'failed':
+        error = job.get('error') or ''
+        reason = '本轮超过 token 预算，未完成最终决定。' if 'Wake token budget exceeded' in error else '本轮执行未完成；未作出保持安静的决定。'
+    return {'title': ' · '.join(actions[:2]) or ('唤醒未完成' if status == 'failed' else '留一句话' if job.get('notification') else '安静醒来'),
+            'summary': reason if status == 'failed' else '；'.join(c['result'] for c in meaningful[:3]) or ('已留下一条聊天消息。' if job.get('notification') else reason),
             'outcome': outcome, 'silentReason': job.get('silent_reason') or reason}
