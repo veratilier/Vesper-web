@@ -109,6 +109,21 @@ export async function updateStickerCategory(scope: MemoryScope, id: string, inpu
   return { id, name, description, sortOrder };
 }
 
+export async function deleteStickerCategory(scope: MemoryScope, id: string) {
+  await ensureSchema();
+  const db = getDb();
+  const category = await db.prepare("SELECT id FROM vesper_sticker_categories WHERE id=? AND user_id=? AND character_id=?")
+    .bind(id, scope.userId, scope.characterId).first<{ id: string }>();
+  if (!category) throw new Error("Category not found");
+  const results = await db.batch([
+    db.prepare("UPDATE vesper_sticker_assets SET category_id=NULL, updated_at=? WHERE category_id=? AND user_id=? AND character_id=?")
+      .bind(now(), id, scope.userId, scope.characterId),
+    db.prepare("DELETE FROM vesper_sticker_categories WHERE id=? AND user_id=? AND character_id=?")
+      .bind(id, scope.userId, scope.characterId),
+  ]);
+  return { deleted: true, uncategorized: results[0].meta.changes ?? 0 };
+}
+
 export async function uploadSticker(scope: MemoryScope, requestOrigin: string, file: File, input: { categoryId?: unknown; description?: unknown; favorite?: unknown; source?: string; sourceConversationId?: string; sourceMessageId?: string } = {}) {
   await ensureSchema();
   if (file.size <= 0 || file.size > STICKER_CONFIG.maxBytes) throw new Error("Sticker size must be between 1 B and 12 MB.");
