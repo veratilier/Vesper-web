@@ -59,7 +59,7 @@ class SettlerTests(unittest.TestCase):
         batch=settler.bounded(c)
         self.assertEqual(len(batch['pending']),50)
         result=settler.assess(batch,self.rpc())
-        self.assertEqual(result['eventIds'],[f'event-{i}' for i in range(50)])
+        self.assertEqual(result['eventIds'],[f'event-{i}' for i in range(30,80)])
     def test_one_run_commits_once_and_never_sends_chat_or_runs_activities(self):
         requests=[]
         def http(path,body=None):

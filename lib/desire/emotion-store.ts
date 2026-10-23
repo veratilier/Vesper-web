@@ -27,14 +27,16 @@ export async function emotionState(db: D1Database) {
 export async function emotionEvents(db: D1Database, raw: unknown) {
   await initialize(db);
   const events = eventInput.array().max(100).parse(raw);
-  if (events.length) await db.batch(events.map(e => db.prepare(`INSERT OR IGNORE INTO vesper_emotion_events(id,stream,at,kind,text,outcome,received_at) VALUES(?,?,?,?,?,?,?)`).bind(e.id,e.stream,e.at,e.kind,e.text,e.outcome,new Date().toISOString())));
+  // Delayed history must not pull the current emotion state back into the past.
+  const latest = await db.prepare(`SELECT MAX(at) AS at FROM vesper_emotion_events WHERE processed_by IS NOT NULL AND processed_by NOT LIKE 'superseded:%'`).first<{at:string|null}>();
+  if (events.length) await db.batch(events.map(e => db.prepare(`INSERT OR IGNORE INTO vesper_emotion_events(id,stream,at,kind,text,outcome,processed_by,received_at) VALUES(?,?,?,?,?,?,?,?)`).bind(e.id,e.stream,e.at,e.kind,e.text,e.outcome,latest?.at && e.at < latest.at ? 'superseded:late' : null,new Date().toISOString())));
   return { accepted: events.length };
 }
 export async function emotionContext(db: D1Database) {
   const state = await emotionState(db);
-  const pending = await db.prepare(`SELECT id,stream,at,kind,text,outcome FROM vesper_emotion_events WHERE processed_by IS NULL ORDER BY at,id LIMIT 80`).all();
-  const background = await db.prepare(`SELECT id,stream,at,kind,text,outcome,processed_by FROM vesper_emotion_events WHERE processed_by IS NOT NULL ORDER BY at DESC,id DESC LIMIT 12`).all();
-  return { state, pending: pending.results, background: background.results.map(e => ({ ...e, alreadyCounted: true })) };
+  const pending = await db.prepare(`SELECT id,stream,at,kind,text,outcome FROM vesper_emotion_events WHERE processed_by IS NULL AND at >= COALESCE((SELECT MAX(at) FROM vesper_emotion_events WHERE processed_by IS NOT NULL AND processed_by NOT LIKE 'superseded:%'),'') ORDER BY at DESC,id DESC LIMIT 80`).all();
+  const background = await db.prepare(`SELECT id,stream,at,kind,text,outcome,processed_by FROM vesper_emotion_events WHERE processed_by IS NOT NULL AND processed_by NOT LIKE 'superseded:%' ORDER BY at DESC,id DESC LIMIT 12`).all();
+  return { state, pending: pending.results.reverse(), background: background.results.map(e => ({ ...e, alreadyCounted: true })) };
 }
 export async function commitEmotion(db: D1Database, raw: unknown) {
   await initialize(db);
@@ -46,7 +48,7 @@ export async function commitEmotion(db: D1Database, raw: unknown) {
   const at = new Date().toISOString(), ids = JSON.stringify(c.eventIds), values = JSON.stringify(c.values), cadence = c.cadence ? JSON.stringify(c.cadence) : null;
   // D1 batch is one transaction. The insertion elects a winner; every subsequent
   // write is gated by that exact update ID and version. Events can arrive out of order.
-  await db.batch([
+  const statements = [
     db.prepare(`INSERT OR IGNORE INTO vesper_emotion_updates(id,base_version,version,source,values_json,reason,unresolved,event_ids,cadence_json,created_at)
       SELECT ?,version,version+1,?,?,?,?,?,?,? FROM vesper_emotion_state WHERE owner='vesper' AND version=?
       AND (SELECT count(*) FROM vesper_emotion_events WHERE id IN (SELECT value FROM json_each(?)) AND processed_by IS NULL)=json_array_length(?)`)
@@ -55,7 +57,13 @@ export async function commitEmotion(db: D1Database, raw: unknown) {
       WHERE owner='vesper' AND version=? AND EXISTS(SELECT 1 FROM vesper_emotion_updates WHERE id=? AND base_version=vesper_emotion_state.version)`)
       .bind(values,c.reason,c.unresolved,at,c.source,cadence,c.baseVersion,c.updateId),
     db.prepare(`UPDATE vesper_emotion_events SET processed_by=? WHERE processed_by IS NULL AND id IN(SELECT value FROM json_each(?)) AND EXISTS(SELECT 1 FROM vesper_emotion_updates WHERE id=?)`).bind(c.updateId,ids,c.updateId),
-  ]);
+  ];
+  // A settlement represents the newest conversation segment. Keep earlier
+  // evidence for audit, but do not score it after a newer state was committed.
+  if (c.source === 'settlement' && c.eventIds.length) statements.push(
+    db.prepare(`UPDATE vesper_emotion_events SET processed_by=? WHERE processed_by IS NULL AND at <= (SELECT MAX(at) FROM vesper_emotion_events WHERE id IN (SELECT value FROM json_each(?))) AND EXISTS(SELECT 1 FROM vesper_emotion_updates WHERE id=?)`).bind(`superseded:${c.updateId}`,ids,c.updateId),
+  );
+  await db.batch(statements);
   const saved = await db.prepare(`SELECT version FROM vesper_emotion_updates WHERE id=?`).bind(c.updateId).first<{version:number}>();
   return saved ? { committed: true, duplicate: false, version: saved.version } : { committed: false, conflict: true, state: await emotionState(db) };
 }

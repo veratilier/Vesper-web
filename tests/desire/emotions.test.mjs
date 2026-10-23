@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fixture} from './fixture.mjs';
-import {emotionState,emotionEvents,emotionHistory,commitEmotion,settlementReceipt} from '/tmp/vesper-emotion-store-test.mjs';
+import {emotionState,emotionEvents,emotionContext,emotionHistory,commitEmotion,settlementReceipt} from '/tmp/vesper-emotion-store-test.mjs';
 const values={joy:45,calm:70,sadness:10,anxiety:15,anger:0,closeness:65,curiosity:45,hurt:5};
 const event=(id)=>({id,stream:'vps:chat',at:'2026-10-09T04:00:00Z',kind:'user',text:'A real incoming message',outcome:'observed'});
 const candidate=(updateId,baseVersion,eventIds)=>({updateId,baseVersion,eventIds,values,reason:'A brief assessment based on actual conversation.',unresolved:'',source:'settlement',cadence:{minutes:45,mode:'calm',reason:'Continue quietly.'}});
@@ -14,11 +14,11 @@ test('uninitialized eight values never copy or seed old six-dimensional numbers'
 });
 test('CAS collision commits one state/history atomically, retaining losing events for next assessment',async t=>{
  const {adapter,db}=fixture(t);await emotionEvents(adapter,[event('one'),event('two')]);
- const results=await Promise.all([commitEmotion(adapter,candidate('chat-update',0,['one'])),commitEmotion(adapter,candidate('periodic-update',0,['two']))]);
+ const results=await Promise.all([commitEmotion(adapter,{...candidate('chat-update',0,['one']),source:'chat'}),commitEmotion(adapter,{...candidate('periodic-update',0,['two']),source:'chat'})]);
  assert.equal(results.filter(r=>r.committed).length,1);assert.equal(results.filter(r=>r.conflict).length,1);
  assert.equal((await emotionHistory(adapter)).records.length,1);assert.equal((await emotionState(adapter)).version,1);
  const pending=db.prepare('SELECT id FROM vesper_emotion_events WHERE processed_by IS NULL').all();assert.equal(pending.length,1);
- assert.equal((await commitEmotion(adapter,candidate('next',1,[pending[0].id]))).committed,true);
+ assert.equal((await commitEmotion(adapter,{...candidate('next',1,[pending[0].id]),source:'chat'})).committed,true);
  assert.equal(db.prepare('SELECT count(*) n FROM vesper_emotion_events WHERE processed_by IS NULL').get().n,0);
 });
 test('duplicate retry and overlapping evidence do not count twice; late low-ID events remain eligible',async t=>{
@@ -28,6 +28,24 @@ test('duplicate retry and overlapping evidence do not count twice; late low-ID e
  assert.equal((await commitEmotion(adapter,candidate('reuse-evidence',1,['zzz']))).conflict,true);
  await emotionEvents(adapter,[event('aaa')]);assert.equal((await commitEmotion(adapter,candidate('late',1,['aaa']))).committed,true);
  assert.equal((await emotionHistory(adapter)).records.length,2);
+});
+test('settlement uses the newest segment and preserves older events as superseded audit records',async t=>{
+ const {adapter,db}=fixture(t);
+ await emotionEvents(adapter,[
+  {...event('old'),at:'2026-10-09T04:00:00Z'},
+  {...event('new'),at:'2026-10-10T04:00:00Z'},
+ ]);
+ assert.deepEqual((await emotionContext(adapter)).pending.map(e=>e.id),['old','new']);
+ assert.equal((await commitEmotion(adapter,candidate('latest',0,['new']))).committed,true);
+ assert.match(db.prepare("SELECT processed_by FROM vesper_emotion_events WHERE id='old'").get().processed_by,/^superseded:/);
+ assert.deepEqual((await emotionContext(adapter)).pending,[]);
+ await emotionEvents(adapter,[
+  {...event('delayed-old'),at:'2026-10-09T05:00:00Z'},
+  {...event('newer'),at:'2026-10-10T05:00:00Z'},
+ ]);
+ assert.equal(db.prepare("SELECT processed_by FROM vesper_emotion_events WHERE id='delayed-old'").get().processed_by,'superseded:late');
+ assert.deepEqual((await emotionContext(adapter)).pending.map(e=>e.id),['newer']);
+ assert.equal((await emotionContext(adapter)).background.some(e=>e.id==='old'),false);
 });
 test('transaction interruption rolls back state, history and event consumption together',async t=>{
  const {adapter,db}=fixture(t);await emotionEvents(adapter,[event('one')]);adapter.failAt=2;

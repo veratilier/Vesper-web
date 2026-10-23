@@ -66,8 +66,13 @@ def bounded(context):
         if not append('background',event,120):break
     pending=context.get('pending',[])
     if not state.get('initialized'):pending=pending[-10:]
-    for event in pending[:50]:
-        if not append('pending',event,180):break
+    # The API returns the most recent evidence in chronological order. Fit the
+    # newest contiguous slice, then present it to the model chronologically.
+    for event in reversed(pending[-50:]):
+        entry={**event,'text':event['text'][:180]}
+        result['pending'].insert(0,entry)
+        if len(json.dumps(result,ensure_ascii=False,separators=(',',':')))>MAX_CONTEXT_CHARACTERS:
+            result['pending'].pop(0);break
     return result
 
 def assess(context,rpc):
