@@ -19,7 +19,8 @@ class SettlerTests(unittest.TestCase):
                 if method=='turn/start':
                     assert_strict_output_schema(params['outputSchema'])
                     context=json.loads(params['input'][0]['text'])
-                    value={'values':VALUES,'reason':'Current state continues.','unresolved':'','eventIds':[e['id'] for e in context['pending']],'cadence':{'minutes':45,'mode':'calm','reason':'Read quietly.'}}
+                    self.assertTrue(all('id' not in e for e in context['pending']))
+                    value={'values':VALUES,'reason':'Current state continues.','unresolved':'','cadence':{'minutes':45,'mode':'calm','reason':'Read quietly.'}}
                     r.handler({'method':'item/completed','params':{'item':{'type':'agentMessage','text':json.dumps(value)}}})
                     r.handler({'method':'turn/completed','params':{'turn':{'status':'completed'}}})
                     return {'turn':{'id':'assessment'}}
@@ -39,7 +40,7 @@ class SettlerTests(unittest.TestCase):
         c['background']=[{'id':'old','text':'Already counted','alreadyCounted':True}]
         small=settler.bounded(c)
         self.assertLessEqual(len(json.dumps(small,ensure_ascii=False,separators=(',',':'))),settler.MAX_CONTEXT_CHARACTERS)
-        self.assertLessEqual(len(small['pending']),10)
+        self.assertLessEqual(len(small['pending']),50)
         self.assertNotIn('runtime',small['state']);self.assertTrue(small['background'][0]['alreadyCounted'])
         self.assertIn('runtime',c['state'],'Building the model input must not mutate the authoritative snapshot')
     def test_long_event_ids_and_background_share_one_bound_without_consuming_omitted_events(self):
@@ -52,6 +53,13 @@ class SettlerTests(unittest.TestCase):
         self.assertLess(len(small['pending']),len(c['pending']))
         self.assertEqual(len(c['pending']),80)
         self.assertTrue(all(e['alreadyCounted'] for e in small['background']))
+    def test_backlog_batches_more_than_ten_events_without_losing_ids(self):
+        c=self.context()
+        c['pending']=[{'id':f'event-{i}','at':'2026-10-23T00:00:00Z','kind':'agent','text':'A short real reply.','outcome':'observed'} for i in range(80)]
+        batch=settler.bounded(c)
+        self.assertEqual(len(batch['pending']),50)
+        result=settler.assess(batch,self.rpc())
+        self.assertEqual(result['eventIds'],[f'event-{i}' for i in range(50)])
     def test_one_run_commits_once_and_never_sends_chat_or_runs_activities(self):
         requests=[]
         def http(path,body=None):
