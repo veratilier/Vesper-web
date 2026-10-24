@@ -2,25 +2,42 @@ import { ensureSchema, getDb } from './db';
 import { env } from 'cloudflare:workers';
 import { sendPushBatch, type PushSubscriptionData } from '@mmmike/web-push/send';
 
-type Quote = { text: string; source: string; category: string; sourceURL: string };
+type Quote = { text: string; source: string; category: typeof quoteCategories[number]; sourceURL: string };
 type Row = { id: string; day: string; value: string; kept: number; created_at: string };
 type CommentRow = { id: string; card_id: string; author: string; body: string; created_at: string };
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
-export const quoteCategories = ['诗意', '从容', '勇气', '思念', '自然'] as const;
+export const quoteCategories = ['哲学', '轻文学', '诗歌', '散文', '小说'] as const;
+function isQuoteCategory(value: unknown): value is typeof quoteCategories[number] {
+  return typeof value === 'string' && (quoteCategories as readonly string[]).includes(value);
+}
 // Short excerpts from public-domain originals, with a direct source for each one.
 const quotes: Quote[] = [
-  { text: '行到水穷处，坐看云起时。', source: '王维《终南别业》', category: '从容', sourceURL: 'https://zh.wikisource.org/wiki/終南別業' },
-  { text: '海内存知己，天涯若比邻。', source: '王勃《送杜少府之任蜀州》', category: '思念', sourceURL: 'https://zh.wikisource.org/wiki/送杜少府之任蜀州' },
-  { text: '莫听穿林打叶声，何妨吟啸且徐行。', source: '苏轼《定风波》', category: '从容', sourceURL: 'https://zh.wikisource.org/zh/定風波_(莫聽穿林打葉聲)' },
-  { text: '明月松间照，清泉石上流。', source: '王维《山居秋暝》', category: '自然', sourceURL: 'https://zh.wikisource.org/wiki/山居秋暝' },
-  { text: '采菊东篱下，悠然见南山。', source: '陶渊明《饮酒·其五》', category: '自然', sourceURL: 'https://zh.wikisource.org/wiki/飲酒二十首' },
-  { text: '山重水复疑无路，柳暗花明又一村。', source: '陆游《游山西村》', category: '勇气', sourceURL: 'https://zh.wikisource.org/wiki/遊山西村' },
-  { text: '长风破浪会有时，直挂云帆济沧海。', source: '李白《行路难·其一》', category: '勇气', sourceURL: 'https://zh.wikisource.org/wiki/行路難三首' },
-  { text: '但愿人长久，千里共婵娟。', source: '苏轼《水调歌头》', category: '思念', sourceURL: 'https://zh.wikisource.org/wiki/水調歌頭_(明月幾時有)' },
-  { text: '人闲桂花落，夜静春山空。', source: '王维《鸟鸣涧》', category: '诗意', sourceURL: 'https://zh.wikisource.org/wiki/鳥鳴澗' },
-  { text: '此情可待成追忆，只是当时已惘然。', source: '李商隐《锦瑟》', category: '思念', sourceURL: 'https://zh.wikisource.org/wiki/錦瑟' },
-  { text: '野旷天低树，江清月近人。', source: '孟浩然《宿建德江》', category: '诗意', sourceURL: 'https://zh.wikisource.org/wiki/宿建德江' },
-  { text: '会当凌绝顶，一览众山小。', source: '杜甫《望岳》', category: '勇气', sourceURL: 'https://zh.wikisource.org/wiki/望嶽' },
+  { text: '行到水穷处，坐看云起时。', source: '王维《终南别业》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/終南別業' },
+  { text: '海内存知己，天涯若比邻。', source: '王勃《送杜少府之任蜀州》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/送杜少府之任蜀州' },
+  { text: '莫听穿林打叶声，何妨吟啸且徐行。', source: '苏轼《定风波》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/zh/定風波_(莫聽穿林打葉聲)' },
+  { text: '明月松间照，清泉石上流。', source: '王维《山居秋暝》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/山居秋暝' },
+  { text: '采菊东篱下，悠然见南山。', source: '陶渊明《饮酒·其五》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/飲酒二十首' },
+  { text: '山重水复疑无路，柳暗花明又一村。', source: '陆游《游山西村》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/遊山西村' },
+  { text: '长风破浪会有时，直挂云帆济沧海。', source: '李白《行路难·其一》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/行路難三首' },
+  { text: '但愿人长久，千里共婵娟。', source: '苏轼《水调歌头》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/水調歌頭_(明月幾時有)' },
+  { text: '人闲桂花落，夜静春山空。', source: '王维《鸟鸣涧》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/鳥鳴澗' },
+  { text: '此情可待成追忆，只是当时已惘然。', source: '李商隐《锦瑟》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/錦瑟' },
+  { text: '野旷天低树，江清月近人。', source: '孟浩然《宿建德江》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/宿建德江' },
+  { text: '会当凌绝顶，一览众山小。', source: '杜甫《望岳》', category: '诗歌', sourceURL: 'https://zh.wikisource.org/wiki/望嶽' },
+  { text: '知者不惑，仁者不忧，勇者不惧。', source: '《论语·子罕》', category: '哲学', sourceURL: 'https://zh.wikisource.org/wiki/論語/子罕第九' },
+  { text: '逝者如斯夫！不舍昼夜。', source: '《论语·子罕》', category: '哲学', sourceURL: 'https://zh.wikisource.org/wiki/論語/子罕第九' },
+  { text: '上善若水。水善利万物而不争。', source: '《道德经》第八章', category: '哲学', sourceURL: 'https://zh.wikisource.org/wiki/老子道德經註/上篇' },
+  { text: '天地有大美而不言，四时有明法而不议。', source: '《庄子·知北游》', category: '哲学', sourceURL: 'https://zh.wikisource.org/wiki/莊子/知北遊' },
+  { text: '燕子去了，有再来的时候；杨柳枯了，有再青的时候；桃花谢了，有再开的时候。', source: '朱自清《匆匆》', category: '轻文学', sourceURL: 'https://zh.wikisource.org/wiki/匆匆' },
+  { text: '过去的日子如轻烟，被微风吹散了，如薄雾，被初阳蒸融了。', source: '朱自清《匆匆》', category: '轻文学', sourceURL: 'https://zh.wikisource.org/wiki/匆匆' },
+  { text: '单是周围的短短的泥墙根一带，就有无限趣味。', source: '鲁迅《从百草园到三味书屋》', category: '轻文学', sourceURL: 'https://zh.wikisource.org/wiki/從百草園到三味書屋' },
+  { text: '我爱热闹，也爱冷静；爱群居，也爱独处。', source: '朱自清《荷塘月色》', category: '轻文学', sourceURL: 'https://zh.wikisource.org/wiki/荷塘月色' },
+  { text: '忽逢桃花林，夹岸数百步，中无杂树，芳草鲜美，落英缤纷。', source: '陶渊明《桃花源记》', category: '散文', sourceURL: 'https://zh.wikisource.org/wiki/桃花源記' },
+  { text: '天朗气清，惠风和畅。仰观宇宙之大，俯察品类之盛。', source: '王羲之《兰亭集序》', category: '散文', sourceURL: 'https://zh.wikisource.org/wiki/蘭亭集序' },
+  { text: '不以物喜，不以己悲。', source: '范仲淹《岳阳楼记》', category: '散文', sourceURL: 'https://zh.wikisource.org/wiki/岳陽樓記' },
+  { text: '希望是本无所谓有，无所谓无的。这正如地上的路，其实地上本没有路；走的人多了，也便成了路。', source: '鲁迅《故乡》', category: '小说', sourceURL: 'https://zh.wikisource.org/wiki/故鄉' },
+  { text: '从来如此，便对么？', source: '鲁迅《狂人日记》', category: '小说', sourceURL: 'https://zh.wikisource.org/wiki/狂人日記' },
+  { text: '虽我不学无文，又何妨用假语村言，敷演出来，亦可使闺阁昭传。', source: '曹雪芹《红楼梦》第一回', category: '小说', sourceURL: 'https://zh.wikisource.org/wiki/紅樓夢（程甲本）/一' },
 ];
 
 function localDay(date = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); }
@@ -30,7 +47,11 @@ function cleanCategories(value: unknown) {
 }
 async function preferences(owner: string) {
   const row = await getDb().prepare('SELECT categories,notify,daily_count FROM vesper_quote_preferences WHERE user_id=?').bind(owner).first<{categories:string;notify:number;daily_count:number}>();
-  return { categories: row ? JSON.parse(row.categories) as string[] : [], notify: row ? Boolean(row.notify) : true, dailyCount: row ? row.daily_count : 3 };
+  const saved = row ? JSON.parse(row.categories) as unknown : [];
+  // Older settings were mood labels. Ignore those labels so an obsolete filter
+  // never leaves the new genre catalogue empty.
+  const categories = Array.isArray(saved) ? saved.filter(isQuoteCategory) : [];
+  return { categories, notify: row ? Boolean(row.notify) : true, dailyCount: row ? row.daily_count : 3 };
 }
 export async function quoteCandidates(owner: string) {
   await ensureSchema();
@@ -97,7 +118,11 @@ export async function listDailyQuotes(owner: string) {
   const config = await preferences(owner), today = localDay();
   const rows = await getDb().prepare('SELECT id,day,value,kept,created_at FROM vesper_daily_quotes WHERE user_id=? ORDER BY day DESC,id DESC LIMIT 90').bind(owner).all<Row>();
   const notes = await comments(owner, rows.results.map(row => row.id));
-  return { cards: rows.results.map(row => ({ ...JSON.parse(row.value), kept: Boolean(row.kept), comments: notes[row.id] || [] })),
+  return { cards: rows.results.map(row => {
+    const card = JSON.parse(row.value);
+    return { ...card, category: isQuoteCategory(card.category) ? card.category : '诗歌',
+      kept: Boolean(row.kept), comments: notes[row.id] || [] };
+  }),
     preferences: config, today };
 }
 export async function publishDailyQuote(owner: string, input: Record<string,unknown>) {
