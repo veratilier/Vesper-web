@@ -59,6 +59,8 @@ try {
   assert.equal(first.cards.length, 0, 'opening the page must not fabricate cards or images');
   const candidates = await tool('daily_quote_candidates', {});
   assert.equal(candidates.status, 200);
+  assert.deepEqual(new Set(candidates.body.result.candidates.map(item => item.category)),
+    new Set(['哲学', '轻文学', '诗歌', '散文', '小说']));
   const found = await tool('daily_quote_image_search', { query: 'mountain mist' });
   assert.equal(found.status, 200, JSON.stringify(found.body));
   assert.equal(found.body.result.images.length, 1);
@@ -73,6 +75,14 @@ try {
   const card = (await (await modules.route.GET(request('GET', '/api/daily-quotes'))).json()).cards[0];
   assert.equal(card.imagePageURL, 'https://commons.wikimedia.org/wiki/File:Mist_in_the_trees_-_Public_Domain.jpg');
   assert.equal(card.licence, 'CC0');
+  const owner = sqlite.prepare('SELECT user_id FROM vesper_daily_quotes LIMIT 1').get().user_id;
+  sqlite.prepare('UPDATE vesper_daily_quotes SET value=json_set(value, ?, ?) WHERE id=?')
+    .run('$.category', '从容', card.id);
+  sqlite.prepare('INSERT INTO vesper_quote_preferences(user_id,categories,notify,daily_count,updated_at) VALUES(?,?,?,?,?)')
+    .run(owner, '["自然"]', 1, 3, new Date().toISOString());
+  const migrated = await (await modules.route.GET(request('GET', '/api/daily-quotes'))).json();
+  assert.equal(migrated.cards[0].category, '诗歌');
+  assert.deepEqual(migrated.preferences.categories, []);
   assert.equal((await tool('daily_quote_publish', { ...input, slot: 1, searchProof: 'a'.repeat(64) })).status, 400);
   assert.equal((await tool('daily_quote_publish', { ...input, fileTitle: 'https://invented.test/photo.jpg' })).status, 400);
   assert.equal((await modules.route.POST(request('POST', '/api/daily-quotes', { action: 'keep', cardId: card.id, kept: true }))).status, 200);
@@ -85,11 +95,12 @@ try {
   assert.equal(second.cards.length, 1);
   assert.equal(second.cards.find(item => item.id === card.id).kept, true);
   assert.deepEqual(second.cards.find(item => item.id === card.id).comments.map(item => item.author), ['Vera', 'Ash']);
-  assert.equal((await tool('daily_quote_preferences', { categories: ['自然'], dailyCount: 5 })).status, 200);
+  assert.equal((await tool('daily_quote_preferences', { categories: ['哲学'], dailyCount: 5 })).status, 200);
   const third = await (await modules.route.GET(request('GET', '/api/daily-quotes'))).json();
   assert.equal(third.cards.length, 1);
   assert.equal(third.cards.find(item => item.id === card.id).text, card.text);
-  assert.ok((await tool('daily_quote_candidates', {})).body.result.candidates.every(item => item.category === '自然'));
+  assert.ok((await tool('daily_quote_candidates', {})).body.result.candidates.every(item => item.category === '哲学'));
+  assert.equal((await tool('daily_quote_preferences', { categories: ['自然'] })).status, 400);
   assert.equal((await modules.route.POST(request('POST', '/api/daily-quotes', { action: 'preferences', dailyCount: 6 }))).status, 400);
   assert.equal((await modules.route.POST(request('POST', '/api/daily-quotes', { action: 'preferences', notify: false }))).status, 200);
   assert.equal((await (await modules.route.GET(request('GET', '/api/daily-quotes'))).json()).preferences.notify, false);
