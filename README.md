@@ -85,4 +85,4 @@ to the existing media bucket and shown in the transcript.
 
 ## Retired Notes feature
 
-The standalone Notes UI and agent tools have been removed. Existing `notes` documents are retained for backups and compatibility; they are not migrated or deleted. Sketch, journals and book annotations remain available. Cached `write_vesper_state(kind=note)` requests fail without writing data.
+The standalone Notes and Sketch UI and agent tools have been removed. Existing documents and Sketch records are retained for backups and read-only compatibility; they are not migrated or deleted. Journals and book annotations remain available. Cached `write_vesper_state(kind=note)` and old Sketch write requests fail without writing data.

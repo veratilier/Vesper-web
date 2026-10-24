@@ -11,9 +11,9 @@ class WorkflowTests(unittest.TestCase):
         tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
         p=patch.object(store,'PATH',Path(tmp.name)/'wake.db');p.start();self.addCleanup(p.stop)
     def test_receipts_and_external_acceptance_are_distinct(self):
-        saved=workflow.step('jotting_create',{'text':'secret','api_key':'secret'},{'jotting':{'id':'j1','text':'secret'}})
+        saved=workflow.step('letter_create',{'text':'secret','api_key':'secret'},{'letter':{'id':'l1','text':'secret'}})
         self.assertEqual(saved['completion'],'completed')
-        self.assertEqual(saved['references'],[{'kind':'jottings','id':'j1'}])
+        self.assertEqual(saved['references'],[{'kind':'letters','id':'l1'}])
         accepted=workflow.step('call_configured_mcp_tool',{'arguments':{'token':'secret'}},{'token':'secret','accepted':True})
         self.assertEqual(accepted['completion'],'request_accepted')
         self.assertNotIn('secret',json.dumps([saved,accepted]))
@@ -47,11 +47,11 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn(name,runner.ALLOWED)
             self.assertNotIn(name,runner.READ_ONLY)
             self.assertNotIn(name,store.TOOL_OPTIONS)
-    def test_jotting_ids_are_stable_and_writes_require_authorization(self):
-        a=permissions.tool_input('jotting_create',{'id':'model','text':'x'},'job','item',{})
-        b=permissions.tool_input('jotting_create',{'id':'another','text':'x'},'job','item',{})
-        self.assertEqual(a['id'],b['id'])
-        self.assertNotIn('jotting_create',permissions.allowed_tools({'tools':[],'messages':[]},runner.ALLOWED))
+    def test_retired_sketch_is_not_available_to_autonomous_wakes(self):
+        for name in ('jotting_list','jotting_create'):
+            self.assertNotIn(name,runner.ALLOWED)
+            self.assertNotIn(name,store.TOOL_OPTIONS)
+        self.assertNotIn('Sketch',runner.INSTRUCTIONS)
     def test_letters_have_stable_retry_ids_and_private_receipts(self):
         a=permissions.tool_input('letter_create',{'id':'first','text':'private letter'},'job','item',{})
         b=permissions.tool_input('letter_create',{'id':'retry','text':'private letter'},'job','item',{})
