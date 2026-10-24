@@ -17,6 +17,22 @@ export const schemaStatements = [
     PRIMARY KEY(user_id,id)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_vesper_bookmarks_created ON vesper_bookmarks(user_id,created_at DESC,id DESC)`,
+  `CREATE TABLE IF NOT EXISTS vesper_daily_quotes (
+    user_id TEXT NOT NULL, id TEXT NOT NULL, day TEXT NOT NULL, value TEXT NOT NULL,
+    kept INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_vesper_daily_quotes_day ON vesper_daily_quotes(user_id,day DESC,id DESC)`,
+  `CREATE TABLE IF NOT EXISTS vesper_quote_comments (
+    id TEXT NOT NULL, user_id TEXT NOT NULL, card_id TEXT NOT NULL,
+    author TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_vesper_quote_comments_card ON vesper_quote_comments(user_id,card_id,created_at)`,
+  `CREATE TABLE IF NOT EXISTS vesper_quote_preferences (
+    user_id TEXT PRIMARY KEY, categories TEXT NOT NULL DEFAULT '[]',
+    notify INTEGER NOT NULL DEFAULT 1, daily_count INTEGER NOT NULL DEFAULT 3, updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS vesper_documents (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

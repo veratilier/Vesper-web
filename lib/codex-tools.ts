@@ -3,6 +3,7 @@ import { WEB_MUSIC, neteaseTrackId, initializeWebMusicQueue } from "./web-music"
 import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-music-search';
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
+import { commentDailyQuote, listDailyQuotes, publishDailyQuote, quoteCandidates, searchQuoteImages, setQuotePreferences } from './daily-quotes';
 import { createJotting, listJottings } from './jottings';
 import { createLetter, getLetter, listLetters, markLetter } from './letters';
 import { legacyDesireRead } from './desire/routing.js';
@@ -138,6 +139,15 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!memoryScope) throw new Error('Account context required');
     return name === 'bookmark_create' ? createBookmark(memoryScope.userId,input)
       : listBookmarks(memoryScope.userId,Number(input.limit || 30),String(input.before || ''));
+  }
+  if (['daily_quote_read', 'daily_quote_candidates', 'daily_quote_image_search', 'daily_quote_publish', 'daily_quote_preferences', 'daily_quote_comment'].includes(name)) {
+    if (!memoryScope) throw new Error('Account context required');
+    if (name === 'daily_quote_read') return listDailyQuotes(memoryScope.userId);
+    if (name === 'daily_quote_candidates') return quoteCandidates(memoryScope.userId);
+    if (name === 'daily_quote_image_search') return searchQuoteImages(memoryScope.userId, input.query);
+    if (name === 'daily_quote_publish') return publishDailyQuote(memoryScope.userId, input);
+    if (name === 'daily_quote_preferences') return { preferences: await setQuotePreferences(memoryScope.userId, input) };
+    return commentDailyQuote(memoryScope.userId, input, 'Ash');
   }
   if (name === 'chat_search_messages') {
     if (!memoryScope) throw new Error('Account context required');
