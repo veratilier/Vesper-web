@@ -4,7 +4,6 @@ import { searchAppleMusic, lookupAppleMusic, isAppleMusicTrack } from './apple-m
 import { appleSearchTransport } from './apple-music-transport';
 import { createBookmark, listBookmarks } from './bookmarks';
 import { commentDailyQuote, listDailyQuotes, publishDailyQuote, quoteCandidates, searchQuoteImages, setQuotePreferences } from './daily-quotes';
-import { createJotting, listJottings } from './jottings';
 import { createLetter, getLetter, listLetters, markLetter } from './letters';
 import { legacyDesireRead } from './desire/routing.js';
 import { env } from 'cloudflare:workers';
@@ -219,10 +218,6 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     const result = await getLetter(owner,String(input.id || ''),'Rowan');
     return result.letter.locked ? result : markLetter(owner,{id:input.id,action:'read'},'Rowan');
   }
-  if (name === 'jotting_create' || name === 'jotting_list') {
-    if (!memoryScope) throw new Error('Jotting scope is unavailable');
-    return name === 'jotting_create' ? createJotting(memoryScope.userId, input) : listJottings(memoryScope.userId, Number(input.limit || 30), String(input.before || ''),'Rowan');
-  }
   if (name === "read_vesper_state") {
     const section = String(input.section || "today").toLowerCase();
     if (section === "memory") {
@@ -254,7 +249,7 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
   if (name === "write_vesper_state") {
     const kind = String(input.kind || "").toLowerCase();
     const now = new Date().toISOString();
-    if (kind === "note") throw new Error("The Notes feature has been removed. No note was saved. Use Sketch only when the user wants free writing.");
+    if (kind === "note") throw new Error("The Notes feature has been removed. No note was saved.");
     if (kind === "reminder") {
       const title = String(input.title || input.text || "").trim();
       if (!title) throw new Error("Reminder title is required");
