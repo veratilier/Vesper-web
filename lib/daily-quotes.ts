@@ -153,7 +153,7 @@ export async function publishDailyQuote(owner: string, input: Record<string,unkn
         const rows = await getDb().prepare('SELECT subscription FROM vesper_push_subscriptions').all<{subscription:string}>();
         if (rows.results.length) {
           const result = await sendPushBatch(rows.results.map(row => JSON.parse(row.subscription) as PushSubscriptionData),
-            { title: 'Ash 的一言', body: card.text, tag: 'vesper-daily-quote-' + id,
+            { title: 'Ash 的 Hitokoto', body: card.text, tag: 'vesper-daily-quote-' + id,
               url: '/?section=bookmarks' },
             { publicKey: settings.VAPID_PUBLIC_KEY, privateKey: settings.VAPID_PRIVATE_KEY,
               subject: settings.VAPID_SUBJECT || 'mailto:admin@r-vera.com' });
