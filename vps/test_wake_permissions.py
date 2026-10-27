@@ -55,9 +55,11 @@ class SwitchTests(unittest.TestCase):
         allowed = permissions.allowed_tools(access, runner.ALLOWED)
         self.assertIn('hitokoto_legacy_list', allowed)
         self.assertIn('bookmark_list', allowed)
+        self.assertIn('daily_quote_read', allowed)
+        self.assertNotIn('daily_quote_edit', allowed)
         self.assertNotIn('hitokoto_legacy_create', allowed)
         self.assertNotIn('bookmark_create', allowed)
-        self.assertEqual(store.validate_permissions({'tools':['bookmark_create'],'messages':[]})['tools'], ['hitokoto_legacy_create'])
+        self.assertEqual(store.validate_permissions({'tools':['bookmark_create'],'messages':[]})['tools'], ['daily_quote_edit'])
         self.assertEqual(permissions.allowed_tools({'tools': [], 'messages': []}, runner.ALLOWED), set())
 
     def test_revocation_blocks_pending_text_delivery(self):

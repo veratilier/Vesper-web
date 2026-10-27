@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as { name?: string; arguments?: Record<string, unknown>; threadId?: string; itemId?: string; conversationId?: string; turnId?: string; musicSurface?: string };
     const requestedName = String(body.name || "");
-    const aliases: Record<string, string> = { bookmark_list: "hitokoto_legacy_list", bookmark_create: "hitokoto_legacy_create" };
+    const aliases: Record<string, string> = { bookmark_list: "hitokoto_legacy_list" };
     const name = aliases[requestedName] || requestedName;
     const definition = codexToolDefinitions.find((tool) => tool.name === name);
     if (!definition) return json(request, { error: "Unknown Codex tool" }, 404);

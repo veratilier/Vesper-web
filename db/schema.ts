@@ -23,6 +23,10 @@ export const schemaStatements = [
     PRIMARY KEY(user_id,id)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_vesper_daily_quotes_day ON vesper_daily_quotes(user_id,day DESC,id DESC)`,
+  `CREATE TABLE IF NOT EXISTS vesper_quote_deletions (
+    user_id TEXT NOT NULL, id TEXT NOT NULL, day TEXT NOT NULL, deleted_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,id)
+  )`,
   `CREATE TABLE IF NOT EXISTS vesper_quote_comments (
     id TEXT NOT NULL, user_id TEXT NOT NULL, card_id TEXT NOT NULL,
     author TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL,
