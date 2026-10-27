@@ -7,7 +7,7 @@ documents, credentials, and wake scheduling remain in place.
 - `GET /api/bookmarks?limit=30&before=…` reads newest-first pages.
 - `POST /api/bookmarks` creates one card; stable `id` makes retries idempotent.
 - `DELETE /api/bookmarks?id=…` removes only that account's card.
-- `bookmark_list` and `bookmark_create` are registered in the shared Codex catalog.
+- `hitokoto_legacy_list` and `hitokoto_legacy_create` manage older cards in Hitokoto. `daily_quote_read` and `daily_quote_publish` manage daily cards. Existing `bookmark_list` and `bookmark_create` calls remain accepted for compatibility.
   Wake's tool ceiling also includes them; the owner's saved permissions still apply.
 - Reading Room cards provide `bookId` and an exact `quote`. The server verifies
   the quote and book title; displayed `text` may be a separate summary.

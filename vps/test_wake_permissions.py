@@ -47,6 +47,19 @@ class SwitchTests(unittest.TestCase):
         value['tools']=[]
         self.assertFalse(permissions.message_allowed(value,{'name':'album_send_photos'}))
 
+    def test_hitokoto_aliases_preserve_existing_grants_and_revocations(self):
+        with store.db() as con:
+            store.put(con, 'permissions', {'tools': ['bookmark_list'], 'messages': []})
+        access = store.access()
+        self.assertEqual(access['tools'], ['hitokoto_legacy_list'])
+        allowed = permissions.allowed_tools(access, runner.ALLOWED)
+        self.assertIn('hitokoto_legacy_list', allowed)
+        self.assertIn('bookmark_list', allowed)
+        self.assertNotIn('hitokoto_legacy_create', allowed)
+        self.assertNotIn('bookmark_create', allowed)
+        self.assertEqual(store.validate_permissions({'tools':['bookmark_create'],'messages':[]})['tools'], ['hitokoto_legacy_create'])
+        self.assertEqual(permissions.allowed_tools({'tools': [], 'messages': []}, runner.ALLOWED), set())
+
     def test_revocation_blocks_pending_text_delivery(self):
         ident=store.request('pending')
         store.configure({'enabled':True,'intervalMinutes':60,'permissions':{'tools':[],'messages':[]}})

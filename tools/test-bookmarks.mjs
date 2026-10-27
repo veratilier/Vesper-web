@@ -20,12 +20,21 @@ try {
     modules[name]=await import(pathToFileURL(outfile));
   }
   const request=(method,path,body,auth=true)=>new Request('https://vesper.test'+path,{method,headers:{'content-type':'application/json',...(auth?{'x-vesper-device-token':'fixture-token'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+  const catalog=await (await modules.tools.GET(request('GET','/api/codex/tools'))).json();
+  const names=catalog.tools.map(tool=>tool.name);
+  assert(names.includes('hitokoto_legacy_list') && names.includes('hitokoto_legacy_create'));
+  assert(!names.includes('bookmark_list') && !names.includes('bookmark_create'));
   assert.equal((await modules.route.GET(request('GET','/api/bookmarks',null,false))).status,401);
   assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create'},false))).status,401);
   const card={id:'synthetic-1',text:'A fictional bookmark used only by this test.',imageUrl:'https://example.com/cover.jpg',imageSource:'test fixture'};
-  const result=await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create',arguments:card}));
+  const result=await modules.tools.POST(request('POST','/api/codex/tools',{name:'hitokoto_legacy_create',arguments:card}));
   assert.equal(result.status,200,await result.clone().text());
   assert.equal((await result.json()).result.bookmark.author,'Rowan');
+  const oldList=await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_list',arguments:{}}));
+  const newList=await modules.tools.POST(request('POST','/api/codex/tools',{name:'hitokoto_legacy_list',arguments:{}}));
+  assert.equal(oldList.status,200);assert.equal(newList.status,200);
+  assert.deepEqual((await oldList.json()).result,(await newList.json()).result);
+  assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create',arguments:card}))).status,200);
   assert.equal((await modules.route.POST(request('POST','/api/bookmarks',card))).status,200);
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_bookmarks').get().n,1);
   assert.equal((await modules.route.POST(request('POST','/api/bookmarks',{...card,text:'conflicting content'}))).status,400);

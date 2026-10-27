@@ -3,7 +3,8 @@ ACTIONS = {
     'desire_status': '查看此刻的 Desire', 'desire_encounter': '保存此刻的心绪',
     'read_vesper_state': '读取 Vesper 内容', 'search_vesper_state': '查找 Vesper 内容',
     'letter_list': '翻阅信箱', 'letter_create': '寄出信件', 'letter_read': '拆开信件', 'letter_keep': '收好信件',
-    'bookmark_list': '翻阅书签', 'bookmark_create': '保存图文书签',
+    'bookmark_list': '翻阅 Hitokoto 旧卡片', 'bookmark_create': '保存 Hitokoto 旧卡片',
+    'hitokoto_legacy_list': '翻阅 Hitokoto 旧卡片', 'hitokoto_legacy_create': '保存 Hitokoto 旧卡片',
     'reading_room_read': '阅读 Library', 'reading_room_annotate': '留下阅读批注',
     'write_vesper_state': '保存文字', 'recall_vesper_memory': '查找相关记忆',
     'remember_vesper_memory': '保存记忆', 'manage_vesper_memory': '查看记忆',
@@ -34,16 +35,16 @@ def step(name, args=None, result=None, failed=False, uncertain=False):
     # Only known, locally persisted receipts can be called complete.
     for key, kind in [('letter','letters'), ('bookmark','bookmarks')]:
         saved = result.get(key)
-        if name == ('letter_create' if key == 'letter' else 'bookmark_create') and isinstance(saved, dict) and isinstance(saved.get('id'), str):
+        if name in ({'letter_create'} if key == 'letter' else {'bookmark_create', 'hitokoto_legacy_create'}) and isinstance(saved, dict) and isinstance(saved.get('id'), str):
             title = saved.get('title') if key == 'letter' else ''
             label = ('《' + title[:80] + '》') if isinstance(title,str) and title.strip() else ''
-            value.update(completion='completed', result=('已保存 Letters' + label + '。') if key == 'letter' else '已保存到书签。',
+            value.update(completion='completed', result=('已保存 Letters' + label + '。') if key == 'letter' else '已保存到 Hitokoto 的旧卡片。',
                          references=[{'kind': kind, 'id': saved['id'][:128]}])
     if name == 'write_vesper_state' and result.get('saved') is True:
         section = result.get('section')
         if section in {'notes','journal'}:
             value.update(completion='completed', result='已保存到便签。' if section == 'notes' else '已保存到日记。')
-    if name in {'desire_status','read_vesper_state','search_vesper_state','letter_list','bookmark_list','reading_room_read','recall_vesper_memory','music_search','music_get_status','chat_search_messages','album_search_photos','browse_system_photos','view_system_photo','sticker_search','list_configured_mcp_tools'}:
+    if name in {'desire_status','read_vesper_state','search_vesper_state','letter_list','bookmark_list','hitokoto_legacy_list','reading_room_read','recall_vesper_memory','music_search','music_get_status','chat_search_messages','album_search_photos','browse_system_photos','view_system_photo','sticker_search','list_configured_mcp_tools'}:
         count = next((len(result[k]) for k in ('letters','bookmarks','matches','memories','tracks','photos','stickers','connections') if isinstance(result.get(k),list)), None)
         value.update(completion='completed', result=('读取完成，返回 ' + str(count) + ' 条结果。') if count is not None else '读取完成。')
     if name == 'desire_encounter': value.update(completion='completed', result='Desire 接口已确认本次评估。')

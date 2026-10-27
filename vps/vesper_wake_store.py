@@ -11,8 +11,16 @@ import vesper_token_usage as token_usage
 from vesper_wake_policy import WAKE_PROMPT
 DEFAULT_PROMPT = WAKE_PROMPT
 PROMPT_LIMIT = 8000
-TOOL_OPTIONS = ['letter_list','letter_create','letter_read','letter_keep','read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','bookmark_list','bookmark_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
+TOOL_OPTIONS = ['letter_list','letter_create','letter_read','letter_keep','read_vesper_state','search_vesper_state','desire_status','desire_history','desire_encounter','write_vesper_state','music_get_status','music_search','chat_search_messages','chat_capture_messages','album_save_photo','album_search_photos','album_send_photos','send_chat_file','sticker_search','sticker_send','reading_room_read','reading_room_annotate','hitokoto_legacy_list','hitokoto_legacy_create','recall_vesper_memory','remember_vesper_memory','manage_vesper_memory','list_configured_mcp_tools','call_configured_mcp_tool','read_codex_task_progress']
 MESSAGE_OPTIONS = ['text', 'photos', 'files', 'stickers']
+TOOL_ALIASES = {'bookmark_list': 'hitokoto_legacy_list', 'bookmark_create': 'hitokoto_legacy_create'}
+
+def normalize_permissions(value):
+    if not isinstance(value, dict): return value
+    result = dict(value)
+    if isinstance(result.get('tools'), list):
+        result['tools'] = [TOOL_ALIASES.get(name, name) if isinstance(name, str) else name for name in result['tools']]
+    return result
 
 
 def access():
@@ -69,6 +77,7 @@ def forum_connections():
 
 
 def validate_permissions(value):
+    value = normalize_permissions(value)
     if not isinstance(value, dict) or set(value) != {'tools', 'messages'}:
         raise ValueError('Expected tool and message permissions')
     for key, options in [('tools', TOOL_OPTIONS), ('messages', MESSAGE_OPTIONS)]:
@@ -171,7 +180,8 @@ def db():
 
 def get(con, key, default=None):
     row = con.execute('SELECT value FROM runtime WHERE key=?',(key,)).fetchone()
-    return json.loads(row[0]) if row else default
+    value = json.loads(row[0]) if row else default
+    return normalize_permissions(value) if key == 'permissions' else value
 
 def put(con,key,value):
     con.execute('INSERT INTO runtime VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(value)))
