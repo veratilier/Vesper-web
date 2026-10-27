@@ -1,7 +1,7 @@
 import { authorizeApp } from '@/lib/bridge-auth';
 import { memoryScopeFromRequest } from '@/lib/memory';
 import { corsHeaders, optionsResponse } from '@/lib/cors';
-import { commentDailyQuote, keepDailyQuote, listDailyQuotes, setQuotePreferences } from '@/lib/daily-quotes';
+import { commentDailyQuote, deleteDailyQuote, keepDailyQuote, listDailyQuotes, setQuotePreferences } from '@/lib/daily-quotes';
 
 export const OPTIONS = optionsResponse;
 function respond(request: Request, value: unknown, status = 200) {
@@ -17,6 +17,7 @@ async function handle(request: Request) {
     if (input.action === 'preferences') return respond(request, { preferences: await setQuotePreferences(userId, input) });
     if (input.action === 'keep') return respond(request, await keepDailyQuote(userId, String(input.cardId || ''), input.kept));
     if (input.action === 'comment') return respond(request, await commentDailyQuote(userId, input, 'Vera'));
+    if (input.action === 'delete') return respond(request, await deleteDailyQuote(userId, input.cardId));
     return respond(request, { error: 'Unknown daily quote action' }, 400);
   } catch (error) { return respond(request, { error: error instanceof Error ? error.message : 'Daily quote request failed' }, 400); }
 }
