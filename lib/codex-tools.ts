@@ -134,9 +134,9 @@ export async function executeCodexTool(name: string, input: ToolInput, memorySco
     if (!memoryScope) throw new Error("Memory scope is unavailable");
     return sharedMemoryTool(name, input, context, memoryScope);
   }
-  if (name === 'bookmark_create' || name === 'bookmark_list') {
+  if (name === 'hitokoto_legacy_create' || name === 'hitokoto_legacy_list') {
     if (!memoryScope) throw new Error('Account context required');
-    return name === 'bookmark_create' ? createBookmark(memoryScope.userId,input)
+    return name === 'hitokoto_legacy_create' ? createBookmark(memoryScope.userId,input)
       : listBookmarks(memoryScope.userId,Number(input.limit || 30),String(input.before || ''));
   }
   if (['daily_quote_read', 'daily_quote_candidates', 'daily_quote_image_search', 'daily_quote_publish', 'daily_quote_preferences', 'daily_quote_comment'].includes(name)) {

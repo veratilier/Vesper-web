@@ -5,7 +5,11 @@ SEND_TYPES = {'chat_capture_messages': 'photos', 'album_send_photos': 'photos', 
 
 
 def allowed_tools(access, ceiling):
-    return {name for name in ceiling if name in access['tools'] and
+    authorized = set(access['tools'])
+    for old, new in (('bookmark_list', 'hitokoto_legacy_list'), ('bookmark_create', 'hitokoto_legacy_create')):
+        if old in authorized or new in authorized:
+            authorized.update((old, new))
+    return {name for name in ceiling if name in authorized and
             (name not in SEND_TYPES or SEND_TYPES[name] in access['messages'])}
 
 
@@ -31,7 +35,7 @@ def tool_input(name, arguments, job_id, item_id, catalog):
         args['interaction_source'] = 'automation'
         # One event per round; repeated events cannot earn multiple encounters.
         args['request_id'] = 'wake-' + hashlib.sha256(job_id.encode()).hexdigest()
-    if name in {'bookmark_create', 'letter_create'}:
+    if name in {'bookmark_create', 'hitokoto_legacy_create', 'letter_create'}:
         args['id'] = 'wake-' + hashlib.sha256((job_id + ':' + item_id).encode()).hexdigest()
     if name == 'reading_room_annotate':
         args['noteId'] = 'wake-' + hashlib.sha256((job_id + ':' + item_id).encode()).hexdigest()
