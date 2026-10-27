@@ -22,19 +22,20 @@ try {
   const request=(method,path,body,auth=true)=>new Request('https://vesper.test'+path,{method,headers:{'content-type':'application/json',...(auth?{'x-vesper-device-token':'fixture-token'}:{})},...(body?{body:JSON.stringify(body)}:{})});
   const catalog=await (await modules.tools.GET(request('GET','/api/codex/tools'))).json();
   const names=catalog.tools.map(tool=>tool.name);
-  assert(names.includes('hitokoto_legacy_list') && names.includes('hitokoto_legacy_create'));
+  assert(names.includes('hitokoto_legacy_list') && names.includes('daily_quote_edit'));
+  assert(!names.includes('hitokoto_legacy_create'));
   assert(!names.includes('bookmark_list') && !names.includes('bookmark_create'));
   assert.equal((await modules.route.GET(request('GET','/api/bookmarks',null,false))).status,401);
   assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create'},false))).status,401);
   const card={id:'synthetic-1',text:'A fictional bookmark used only by this test.',imageUrl:'https://example.com/cover.jpg',imageSource:'test fixture'};
   const result=await modules.tools.POST(request('POST','/api/codex/tools',{name:'hitokoto_legacy_create',arguments:card}));
-  assert.equal(result.status,200,await result.clone().text());
-  assert.equal((await result.json()).result.bookmark.author,'Rowan');
+  assert.equal(result.status,404);
+  assert.equal((await modules.route.POST(request('POST','/api/bookmarks',card))).status,200);
   const oldList=await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_list',arguments:{}}));
   const newList=await modules.tools.POST(request('POST','/api/codex/tools',{name:'hitokoto_legacy_list',arguments:{}}));
   assert.equal(oldList.status,200);assert.equal(newList.status,200);
   assert.deepEqual((await oldList.json()).result,(await newList.json()).result);
-  assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create',arguments:card}))).status,200);
+  assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create',arguments:card}))).status,404);
   assert.equal((await modules.route.POST(request('POST','/api/bookmarks',card))).status,200);
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM vesper_bookmarks').get().n,1);
   assert.equal((await modules.route.POST(request('POST','/api/bookmarks',{...card,text:'conflicting content'}))).status,400);
@@ -44,9 +45,9 @@ try {
   for(const imageUrl of ['http://example.com/a','https://user:secret@example.com/a','https://127.0.0.1/a','https://10.0.0.1/a','https://[::1]/a','file:///tmp/a'])
     assert.equal((await modules.route.POST(request('POST','/api/bookmarks',{id:'invalid-image',text:'test',imageUrl}))).status,400,imageUrl);
   sqlite.prepare('INSERT INTO vesper_documents VALUES(?,?,?)').run('readingRoom',JSON.stringify([{id:'book',title:'Fixture book',text:'The exact passage from a fictional book.'}]),'fixture');
-  assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create',arguments:{id:'quote',text:'A summary',bookId:'book',quote:'invented passage'}}))).status,400);
+  assert.equal((await modules.route.POST(request('POST','/api/bookmarks',{id:'quote',text:'A summary',bookId:'book',quote:'invented passage'}))).status,400);
   const exact={id:'quote',text:'A summary',bookId:'book',quote:'The exact passage'};
-  assert.equal((await modules.tools.POST(request('POST','/api/codex/tools',{name:'bookmark_create',arguments:exact}))).status,200);
+  assert.equal((await modules.route.POST(request('POST','/api/bookmarks',exact))).status,200);
   const first=await (await modules.route.GET(request('GET','/api/bookmarks?limit=1'))).json();
   const second=await (await modules.route.GET(request('GET','/api/bookmarks?limit=1&before='+encodeURIComponent(first.before)))).json();
   assert.equal(first.bookmarks.length,1);assert.equal(second.bookmarks.length,1);assert.notEqual(first.bookmarks[0].id,second.bookmarks[0].id);
