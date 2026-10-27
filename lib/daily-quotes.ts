@@ -169,7 +169,10 @@ export async function editDailyQuote(owner: string, input: Record<string, unknow
   const imageSource = field('imageSource', 2048);
   const day = typeof previous.day === 'string' ? previous.day : localDay();
   const createdAt = typeof previous.createdAt === 'string' ? previous.createdAt : new Date().toISOString();
-  const card = { ...previous, id, day, text, source, sourceURL, category, imageUrl, imageSource, createdAt, author: previous.author || 'Ash' };
+  const card: Record<string, unknown> = { ...previous, id, day, text, source, sourceURL, category, imageUrl, imageSource, createdAt, author: previous.author || 'Ash' };
+  if (input.imageUrl !== undefined && imageUrl !== previous.imageUrl) {
+    delete card.imagePageURL; delete card.licence; delete card.fileTitle;
+  }
   if (input.action === 'create') {
     if (existing) {
       if (['text','source','sourceURL','category','imageUrl','imageSource'].some(key => previous[key] !== card[key as keyof typeof card])) throw new Error('This id belongs to another card');
