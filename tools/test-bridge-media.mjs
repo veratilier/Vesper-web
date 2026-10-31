@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import {createBridge,userSend,userMessages,assistantMessagesBound,assistantReplyBound} from '../lib/conversation-bridge.ts';
-import {uploadBridgeMedia,readBridgeMedia,getBridgeMedia,getBridgeImage} from '../lib/bridge-media.ts';
+import {createBridge,listBridges,userSend,userMessages,assistantMessagesBound,assistantReplyBound} from '../lib/conversation-bridge.ts';
+import {uploadBridgeMedia,readBridgeMedia,getBridgeMedia,getBridgeImage,updateBridgeProfile,readBridgeAvatar} from '../lib/bridge-media.ts';
 const sqlite=new DatabaseSync(':memory:');
 class S{constructor(q,v=[]){this.q=q;this.v=v}bind(...v){return new S(this.q,v)}async run(){let r=sqlite.prepare(this.q).run(...this.v);return {meta:{changes:r.changes}}}async first(){return sqlite.prepare(this.q).get(...this.v)??null}async all(){return {results:sqlite.prepare(this.q).all(...this.v)}}}
 const db={prepare:q=>new S(q),batch:async xs=>{let out=[];for(const x of xs)out.push(await x.run());return out}};
 const objects=new Map(),bucket={put:async(k,v)=>objects.set(k,new Uint8Array(v)),delete:async k=>objects.delete(k),get:async(k,opt)=>{const bytes=objects.get(k);if(!bytes)return null;const data=opt?.range?bytes.slice(opt.range.offset,opt.range.offset+opt.range.length):bytes;return {body:new Blob([data]).stream(),arrayBuffer:async()=>data.buffer}}};
 const a=await createBridge(db,'owner',{name:'A',provider:'work'}),b=await createBridge(db,'owner',{name:'B',provider:'muse'});
+await updateBridgeProfile(db,bucket,a.binding.id,'owner','A new name',new Uint8Array([255,216,1,2]));
+const contacts=(await listBridges(db,'owner')).bindings;assert.equal(contacts.find(x=>x.id===a.binding.id).name,'A new name');assert.ok(contacts.find(x=>x.id===a.binding.id).avatarId);
+await assert.rejects(()=>readBridgeAvatar(db,bucket,a.binding.id,'another-owner'));
+assert.ok(await readBridgeAvatar(db,bucket,a.binding.id,'owner'));
 const asset=(await uploadBridgeMedia(db,bucket,a.binding.id,'user',{name:'photo.png',type:'image/png',bytes:new Uint8Array([1,2,3])},'owner')).attachment;
 await assert.rejects(()=>readBridgeMedia(db,bucket,a.binding.id,asset.id,'owner'));
 await assert.rejects(()=>userSend(db,'owner',{bindingId:b.binding.id,id:'wrong',text:'',attachments:[asset.id]}));
@@ -23,4 +27,8 @@ await assistantReplyBound(db,a.binding.id,{id:'reply',replyTo:'message',attachme
 const conversation=(await userMessages(db,'owner',a.binding.id)).messages;assert.equal(conversation.length,2);assert.equal(conversation[1].attachments[0].kind,'sticker');
 await userSend(db,'owner',{bindingId:a.binding.id,id:'card',card:{kind:'music',data:{title:'Song'}}});
 assert.equal((await userMessages(db,'owner',a.binding.id)).messages.at(-1).card.data.title,'Song');
+await assistantReplyBound(db,a.binding.id,{id:'proactive',text:'Hello'});
+await assistantReplyBound(db,a.binding.id,{id:'proactive',text:'Hello'});
+assert.equal((await userMessages(db,'owner',a.binding.id)).messages.filter(x=>x.id==='proactive').length,1);
+assert.equal((await userMessages(db,'owner',b.binding.id)).messages.length,0);
 console.log('private attachment ownership, scoped reads, media replies, idempotency and cards passed');

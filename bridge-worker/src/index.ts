@@ -26,6 +26,13 @@ function server(env:Env,bindingID:string) {
     try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
     catch { return {...response({error:'Reply unavailable'}),isError:true}; }
   });
+  mcp.registerTool('send_message',{
+    description:'Send a new message to the user in this connection without replying to a pending message. Choose a unique id and reuse it on retries. Optional attachments must first be uploaded with upload_attachment.',
+    inputSchema:{id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+  },async input=>{
+    try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
+    catch { return {...response({error:'Message unavailable'}),isError:true}; }
+  });
   mcp.registerTool('read_attachment',{
     description:'Read an attachment belonging to a sent message in this connection. Images up to 4 MB are returned as images; other files are returned in base64 chunks using nextOffset.',
     inputSchema:{id:z.string(),offset:z.number().int().min(0).default(0)},annotations:{readOnlyHint:true},

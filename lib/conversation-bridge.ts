@@ -24,6 +24,7 @@ export async function ensureBridge(db: DB) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS vesper_bridge_one_reply ON vesper_bridge_messages(binding_id,reply_to) WHERE sender='assistant'"),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_cards (binding_id TEXT NOT NULL, message_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(binding_id,message_id))'),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_inflight (binding_id TEXT NOT NULL, message_id TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0, intent TEXT NOT NULL, PRIMARY KEY(binding_id,message_id))'),
+    db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_profiles (binding_id TEXT PRIMARY KEY, avatar_id TEXT NOT NULL)'),
   ]);
 }
 async function owned(db: DB, owner: string, bindingID: unknown): Promise<Binding> {
@@ -43,7 +44,7 @@ async function activeBinding(db: DB, id: unknown): Promise<Binding> {
   if (!row) throw new Error('Connection unavailable');
   return row;
 }
-function publicBinding(row: Binding) { return { id: row.id, name: row.name, provider: row.provider, createdAt: row.created_at }; }
+function publicBinding(row: Binding & {avatar_id?:string}) { return { id: row.id, name: row.name, provider: row.provider, createdAt: row.created_at, avatarId: row.avatar_id||'' }; }
 function publicMessage(row: Message) { return { id: row.id, bindingId: row.binding_id, sender: row.sender, text: row.text, replyTo: row.reply_to, createdAt: row.created_at }; }
 async function withMedia(db:DB,bindingID:string,rows:Message[]) {
   if(!rows.length)return [];
@@ -65,7 +66,7 @@ export async function createBridge(db: DB, owner: string, input: Record<string, 
 }
 export async function listBridges(db: DB, owner: string) {
   await ensureBridge(db);
-  const rows=await db.prepare('SELECT * FROM vesper_bridge_bindings WHERE owner=? AND revoked=0 ORDER BY created_at,id').bind(owner).all<Binding>();
+  const rows=await db.prepare('SELECT b.*, p.avatar_id FROM vesper_bridge_bindings b LEFT JOIN vesper_bridge_profiles p ON p.binding_id=b.id WHERE b.owner=? AND b.revoked=0 ORDER BY b.created_at,b.id').bind(owner).all<Binding & {avatar_id?:string}>();
   return { bindings: rows.results.map(publicBinding) };
 }
 export async function revokeBridge(db: DB, owner: string, bindingID: unknown) {
@@ -75,7 +76,7 @@ export async function revokeBridge(db: DB, owner: string, bindingID: unknown) {
 }
 async function putMessage(db: DB, binding: Binding, input: Record<string, unknown>, sender: 'user'|'assistant') {
   await ensureBridgeMedia(db);
-  const id=identifier(input.id), replyTo=sender==='assistant'?identifier(input.replyTo):null;
+  const id=identifier(input.id), replyTo=sender==='assistant'&&input.replyTo!=null?identifier(input.replyTo):null;
   const attachmentIDs=input.attachments===undefined?[]:Array.isArray(input.attachments)?input.attachments.map(identifier):null;
   if(!attachmentIDs||attachmentIDs.length>5||new Set(attachmentIDs).size!==attachmentIDs.length)throw new Error('Invalid attachments');
   const text=typeof input.text==='string'?input.text.trim():'';

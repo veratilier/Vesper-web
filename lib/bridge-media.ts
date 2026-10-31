@@ -57,3 +57,21 @@ export async function getBridgeImage(db:D1Database,bucket:R2Bucket,bindingID:unk
   const bytes=new Uint8Array(await object.arrayBuffer());let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));
   return {mimeType:row.mime,data:btoa(raw),attachment:mediaView(row)};
 }
+export async function updateBridgeProfile(db:D1Database,bucket:R2Bucket,bindingID:unknown,owner:string,name:unknown,image?:Uint8Array) {
+  const binding=await validateBridgeBinding(db,bindingID,owner);
+  if(typeof name!=='string'||!name.trim()||name.trim().length>80)throw new Error('Invalid name');
+  if(image && (!image.length||image.length>4*1024*1024||image[0]!==0xff||image[1]!==0xd8))throw new Error('Invalid avatar');
+  const avatarID=image?crypto.randomUUID():null;
+  if(image&&avatarID)await bucket.put(`private-bridge/${binding}/avatar/${avatarID}`,image,{httpMetadata:{contentType:'image/jpeg'}});
+  const updates=[db.prepare('UPDATE vesper_bridge_bindings SET name=? WHERE id=? AND owner=? AND revoked=0').bind(name.trim(),binding,owner)];
+  if(avatarID)updates.push(db.prepare('INSERT INTO vesper_bridge_profiles(binding_id,avatar_id) VALUES(?,?) ON CONFLICT(binding_id) DO UPDATE SET avatar_id=excluded.avatar_id').bind(binding,avatarID));
+  try {await db.batch(updates);} catch(error) {if(avatarID)await bucket.delete(`private-bridge/${binding}/avatar/${avatarID}`).catch(()=>{});throw error;}
+  return {name:name.trim(),avatarId:avatarID};
+}
+export async function readBridgeAvatar(db:D1Database,bucket:R2Bucket,bindingID:unknown,owner:string) {
+  const binding=await validateBridgeBinding(db,bindingID,owner);
+  const row=await db.prepare('SELECT avatar_id FROM vesper_bridge_profiles WHERE binding_id=?').bind(binding).first<{avatar_id:string}>();
+  if(!row)throw new Error('Avatar unavailable');
+  const image=await bucket.get(`private-bridge/${binding}/avatar/${id(row.avatar_id)}`);
+  if(!image)throw new Error('Avatar unavailable');return image;
+}
