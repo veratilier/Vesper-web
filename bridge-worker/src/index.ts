@@ -57,7 +57,7 @@ async function handleMcp(request:Request,env:Env,ctx:ExecutionContext,bindingID:
 }
 const escape=(v:string)=>v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 function page(body:string,cookie?:string,status=200) {
-  return new Response(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vesper Chat</title><style>body{font:16px system-ui;background:#101d30;color:#eef4ff;margin:0;display:grid;place-items:center;min-height:100dvh}main{max-width:420px;padding:28px}input,button{box-sizing:border-box;width:100%;font:inherit;padding:14px;margin-top:12px;border-radius:12px}button{background:#45618a;color:white}small{color:#b8c6dc}</style><main>${body}</main></html>`,{status,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",...(cookie?{'set-cookie':cookie}:{})}});
+  return new Response(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vesper Chat</title><style>body{font:16px system-ui;background:#101d30;color:#eef4ff;margin:0;display:grid;place-items:center;min-height:100dvh}main{max-width:420px;padding:28px}input,button{box-sizing:border-box;width:100%;font:inherit;padding:14px;margin-top:12px;border-radius:12px}button{background:#45618a;color:white}small{color:#b8c6dc}</style><main>${body}</main></html>`,{status,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','referrer-policy':'same-origin','x-frame-options':'DENY','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",...(cookie?{'set-cookie':cookie}:{})}});
 }
 const api:ExportedHandler<Env>={async fetch(request,env,ctx) {
   const props=(ctx as ExecutionContext & {props?:{bindingID?:string; scope?:string[]}}).props;
@@ -86,7 +86,12 @@ const oauth=new OAuthProvider<Env>({
         const client=await env.OAUTH_PROVIDER.lookupClient(auth.clientId);
         return page(`<h1>Connect Vesper Chat</h1><p>Connect ${escape(client?.clientName||'your assistant')} to one conversation. This does not grant access to Vesper memory, diary, photos, or other chats.</p><form method="post" action="/authorize"><input type="hidden" name="csrf" value="${nonce}"><label>Connection code<input type="password" name="code" autocomplete="off" required></label><small>Use the code from Vesper; do not send it in a message.</small><button name="decision" value="allow">Connect</button><button name="decision" value="deny" formnovalidate>Cancel</button></form>`,`__Host-vesper-chat=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
       }
-      if(request.method!=='POST'||request.headers.get('origin')!==ORIGIN) return page('Invalid request.',undefined,403);
+      const origin=request.headers.get('origin'), fetchSite=request.headers.get('sec-fetch-site');
+      // Some WebKit versions submit an opaque Origin under strict referrer policies.
+      // Accept that only when the browser identifies the request as same-origin;
+      // the one-time nonce and host-only SameSite cookie are still required below.
+      const sameOrigin=origin===ORIGIN||((origin===null||origin==='null')&&fetchSite==='same-origin');
+      if(request.method!=='POST'||!sameOrigin) return page('Invalid request. Please restart the connection in ChatGPT.',undefined,403);
       const raw=await request.text(); if(raw.length>12000) return page('Request too large.',undefined,400);
       const form=new URLSearchParams(raw), nonce=form.get('csrf')||'';
       const cookie=request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith('__Host-vesper-chat='))?.slice('__Host-vesper-chat='.length);
@@ -100,11 +105,16 @@ const oauth=new OAuthProvider<Env>({
         const denied=new URL(auth.redirectUri); denied.searchParams.set('error','access_denied'); denied.searchParams.set('state',auth.state||''); denied.searchParams.set('iss',ORIGIN); return Response.redirect(denied,303);
       }
       if(form.get('decision')!=='allow') return page('Authorization denied.',undefined,403);
-      const bindingID=await bridgeIdentity(env.DB,(form.get('code')||'').trim());
-      await env.OAUTH_KV.delete(`chat-consent:${nonce}`);
+      let bindingID:string;
+      try { bindingID=await bridgeIdentity(env.DB,(form.get('code')||'').trim()); }
+      catch(error) {
+        if(error instanceof Error&&error.message==='Connection unavailable') return page('This connection code is invalid or has been disconnected. Create a new connection in Vesper.',undefined,400);
+        throw error;
+      }
       const granted=await env.OAUTH_PROVIDER.completeAuthorization({request:auth,userId:`chat_${bindingID}`,metadata:{clientName:'Vesper Chat'},scope:[SCOPE],props:{bindingID,scope:[SCOPE]}});
+      await env.OAUTH_KV.delete(`chat-consent:${nonce}`);
       return new Response(null,{status:303,headers:{location:granted.redirectTo,'cache-control':'no-store','set-cookie':'__Host-vesper-chat=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'}});
-    } catch { return page('Unable to connect. Check the connection code and try again.',undefined,400); }
+    } catch { return page('Unable to complete authorization. Please restart the connection in ChatGPT.',undefined,400); }
   }},
 });
 export default {async fetch(request:Request,env:Env,ctx:ExecutionContext) {
