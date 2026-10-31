@@ -15,6 +15,7 @@ export async function ensureGroups(db:DB) {
     db.prepare("CREATE TABLE IF NOT EXISTS vesper_bridge_ash_jobs (group_id TEXT NOT NULL, message_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', claimant TEXT, lease_until TEXT, PRIMARY KEY(group_id,message_id))"),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_group_messages (group_id TEXT NOT NULL, id TEXT NOT NULL, sender_id TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(group_id,id))'),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_group_inbox (binding_id TEXT NOT NULL, group_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(binding_id,group_id,message_id))'),
+    db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_group_peer_notifications (group_id TEXT NOT NULL, recipient TEXT NOT NULL, round_id TEXT NOT NULL, sender_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(group_id,recipient,round_id,sender_id))'),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_group_media (id TEXT PRIMARY KEY, group_id TEXT NOT NULL, sender_id TEXT NOT NULL, message_id TEXT, object_key TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_group_inflight (group_id TEXT NOT NULL, message_id TEXT NOT NULL, intent TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(group_id,message_id))'),
     db.prepare('CREATE INDEX IF NOT EXISTS vesper_bridge_group_members_binding ON vesper_bridge_group_members(binding_id,group_id)'),
@@ -80,6 +81,28 @@ export async function userGroupMessages(db:DB,owner:string,groupID:unknown) {
   return {...result,ashConversationId:ash?.conversation_id||''};
 }
 export async function assistantGroupMessages(db:DB,bindingID:unknown,groupID:unknown) {await ensureGroups(db);return read(db,await member(db,bindingID,groupID));}
+/** Deliver at most one notification per sender, recipient and user turn.
+ * The guard is durable across retries and devices; a new user message starts a
+ * new round. Never backfill old conversations or notify the original sender. */
+async function notifyPeers(db:DB,group:Group,sender:string,messageID:string) {
+  const origin=await db.prepare('SELECT rowid AS n FROM vesper_bridge_group_messages WHERE group_id=? AND id=? AND sender_id=?').bind(group.id,messageID,sender).first<{n:number}>();
+  if(!origin)return;
+  const lastUser=await db.prepare("SELECT id FROM vesper_bridge_group_messages WHERE group_id=? AND sender_id='user' AND rowid<? ORDER BY rowid DESC LIMIT 1").bind(group.id,origin.n).first<{id:string}>();
+  const round=lastUser ? 'user:'+lastUser.id : 'before-first-user';
+  await db.batch([
+    db.prepare(`INSERT OR IGNORE INTO vesper_bridge_group_peer_notifications(group_id,recipient,round_id,sender_id,message_id)
+      SELECT ?,b.id,?,?,? FROM vesper_bridge_group_members m JOIN vesper_bridge_bindings b ON b.id=m.binding_id AND b.revoked=0
+      WHERE m.group_id=? AND b.id<>?`).bind(group.id,round,sender,messageID,group.id,sender),
+    db.prepare(`INSERT OR IGNORE INTO vesper_bridge_group_peer_notifications(group_id,recipient,round_id,sender_id,message_id)
+      SELECT group_id,'ash',?,?,? FROM vesper_bridge_group_ash WHERE group_id=? AND ?<>'ash'`).bind(round,sender,messageID,group.id,sender),
+    db.prepare(`INSERT OR IGNORE INTO vesper_bridge_group_inbox(binding_id,group_id,message_id)
+      SELECT recipient,group_id,message_id FROM vesper_bridge_group_peer_notifications
+      WHERE group_id=? AND round_id=? AND message_id=? AND recipient<>'ash'`).bind(group.id,round,messageID),
+    db.prepare(`INSERT OR IGNORE INTO vesper_bridge_ash_jobs(group_id,message_id,state)
+      SELECT group_id,message_id,'pending' FROM vesper_bridge_group_peer_notifications
+      WHERE group_id=? AND round_id=? AND message_id=? AND recipient='ash'`).bind(group.id,round,messageID),
+  ]);
+}
 async function put(db:DB,group:Group,sender:string,input:Record<string,unknown>) {
   const messageID=id(input.id),body=typeof input.text==='string'?input.text.trim():'';
   const attachments=input.attachments===undefined?[]:Array.isArray(input.attachments)?input.attachments.map(id):null;
@@ -105,6 +128,7 @@ async function put(db:DB,group:Group,sender:string,input:Record<string,unknown>)
     db.prepare('INSERT OR IGNORE INTO vesper_bridge_group_inbox(binding_id,group_id,message_id) SELECT binding_id,?,? FROM vesper_bridge_group_members WHERE group_id=?').bind(group.id,messageID,group.id),
     db.prepare("INSERT OR IGNORE INTO vesper_bridge_ash_jobs(group_id,message_id,state) SELECT group_id,?,'pending' FROM vesper_bridge_group_ash WHERE group_id=?").bind(messageID,group.id),
   ]);
+  else await notifyPeers(db,group,sender,messageID);
   return {message:messageView(row)};
 }
 export async function userGroupSend(db:DB,owner:string,input:Record<string,unknown>) {await ensureGroups(db);return put(db,await owned(db,owner,input.groupId),'user',input);}
@@ -137,7 +161,7 @@ export async function completeGroupAsh(db:DB,owner:string,input:Record<string,un
   if(job.state==='done') {
     const previous=await db.prepare('SELECT * FROM vesper_bridge_group_messages WHERE group_id=? AND id=?').bind(group.id,responseID).first<GroupMessage>();
     const linked=await db.prepare('SELECT id FROM vesper_bridge_group_media WHERE group_id=? AND message_id=? ORDER BY rowid').bind(group.id,responseID).all<{id:string}>();
-    if(!previous||previous.text!==reply||JSON.stringify(linked.results.map(x=>x.id).sort())!==JSON.stringify([...attachments].sort()))throw new Error('Ash job unavailable');return {message:messageView(previous)};
+    if(!previous||previous.text!==reply||JSON.stringify(linked.results.map(x=>x.id).sort())!==JSON.stringify([...attachments].sort()))throw new Error('Ash job unavailable');await notifyPeers(db,group,'ash',responseID);return {message:messageView(previous)};
   }
   const now=new Date().toISOString();
   if(job.state!=='running'||job.lease_until<now)throw new Error('Ash job unavailable');
@@ -152,6 +176,6 @@ export async function completeGroupAsh(db:DB,owner:string,input:Record<string,un
   ]);
   if(!results.at(-1)?.meta.changes||!results.at(-2)?.meta.changes||results.slice(2,-2).some(r=>!r.meta.changes))throw new Error('Ash job unavailable');
   const saved=await db.prepare('SELECT * FROM vesper_bridge_group_messages WHERE group_id=? AND id=?').bind(group.id,responseID).first<GroupMessage>();
-  if(!saved)throw new Error('Ash reply unavailable');return {message:messageView(saved)};
+  if(!saved)throw new Error('Ash reply unavailable');await notifyPeers(db,group,'ash',responseID);return {message:messageView(saved)};
 }
 export async function assistantGroupSend(db:DB,bindingID:unknown,input:Record<string,unknown>) {await ensureGroups(db);const binding=id(bindingID);return put(db,await member(db,binding,input.groupId),binding,input);}
