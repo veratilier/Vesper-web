@@ -31,6 +31,7 @@ jobs:
       - run: npm run test:memory
       - run: node tools/test-journal-moods.mjs && node tools/test-journal-mood-write.mjs && node tools/test-mcp-diary.mjs
       - run: node --experimental-strip-types tools/test-conversation-bridge.mjs
+      - run: node --experimental-strip-types tools/test-bridge-media.mjs
       - run: node --experimental-strip-types tools/test-conversation-bridge-events.mjs
       - run: node --experimental-strip-types tools/test-bridge-consent.mjs
       - run: node tools/test-jottings.mjs
