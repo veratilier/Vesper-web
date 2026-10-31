@@ -95,12 +95,18 @@ const oauth=new OAuthProvider<Env>({
       if(request.method!=='POST'||!sameOrigin) return page('Invalid request. Please restart the connection in ChatGPT.',undefined,403);
       const raw=await request.text(); if(raw.length>12000) return page('Request too large.',undefined,400);
       const form=new URLSearchParams(raw), nonce=form.get('csrf')||'';
-      if(!cookieMatches(request.headers.get('cookie'),nonce)) return page('The browser session could not be verified. Open the latest authorization link and complete it in the same browser.',undefined,403);
+      if(!cookieMatches(request.headers.get('cookie'),nonce)) {
+        console.warn('vesper_chat_oauth: cookie_mismatch');
+        return page('The browser session could not be verified. Open the latest authorization link and complete it in the same browser.',undefined,403);
+      }
       // Read through old KV entries for authorizations started before this update.
       const currentConsent=await getConsent(env.DB,nonce);
       const legacyConsent=currentConsent ? null : await env.OAUTH_KV.get(`chat-consent:${nonce}`);
       const original=currentConsent ?? legacyConsent;
-      if(!original) return page('This authorization link has expired. Ask the assistant to start a new connection.',undefined,403);
+      if(!original) {
+        console.warn('vesper_chat_oauth: consent_expired');
+        return page('This authorization link has expired. Ask the assistant to start a new connection.',undefined,403);
+      }
       const auth=await env.OAUTH_PROVIDER.parseAuthRequest(new Request(original));
       if(!allowedRedirect(auth.redirectUri)||auth.scope.some(s=>s!==SCOPE)) return page('Unsupported authorization.',undefined,400);
       if(form.get('decision')==='deny') {
@@ -112,14 +118,17 @@ const oauth=new OAuthProvider<Env>({
       let bindingID:string;
       try { bindingID=await bridgeIdentity(env.DB,(form.get('code')||'').trim()); }
       catch(error) {
-        if(error instanceof Error&&error.message==='Connection unavailable') return page('This connection code is invalid or has been disconnected. Create a new connection in Vesper.',undefined,400);
+        if(error instanceof Error&&error.message==='Connection unavailable') {
+          console.warn('vesper_chat_oauth: code_unavailable');
+          return page('This connection code is invalid or has been disconnected. Create a new connection in Vesper.',undefined,400);
+        }
         throw error;
       }
       const granted=await env.OAUTH_PROVIDER.completeAuthorization({request:auth,userId:`chat_${bindingID}`,metadata:{clientName:'Vesper Chat'},scope:[SCOPE],props:{bindingID,scope:[SCOPE]}});
       await deleteConsent(env.DB,nonce).catch(()=>{});
       if(legacyConsent) await env.OAUTH_KV.delete(`chat-consent:${nonce}`).catch(()=>{});
       return new Response(null,{status:303,headers:{location:granted.redirectTo,'cache-control':'no-store','set-cookie':clearConsentCookie(nonce)}});
-    } catch { return page('Unable to complete authorization. Please restart the connection in ChatGPT.',undefined,400); }
+    } catch { console.warn('vesper_chat_oauth: authorization_failed'); return page('Unable to complete authorization. Please restart the connection in your assistant.',undefined,400); }
   }},
 });
 export default {async fetch(request:Request,env:Env,ctx:ExecutionContext) {
