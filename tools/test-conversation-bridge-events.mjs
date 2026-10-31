@@ -16,13 +16,16 @@ assert.equal(eventFailureDiagnostic(new Error('invalid_url'),{delivery:{url:'htt
 let events=[],failedOnce=false;
 const receiver=async (url,options)=>{
   const h=options.headers, signature=createHmac('sha256',Buffer.from(secret.slice(6),'base64')).update(`${h['webhook-id']}.${h['webhook-timestamp']}.${options.body}`).digest('base64');
-  assert.equal(h['webhook-signature'],`v1,${signature}`);assert.equal(options.redirect,'error');
+  assert.equal(h['webhook-signature'],`v1,${signature}`);assert.equal(options.redirect,'manual');
   const data=JSON.parse(options.body); if(data.type==='verification') return Response.json({challenge:data.challenge});
   events.push(data); if(!failedOnce){failedOnce=true;return new Response('',{status:503});}return new Response('',{status:200});
 };
 assert.equal(listEvents().events[0].name,'message.created');
 await assert.rejects(()=>subscribe(env,a.binding.id,{...request,delivery:{...request.delivery,url:'http://127.0.0.1'}} ,receiver));
 await assert.rejects(()=>subscribe(env,a.binding.id,request,async()=>Response.json({challenge:'wrong'})));
+let redirectCalls=0;
+await assert.rejects(()=>subscribe(env,a.binding.id,request,async(_url,options)=>{redirectCalls++;assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{location:'https://attacker.example/'}})}));
+assert.equal(redirectCalls,1);
 const sub=await subscribe(env,a.binding.id,request,receiver);assert(sub.id.startsWith('sub_'));
 await userSend(db,'owner',{bindingId:a.binding.id,id:'after',text:'new'});
 await userSend(db,'owner',{bindingId:b.binding.id,id:'other',text:'private B'});

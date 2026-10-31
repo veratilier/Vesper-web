@@ -46,7 +46,9 @@ async function signed(url:string,secret:string,id:string,subscriptionID:string,b
   try {const key=await crypto.subtle.importKey('raw',decodeSecret(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);signature=new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(`${id}.${timestamp}.${payload}`)));}
   catch {throw new EventCallbackError('signing_failed');}
   const b64=btoa(String.fromCharCode(...signature));
-  try {return await fetcher(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json','webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${b64}`,'X-MCP-Subscription-Id':subscriptionID},body:payload});}
+  // Workers does not implement redirect:'error'. Manual mode prevents forwarding
+  // the signed body or headers; callers reject redirects as non-success.
+  try {return await fetcher(url,{method:'POST',redirect:'manual',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json','webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${b64}`,'X-MCP-Subscription-Id':subscriptionID},body:payload});}
   catch(error) {
     const message=error instanceof Error?error.message.toLowerCase():'';
     const tags=['dns','certificate','tls','redirect','timeout','public','private','network','fetch','socket','blocked','invocation','receiver'].filter(tag=>message.includes(tag));
@@ -103,7 +105,7 @@ export async function deliver(env:Env,fetcher:typeof fetch=fetch){
     let status:'done'|'retry'|'terminal'='retry';const attempts=(item.attempts??0)+1;
     try {
       const r=await signed(item.url,secret,eventId,item.id,{eventId,name:NAME,timestamp:item.message_created_at,data:{message_id:item.message_id,text:item.message_text},cursor:null},fetcher);
-      if(r.ok) status='done';else if(r.status===410||r.status===413||attempts>=5) status='terminal';
+      if(r.ok) status='done';else if((r.status>=300&&r.status<400)||r.status===410||r.status===413||attempts>=5) status='terminal';
     } catch { if(attempts>=5) status='terminal'; }
     const next=new Date(Date.now()+Math.min(3600000,60000*2**(attempts-1))).toISOString();
     await env.DB.prepare('INSERT INTO vesper_bridge_deliveries(subscription_id,message_id,attempts,next_at,status) VALUES(?,?,?,?,?) ON CONFLICT(subscription_id,message_id) DO UPDATE SET attempts=excluded.attempts,next_at=excluded.next_at,status=excluded.status')
@@ -122,7 +124,7 @@ export async function deliver(env:Env,fetcher:typeof fetch=fetch){
     const secret=await env.OAUTH_KV.get(KEY+item.id);if(!secret)continue;
     const deliveryID='group_'+item.group_id+'_'+item.message_id,eventId='evt_'+(await digest(`${item.id}\n${deliveryID}`)).slice(0,48);
     let status:'done'|'retry'|'terminal'='retry';const attempts=(item.attempts??0)+1;
-    try {const r=await signed(item.url,secret,eventId,item.id,{eventId,name:NAME,timestamp:item.message_created_at,data:{message_id:item.message_id,text:item.message_text,group_id:item.group_id},cursor:null},fetcher);if(r.ok)status='done';else if(r.status===410||r.status===413||attempts>=5)status='terminal';}catch{if(attempts>=5)status='terminal';}
+    try {const r=await signed(item.url,secret,eventId,item.id,{eventId,name:NAME,timestamp:item.message_created_at,data:{message_id:item.message_id,text:item.message_text,group_id:item.group_id},cursor:null},fetcher);if(r.ok)status='done';else if((r.status>=300&&r.status<400)||r.status===410||r.status===413||attempts>=5)status='terminal';}catch{if(attempts>=5)status='terminal';}
     const next=new Date(Date.now()+Math.min(3600000,60000*2**(attempts-1))).toISOString();
     await env.DB.prepare('INSERT INTO vesper_bridge_deliveries(subscription_id,message_id,attempts,next_at,status) VALUES(?,?,?,?,?) ON CONFLICT(subscription_id,message_id) DO UPDATE SET attempts=excluded.attempts,next_at=excluded.next_at,status=excluded.status').bind(item.id,deliveryID,attempts,next,status).run();
   }
