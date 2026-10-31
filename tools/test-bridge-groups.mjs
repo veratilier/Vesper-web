@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {createBridge,revokeBridge,userSend,assistantMessagesBound} from '../lib/conversation-bridge.ts';
-import {createGroup,userGroups,assistantGroups,userGroupMessages,userGroupSend,assistantGroupMessages,assistantGroupSend,claimGroupAsh,completeGroupAsh} from '../lib/bridge-groups.ts';
+import {createGroup,userGroups,assistantGroups,userGroupMessages,userGroupSend,assistantGroupMessages,assistantGroupSend,claimGroupAsh,completeGroupAsh,setGroupContinuous} from '../lib/bridge-groups.ts';
 import {uploadGroupMedia,readGroupMedia,groupMediaChunk} from '../lib/bridge-group-media.ts';
 import {readCombinedInbox,replyFromCombinedInbox} from '../lib/bridge-inbox.ts';
 const sqlite=new DatabaseSync(':memory:');
@@ -80,34 +80,44 @@ await userGroupSend(db,'owner',{groupId:group.id,id:'collision',text:'Group'});
 await assert.rejects(()=>replyFromCombinedInbox(db,b.binding.id,{id:'ambiguous',replyTo:'collision',text:'No'}));
 await replyFromCombinedInbox(db,b.binding.id,{id:'group-collision',replyTo:'collision',groupId:group.id,text:'Group reply'});
 assert.ok((await assistantMessagesBound(db,b.binding.id)).pending.some(m=>m.id==='collision'));
-// Each participant sees and may answer each peer once per user turn.
-// Generated replies cannot recursively trigger an unlimited conversation.
+// Continuous interaction delivers every peer message until the owner stops it.
 const peerGroup=(await createGroup(db,'owner',{name:'Peers',members:[a.binding.id,b.binding.id],includeAsh:true})).group;
+assert.equal(peerGroup.continuous,false);
+await assert.rejects(()=>setGroupContinuous(db,'other',{groupId:peerGroup.id,enabled:true}));
+await assert.rejects(()=>setGroupContinuous(db,'owner',{groupId:peerGroup.id,enabled:'true'}));
+assert.equal((await setGroupContinuous(db,'owner',{groupId:peerGroup.id,enabled:true})).group.continuous,true);
 await userGroupSend(db,'owner',{groupId:peerGroup.id,id:'peer-user-1',text:'Round one'});
 await assistantGroupSend(db,b.binding.id,{groupId:peerGroup.id,id:'peer-b-1',text:'B speaks'});
 await assistantGroupSend(db,b.binding.id,{groupId:peerGroup.id,id:'peer-b-1',text:'B speaks'}); // retry
-const pendingA=(await readCombinedInbox(db,a.binding.id)).pending.filter(m=>m.groupId===peerGroup.id);
-const peerA=pendingA.find(m=>m.id==='peer-b-1');
+let pendingA=(await readCombinedInbox(db,a.binding.id)).pending.filter(m=>m.groupId===peerGroup.id);
+let peerA=pendingA.find(m=>m.id==='peer-b-1');
 assert.equal(peerA.senderName,'B');assert.equal(peerA.senderId,b.binding.id);
 assert.ok(peerA.recentGroupMessages.some(m=>m.id==='peer-user-1'));
 assert.ok(!pendingA.some(m=>m.senderId===a.binding.id));
 assert.ok(!(await readCombinedInbox(db,c.binding.id)).pending.some(m=>m.groupId===peerGroup.id));
+// A duplicate toggle-on request must not discard live notifications.
+await setGroupContinuous(db,'owner',{groupId:peerGroup.id,enabled:true});
+assert.ok((await readCombinedInbox(db,a.binding.id)).pending.some(m=>m.id==='peer-b-1'));
 await replyFromCombinedInbox(db,a.binding.id,{id:'peer-a-1',replyTo:'peer-b-1',text:'A responds'});
-const pendingB=(await readCombinedInbox(db,b.binding.id)).pending.filter(m=>m.groupId===peerGroup.id);
-assert.ok(pendingB.some(m=>m.id==='peer-a-1' && m.senderName==='A'));
+assert.ok((await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='peer-a-1' && m.senderName==='A'));
 await assistantGroupSend(db,a.binding.id,{groupId:peerGroup.id,id:'peer-a-2',text:'A again'});
-assert.ok(!(await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='peer-a-2'));
+assert.ok((await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='peer-a-2'));
 let ash=await claimGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone'});assert.equal(ash.job.messageId,'peer-user-1');
 await completeGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone',messageId:ash.job.messageId,text:'Ash responds'});
 ash=await claimGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone'});assert.equal(ash.job.messageId,'peer-b-1');
-await completeGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone',messageId:ash.job.messageId,text:'Ash again'});
-ash=await claimGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone'});assert.equal(ash.job.messageId,'peer-a-1');
-await completeGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone',messageId:ash.job.messageId,text:'Ash replies to A'});
+assert.equal((await setGroupContinuous(db,'owner',{groupId:peerGroup.id,enabled:false})).group.continuous,false);
+await assert.rejects(()=>completeGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone',messageId:ash.job.messageId,text:'Cancelled'}));
 assert.equal((await claimGroupAsh(db,'owner',{groupId:peerGroup.id,claimant:'phone'})).job,null);
-const ashPeerNotices=sqlite.prepare("SELECT COUNT(*) AS n FROM vesper_bridge_group_peer_notifications WHERE group_id=? AND sender_id='ash'").get(peerGroup.id).n;
-assert.equal(ashPeerNotices,2);
-await userGroupSend(db,'owner',{groupId:peerGroup.id,id:'peer-user-2',text:'Round two'});
-await assistantGroupSend(db,b.binding.id,{groupId:peerGroup.id,id:'peer-b-2',text:'New round'});
+assert.equal((await readCombinedInbox(db,b.binding.id)).pending.filter(m=>m.groupId===peerGroup.id && m.senderId!=='user').length,0);
+await assistantGroupSend(db,a.binding.id,{groupId:peerGroup.id,id:'peer-after-stop',text:'Finished in flight'});
+assert.ok(!(await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='peer-after-stop'));
+// The switch does not block ordinary user messages or alter group history.
+await userGroupSend(db,'owner',{groupId:peerGroup.id,id:'peer-user-2',text:'A user message'});
+assert.ok((await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='peer-user-2'));
+assert.ok((await assistantGroupMessages(db,b.binding.id,peerGroup.id)).messages.some(m=>m.id==='peer-a-1'));
+await setGroupContinuous(db,'owner',{groupId:peerGroup.id,enabled:true});
+assert.ok(!(await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='peer-a-1'), 'restart does not replay old peer messages');
+await assistantGroupSend(db,b.binding.id,{groupId:peerGroup.id,id:'peer-b-2',text:'Restarted'});
 assert.ok((await readCombinedInbox(db,a.binding.id)).pending.some(m=>m.id==='peer-b-2'));
 await revokeBridge(db,'owner',a.binding.id);await assert.rejects(()=>assistantGroupMessages(db,a.binding.id,group.id));
 console.log('group membership, isolation, authorship and idempotency passed');
