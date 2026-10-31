@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {createBridge,revokeBridge} from '../lib/conversation-bridge.ts';
+import {createBridge,revokeBridge,userSend,assistantMessagesBound} from '../lib/conversation-bridge.ts';
 import {createGroup,userGroups,assistantGroups,userGroupMessages,userGroupSend,assistantGroupMessages,assistantGroupSend,claimGroupAsh,completeGroupAsh} from '../lib/bridge-groups.ts';
 import {uploadGroupMedia,readGroupMedia,groupMediaChunk} from '../lib/bridge-group-media.ts';
+import {readCombinedInbox,replyFromCombinedInbox} from '../lib/bridge-inbox.ts';
 const sqlite=new DatabaseSync(':memory:');
 class S{constructor(q,v=[]){this.q=q;this.v=v}bind(...v){return new S(this.q,v)}async run(){const r=sqlite.prepare(this.q).run(...this.v);return {meta:{changes:r.changes}}}async first(){return sqlite.prepare(this.q).get(...this.v)??null}async all(){return {results:sqlite.prepare(this.q).all(...this.v)}}}
 const db={prepare:q=>new S(q),batch:async xs=>{const out=[];for(const x of xs)out.push(await x.run());return out}};
@@ -58,5 +59,26 @@ await assistantGroupSend(db,a.binding.id,{groupId:group.id,id:'a1',text:'Hello'}
 await assistantGroupSend(db,a.binding.id,{groupId:group.id,id:'a1',text:'Hello'});
 await assert.rejects(()=>assistantGroupSend(db,b.binding.id,{groupId:group.id,id:'a1',text:'Spoof'}));
 const history=await assistantGroupMessages(db,b.binding.id,group.id);assert.equal(history.messages.length,3);assert.equal(history.messages[0].attachments[0].id,media.id);assert.equal(history.messages[2].senderId,a.binding.id);
+// A polling contact sees its own groups in the same pending list, and its
+// existing send_reply call routes back to the group without a new credential.
+const inbox=await readCombinedInbox(db,b.binding.id);
+assert.ok(inbox.pending.some(m=>m.id==='u1' && m.groupId===group.id));
+assert.equal(inbox.pending.find(m=>m.id==='photo').attachments[0].id,media.id);
+assert.equal((await readCombinedInbox(db,c.binding.id)).group_pending.length,0);
+await replyFromCombinedInbox(db,b.binding.id,{id:'b-reply',replyTo:'u1',text:'Hello too'});
+await replyFromCombinedInbox(db,b.binding.id,{id:'b-reply',replyTo:'u1',text:'Hello too'});
+assert.equal((await readCombinedInbox(db,b.binding.id)).group_pending.length,0);
+assert.equal((await assistantGroupMessages(db,b.binding.id,group.id)).messages.at(-1).senderId,b.binding.id);
+await assert.rejects(()=>replyFromCombinedInbox(db,c.binding.id,{id:'spoof',replyTo:'u1',groupId:group.id,text:'No'}));
+await userGroupSend(db,'owner',{groupId:group.id,id:'u2',text:'Later'});
+assert.ok((await readCombinedInbox(db,b.binding.id)).pending.some(m=>m.id==='u2'));
+await replyFromCombinedInbox(db,b.binding.id,{id:'b-reply-2',replyTo:'u2',groupId:group.id,text:'Here'});
+assert.equal((await readCombinedInbox(db,b.binding.id)).group_pending.length,0);
+// A coincidental reused ID must not route a direct reply to a group silently.
+await userSend(db,'owner',{bindingId:b.binding.id,id:'collision',text:'Direct'});
+await userGroupSend(db,'owner',{groupId:group.id,id:'collision',text:'Group'});
+await assert.rejects(()=>replyFromCombinedInbox(db,b.binding.id,{id:'ambiguous',replyTo:'collision',text:'No'}));
+await replyFromCombinedInbox(db,b.binding.id,{id:'group-collision',replyTo:'collision',groupId:group.id,text:'Group reply'});
+assert.ok((await assistantMessagesBound(db,b.binding.id)).pending.some(m=>m.id==='collision'));
 await revokeBridge(db,'owner',a.binding.id);await assert.rejects(()=>assistantGroupMessages(db,a.binding.id,group.id));
 console.log('group membership, isolation, authorship and idempotency passed');

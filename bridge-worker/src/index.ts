@@ -2,7 +2,8 @@ import { OAuthProvider, type OAuthHelpers } from '@cloudflare/workers-oauth-prov
 import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
-import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../../lib/conversation-bridge';
+import { bridgeIdentity, assistantReplyBound } from '../../lib/conversation-bridge';
+import { readCombinedInbox, replyFromCombinedInbox } from '../../lib/bridge-inbox';
 import { listEvents, subscribe, unsubscribe, deliver, eventFailureDiagnostic } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
 import { advertiseEvents } from './discovery';
@@ -35,17 +36,17 @@ function server(env:Env,bindingID:string) {
     description:'Stage genuine file bytes for a message in a group you belong to; maximum 8 MB.',inputSchema:{groupId:z.string(),name:z.string().min(1).max(160),mimeType:z.string().max(128),base64:z.string().max(12*1024*1024),kind:z.enum(['file','sticker']).default('file')},annotations:{readOnlyHint:false},
   },async input=>{try{if(!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64)||input.base64.length%4!==0)throw new Error('Invalid base64');const raw=atob(input.base64);if(raw.length>8*1024*1024)throw new Error('Too large');return response(await uploadGroupMedia(env.DB,env.MEDIA,input.groupId,{bindingID},{name:input.name,type:input.mimeType,bytes:Uint8Array.from(raw,c=>c.charCodeAt(0)),kind:input.kind}));}catch{return {...response({error:'Attachment upload unavailable'}),isError:true};}});
   mcp.registerTool('read_messages',{
-    description:'Read this connection’s recent and pending messages. Attachments have private IDs; use read_attachment to view images or retrieve file bytes. No other conversations are accessible.',
+    description:'Read recent direct messages and pending direct or group messages for this connection. Group items include groupId: use read_group_messages and read_group_attachment for their context and files, and send_reply or send_group_message to reply. Direct attachments use read_attachment. Other contacts’ private conversations are inaccessible.',
     inputSchema:{},annotations:{readOnlyHint:true},
   },async()=>{
-    try { return response(await assistantMessagesBound(env.DB,bindingID)); }
+    try { return response(await readCombinedInbox(env.DB,bindingID)); }
     catch { return {...response({error:'Connection unavailable'}),isError:true}; }
   });
   mcp.registerTool('send_reply',{
-    description:'Send a reply to a pending user message. Optional attachments must first be uploaded with upload_attachment. Generate a unique id and reuse it unchanged on retries.',
-    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+    description:'Reply to a pending direct or group message using its id as replyTo. For group items use groupId when present and upload_group_attachment for files; direct messages use upload_attachment. Reuse the same unique id on retries.',
+    inputSchema:{id:z.string(),replyTo:z.string(),groupId:z.string().optional(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
   },async input=>{
-    try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
+    try { return response(await replyFromCombinedInbox(env.DB,bindingID,input)); }
     catch { return {...response({error:'Reply unavailable'}),isError:true}; }
   });
   mcp.registerTool('send_message',{
