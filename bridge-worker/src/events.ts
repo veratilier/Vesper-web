@@ -49,7 +49,7 @@ async function signed(url:string,secret:string,id:string,subscriptionID:string,b
   try {return await fetcher(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json','webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${b64}`,'X-MCP-Subscription-Id':subscriptionID},body:payload});}
   catch(error) {
     const message=error instanceof Error?error.message.toLowerCase():'';
-    const tags=['dns','certificate','tls','redirect','timeout','public','private','network','fetch','socket','blocked'].filter(tag=>message.includes(tag));
+    const tags=['dns','certificate','tls','redirect','timeout','public','private','network','fetch','socket','blocked','invocation','receiver'].filter(tag=>message.includes(tag));
     const errorCode=message.match(/\b10\d{2}\b/)?.[0];if(errorCode)tags.push('code_'+errorCode);
     const type=error instanceof Error&&['TypeError','AbortError','TimeoutError','Error'].includes(error.name)?error.name:'unknown';
     throw new EventCallbackError(type==='TimeoutError'?'timeout':'connection_failed',[type,...tags].join(','));
