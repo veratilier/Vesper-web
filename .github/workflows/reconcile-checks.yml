@@ -30,6 +30,8 @@ jobs:
       - run: node tools/test-web-music.mjs
       - run: npm run test:memory
       - run: node tools/test-journal-moods.mjs && node tools/test-journal-mood-write.mjs && node tools/test-mcp-diary.mjs
+      - run: node --experimental-strip-types tools/test-conversation-bridge.mjs
+      - run: node --experimental-strip-types tools/test-conversation-bridge-events.mjs
       - run: node tools/test-jottings.mjs
       - run: node tools/test-letters.mjs
       - run: node tools/test-chat-keeps.mjs
