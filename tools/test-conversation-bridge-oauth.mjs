@@ -8,8 +8,12 @@ let r=await fetch(root+'/oauth/register',{method:'POST',headers:{'content-type':
 let client=await r.json();assert.equal(r.status,201);assert(client.client_id);
 const verifier=crypto.randomBytes(32).toString('base64url'), challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
 const query=new URLSearchParams({response_type:'code',client_id:client.client_id,redirect_uri:callback,scope:'conversation:access',state:'test',code_challenge:challenge,code_challenge_method:'S256',resource:'https://bridge.vesper.r-vera.com/mcp'});
-r=await fetch(root+'/authorize?'+query,{redirect:'manual'});const html=await r.text(),nonce=html.match(/name="csrf" value="([^"]+)"/)?.[1],cookie=r.headers.get('set-cookie')?.split(';')[0];assert.equal(r.status,200);assert(nonce&&cookie);
-r=await fetch(root+'/authorize',{method:'POST',redirect:'manual',headers:{origin:'https://bridge.vesper.r-vera.com',cookie,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:nonce,code,decision:'allow'})});assert.equal(r.status,303);
+r=await fetch(root+'/authorize?'+query,{redirect:'manual'});const html=await r.text(),nonce=html.match(/name="csrf" value="([^"]+)"/)?.[1],cookie=r.headers.get('set-cookie')?.split(';')[0];assert.equal(r.status,200);assert(nonce&&cookie);assert.equal(r.headers.get('referrer-policy'),'same-origin');
+const submit=async(origin,fetchSite,csrf=nonce)=>fetch(root+'/authorize',{method:'POST',redirect:'manual',headers:{origin,'sec-fetch-site':fetchSite,cookie,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,code,decision:'allow'})});
+assert.equal((await submit('https://attacker.example','cross-site')).status,403);
+assert.equal((await submit('null','cross-site')).status,403);
+assert.equal((await submit('null','same-origin','invalid')).status,403);
+r=await submit('null','same-origin');assert.equal(r.status,303);
 const authCode=new URL(r.headers.get('location')).searchParams.get('code');assert(authCode);
 r=await fetch(root+'/oauth/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',client_id:client.client_id,code:authCode,redirect_uri:callback,code_verifier:verifier,resource:'https://bridge.vesper.r-vera.com/mcp'})});const token=await r.json();assert.equal(r.status,200);assert(token.access_token);
 r=await fetch(root+'/mcp',{method:'POST',headers:{authorization:'Bearer '+token.access_token,'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})});const body=await r.text();assert.equal(r.status,200);assert(body.includes('read_messages'));assert(body.includes('send_reply'));assert(!body.includes('list_memories'));assert(!body.includes('list_diaries'));
