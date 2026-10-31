@@ -25,6 +25,7 @@ const withAsh=(await createGroup(db,'owner',{name:'Together with Ash',members:[a
 assert.equal(withAsh.includesAsh,true);
 await userGroupSend(db,'owner',{groupId:withAsh.id,id:'wake-ash',text:'Hi Ash'});
 const claim=await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'phone'});assert.equal(claim.job.messageId,'wake-ash');
+assert.equal(claim.job.message.text,'Hi Ash');assert.deepEqual(claim.job.message.attachments,[]);
 await userGroupSend(db,'owner',{groupId:withAsh.id,id:'waiting',text:'Wait for the first turn'});
 assert.equal((await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'mac'})).job,null);
 await assert.rejects(()=>completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-ash',claimant:'mac',text:'No'}));

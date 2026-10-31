@@ -115,7 +115,10 @@ export async function claimGroupAsh(db:DB,owner:string,input:Record<string,unkno
   const leaseUntil=new Date(Date.now()+15*60*1000).toISOString();
   const result=await db.prepare("UPDATE vesper_bridge_ash_jobs SET state='running',claimant=?,lease_until=? WHERE group_id=? AND message_id=? AND (state='pending' OR (state='running' AND lease_until<?)) AND NOT EXISTS (SELECT 1 FROM vesper_bridge_ash_jobs active WHERE active.group_id=? AND active.message_id<>? AND active.state='running' AND active.lease_until>=?)").bind(claimant,leaseUntil,group.id,job.message_id,now,group.id,job.message_id,now).run();
   if(!result.meta.changes)return {job:null};
-  return {job:{messageId:job.message_id,leaseUntil}};
+  const message=await db.prepare('SELECT * FROM vesper_bridge_group_messages WHERE group_id=? AND id=?').bind(group.id,job.message_id).first<GroupMessage>();
+  if(!message)throw new Error('Group message unavailable');
+  const media=await db.prepare('SELECT id,name,mime,size,kind FROM vesper_bridge_group_media WHERE group_id=? AND message_id=? ORDER BY rowid').bind(group.id,job.message_id).all<{id:string;name:string;mime:string;size:number;kind:string}>();
+  return {job:{messageId:job.message_id,leaseUntil,message:{...messageView(message),attachments:media.results.map(m=>({id:m.id,name:m.name,type:m.mime,size:m.size,kind:m.kind}))}}};
 }
 export async function authorizeGroupAshUpload(db:DB,owner:string,groupID:unknown,messageID:unknown,claimant:unknown) {
   await ensureGroups(db);const group=await owned(db,owner,groupID);
