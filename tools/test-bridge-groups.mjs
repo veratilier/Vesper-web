@@ -43,6 +43,11 @@ sqlite.prepare("UPDATE vesper_bridge_ash_jobs SET lease_until='2000-01-01T00:00:
 assert.equal((await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'mac'})).job.messageId,'wake-again');
 await assert.rejects(()=>completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-again',claimant:'phone',text:'stale'}));
 await completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-again',claimant:'mac',text:'new'});
+const groupPhoto=(await uploadGroupMedia(db,bucket,withAsh.id,{owner:'owner'},{name:'photo.png',type:'image/png',bytes:new Uint8Array([3,4])})).attachment;
+await userGroupSend(db,'owner',{groupId:withAsh.id,id:'photo-for-ash',attachments:[groupPhoto.id]});
+const photoJob=(await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'mac'})).job;
+assert.equal(photoJob.message.attachments[0].id,groupPhoto.id);
+await completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'photo-for-ash',claimant:'mac',text:'Saw the photo'});
 await assert.rejects(()=>claimGroupAsh(db,'other',{groupId:withAsh.id,claimant:'spoof'}));
 assert.ok((await userGroupMessages(db,'owner',withAsh.id)).ashConversationId);
 assert.equal((await assistantGroupMessages(db,a.binding.id,withAsh.id)).ashConversationId,undefined);
