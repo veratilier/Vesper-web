@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { createHmac,randomBytes } from 'node:crypto';
+import { createBridge,userSend,revokeBridge } from '../lib/conversation-bridge.ts';
+import { listEvents,subscribe,unsubscribe,deliver } from '../bridge-worker/src/events.ts';
+const sqlite=new DatabaseSync(':memory:');
+class Statement { constructor(sql,values=[]) {this.sql=sql;this.values=values;} bind(...values){return new Statement(this.sql,values);} async run(){return sqlite.prepare(this.sql).run(...this.values);} async first(){return sqlite.prepare(this.sql).get(...this.values)??null;} async all(){return {results:sqlite.prepare(this.sql).all(...this.values)};} }
+const db={prepare:sql=>new Statement(sql),batch:async xs=>Promise.all(xs.map(x=>x.run()))};
+const kv=new Map(), env={DB:db,OAUTH_KV:{put:async(k,v)=>kv.set(k,v),get:async k=>kv.get(k)??null,delete:async k=>kv.delete(k)}};
+const a=await createBridge(db,'owner',{name:'A',provider:'work'}),b=await createBridge(db,'owner',{name:'B',provider:'work'});
+await userSend(db,'owner',{bindingId:a.binding.id,id:'before',text:'old'});
+const secret='whsec_'+randomBytes(32).toString('base64'), request={name:'message.created',arguments:{},delivery:{mode:'webhook',url:'https://connectors.api.openai.com/webhook/mcp-events/fixture',secret}};
+let events=[],failedOnce=false;
+const receiver=async (url,options)=>{
+  const h=options.headers, signature=createHmac('sha256',Buffer.from(secret.slice(6),'base64')).update(`${h['webhook-id']}.${h['webhook-timestamp']}.${options.body}`).digest('base64');
+  assert.equal(h['webhook-signature'],`v1,${signature}`);assert.equal(options.redirect,'error');
+  const data=JSON.parse(options.body); if(data.type==='verification') return Response.json({challenge:data.challenge});
+  events.push(data); if(!failedOnce){failedOnce=true;return new Response('',{status:503});}return new Response('',{status:200});
+};
+assert.equal(listEvents().events[0].name,'message.created');
+await assert.rejects(()=>subscribe(env,a.binding.id,{...request,delivery:{...request.delivery,url:'http://127.0.0.1'}} ,receiver));
+await assert.rejects(()=>subscribe(env,a.binding.id,request,async()=>Response.json({challenge:'wrong'})));
+const sub=await subscribe(env,a.binding.id,request,receiver);assert(sub.id.startsWith('sub_'));
+await userSend(db,'owner',{bindingId:a.binding.id,id:'after',text:'new'});
+await userSend(db,'owner',{bindingId:b.binding.id,id:'other',text:'private B'});
+await deliver(env,receiver);assert.equal(events.length,1);assert.equal(events[0].data.text,'new');const first=events[0].eventId;
+await deliver(env,receiver);assert.equal(events.length,1);
+sqlite.prepare('UPDATE vesper_bridge_deliveries SET next_at=?').run('2000-01-01T00:00:00.000Z');
+await deliver(env,receiver);assert.equal(events.length,2);assert.equal(events[1].eventId,first);
+await deliver(env,receiver);assert.equal(events.length,2);
+await subscribe(env,a.binding.id,request,receiver); await deliver(env,receiver);assert.equal(events.length,2);
+await userSend(db,'owner',{bindingId:a.binding.id,id:'revoked',text:'never sent'});await revokeBridge(db,'owner',a.binding.id);await deliver(env,receiver);assert.equal(events.length,2);
+await unsubscribe(env,a.binding.id,{...request,delivery:{mode:'webhook',url:request.delivery.url}});assert.equal(kv.size,0);
+console.log('event verification, isolated delivery, retries, revocation and unsubscribe passed');
