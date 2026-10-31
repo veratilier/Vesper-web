@@ -1,7 +1,7 @@
 import { appRoute } from '@/lib/backend/http';
 import { optionsResponse } from '@/lib/cors';
 import { getDb } from '@/lib/db';
-import { createGroup, userGroups, userGroupMessages, userGroupSend, userGroupSendAsh } from '@/lib/bridge-groups';
+import { createGroup, userGroups, userGroupMessages, userGroupSend, claimGroupAsh, completeGroupAsh } from '@/lib/bridge-groups';
 export const OPTIONS=optionsResponse;
 const handle=appRoute({service:'bridge-groups',methods:['GET','POST'],errorMessage:'Group unavailable'},async context=>{
   const owner=(await context.scope()).userId,db=getDb();
@@ -9,7 +9,8 @@ const handle=appRoute({service:'bridge-groups',methods:['GET','POST'],errorMessa
   const input=await context.request.json() as Record<string,unknown>;
   if(input.action==='create')return context.json(await createGroup(db,owner,input));
   if(input.action==='send')return context.json(await userGroupSend(db,owner,input));
-  if(input.action==='sendAsh')return context.json(await userGroupSendAsh(db,owner,input));
+  if(input.action==='claimAsh')return context.json(await claimGroupAsh(db,owner,input));
+  if(input.action==='completeAsh')return context.json(await completeGroupAsh(db,owner,input));
   throw new Error('Unsupported action');
 });
 export const GET=handle,POST=handle;

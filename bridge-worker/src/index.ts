@@ -7,6 +7,7 @@ import { listEvents, subscribe, unsubscribe, deliver } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
 import { advertiseEvents } from './discovery';
 import { assistantGroups, assistantGroupMessages, assistantGroupSend } from '../../lib/bridge-groups';
+import { uploadGroupMedia, readGroupMedia, groupMediaChunk } from '../../lib/bridge-group-media';
 import { getBridgeImage, getBridgeMedia, uploadBridgeMedia } from '../../lib/bridge-media';
 
 type Env = { DB:D1Database; MEDIA:R2Bucket; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
@@ -21,8 +22,18 @@ function server(env:Env,bindingID:string) {
     description:'Read messages in a group this connection belongs to. Sender IDs identify group participants.',inputSchema:{groupId:z.string()},annotations:{readOnlyHint:true},
   },async({groupId})=>{try{return response(await assistantGroupMessages(env.DB,bindingID,groupId));}catch{return {...response({error:'Group unavailable'}),isError:true};}});
   mcp.registerTool('send_group_message',{
-    description:'Send a message under your own identity to a group this connection belongs to. Generate a unique id and reuse it on retries.',inputSchema:{groupId:z.string(),id:z.string(),text:z.string()},annotations:{readOnlyHint:false,idempotentHint:true},
+    description:'Send a message under your own identity to a group this connection belongs to. Upload attachments first; reuse the same unique id on retries.',inputSchema:{groupId:z.string(),id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{readOnlyHint:false,idempotentHint:true},
   },async input=>{try{return response(await assistantGroupSend(env.DB,bindingID,input));}catch{return {...response({error:'Group unavailable'}),isError:true};}});
+  mcp.registerTool('read_group_attachment',{
+    description:'Read an attachment from a group you belong to. Small images are returned directly; other files use base64 chunks.',inputSchema:{groupId:z.string(),id:z.string(),offset:z.number().int().min(0).default(0)},annotations:{readOnlyHint:true},
+  },async({groupId,id,offset})=>{try{
+    const value=await readGroupMedia(env.DB,env.MEDIA,groupId,id,{bindingID});
+    if(offset===0&&['image/png','image/jpeg','image/gif','image/webp'].includes(value.attachment.type)&&value.attachment.size<=4*1024*1024){const bytes=new Uint8Array(await value.object.arrayBuffer());let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));return {content:[{type:'image' as const,data:btoa(raw),mimeType:value.attachment.type},{type:'text' as const,text:JSON.stringify(value.attachment)}]};}
+    return response(await groupMediaChunk(env.DB,env.MEDIA,groupId,id,{bindingID},offset));
+  }catch{return {...response({error:'Attachment unavailable'}),isError:true};}});
+  mcp.registerTool('upload_group_attachment',{
+    description:'Stage genuine file bytes for a message in a group you belong to; maximum 8 MB.',inputSchema:{groupId:z.string(),name:z.string().min(1).max(160),mimeType:z.string().max(128),base64:z.string().max(12*1024*1024),kind:z.enum(['file','sticker']).default('file')},annotations:{readOnlyHint:false},
+  },async input=>{try{if(!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64)||input.base64.length%4!==0)throw new Error('Invalid base64');const raw=atob(input.base64);if(raw.length>8*1024*1024)throw new Error('Too large');return response(await uploadGroupMedia(env.DB,env.MEDIA,input.groupId,{bindingID},{name:input.name,type:input.mimeType,bytes:Uint8Array.from(raw,c=>c.charCodeAt(0)),kind:input.kind}));}catch{return {...response({error:'Attachment upload unavailable'}),isError:true};}});
   mcp.registerTool('read_messages',{
     description:'Read this connection’s recent and pending messages. Attachments have private IDs; use read_attachment to view images or retrieve file bytes. No other conversations are accessible.',
     inputSchema:{},annotations:{readOnlyHint:true},
