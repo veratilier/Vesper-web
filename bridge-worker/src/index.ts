@@ -21,14 +21,14 @@ function server(env:Env,bindingID:string) {
   });
   mcp.registerTool('send_reply',{
     description:'Send a reply to a pending user message. Optional attachments must first be uploaded with upload_attachment. Generate a unique id and reuse it unchanged on retries.',
-    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
   },async input=>{
     try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
     catch { return {...response({error:'Reply unavailable'}),isError:true}; }
   });
   mcp.registerTool('send_message',{
     description:'Send a new message to the user in this connection without replying to a pending message. Choose a unique id and reuse it on retries. Optional attachments must first be uploaded with upload_attachment.',
-    inputSchema:{id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+    inputSchema:{id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
   },async input=>{
     try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
     catch { return {...response({error:'Message unavailable'}),isError:true}; }
