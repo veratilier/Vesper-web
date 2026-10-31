@@ -8,8 +8,9 @@ const NAME='message.created', KEY='vesper-chat-event:';
 const schema=z.object({name:z.literal(NAME),arguments:z.object({}).strict(),delivery:z.object({mode:z.literal('webhook'),url:z.string().max(2048),secret:z.string().optional()}).passthrough(),ttlMs:z.number().positive().nullable().optional()}).passthrough();
 const encoder=new TextEncoder();
 export class EventCallbackError extends Error {
-  readonly reason:'timeout'|'connection_failed'|'http_error'|'challenge_failed';
-  constructor(reason:'timeout'|'connection_failed'|'http_error'|'challenge_failed') {super('callback_failed');this.reason=reason;}
+  readonly reason:'timeout'|'connection_failed'|'signing_failed'|'http_error'|'challenge_failed';
+  readonly detail:string;
+  constructor(reason:'timeout'|'connection_failed'|'signing_failed'|'http_error'|'challenge_failed',detail='') {super('callback_failed');this.reason=reason;this.detail=detail;}
 }
 /** Only coarse failure classes and trusted provider hostnames may be logged. */
 export function eventFailureDiagnostic(error:unknown,input:unknown) {
@@ -18,7 +19,7 @@ export function eventFailureDiagnostic(error:unknown,input:unknown) {
   try { const host=new URL(String(value.delivery?.url||'')).hostname.toLowerCase();callbackHost=host==='openai.com'||host.endsWith('.openai.com')||host==='chatgpt.com'||host.endsWith('.chatgpt.com')?host:'other'; } catch { /* no raw URLs in logs */ }
   const reason=error instanceof EventCallbackError?error.reason:error instanceof z.ZodError?'invalid_schema':error instanceof Error&&['invalid_url','invalid_secret','connection_unavailable'].includes(error.message)?error.message:'internal_error';
   const fields=error instanceof z.ZodError?error.issues.map(issue=>issue.path.map(String).join('.')).slice(0,8):[];
-  return {reason,callbackHost,fields};
+  return {reason,callbackHost,fields,...(error instanceof EventCallbackError&&error.detail?{detail:error.detail}:{})};
 }
 async function digest(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(s))),x=>x.toString(16).padStart(2,'0')).join('');}
 function destination(value:string){
@@ -41,10 +42,18 @@ async function ensure(env:Env){await env.DB.batch([
 ]);}
 async function signed(url:string,secret:string,id:string,subscriptionID:string,body:unknown,fetcher:typeof fetch=fetch) {
   const payload=JSON.stringify(body), timestamp=String(Math.floor(Date.now()/1000));
-  const key=await crypto.subtle.importKey('raw',decodeSecret(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
-  const signature=new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(`${id}.${timestamp}.${payload}`)));
+  let signature:Uint8Array;
+  try {const key=await crypto.subtle.importKey('raw',decodeSecret(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);signature=new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(`${id}.${timestamp}.${payload}`)));}
+  catch {throw new EventCallbackError('signing_failed');}
   const b64=btoa(String.fromCharCode(...signature));
-  return fetcher(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json','webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${b64}`,'X-MCP-Subscription-Id':subscriptionID},body:payload});
+  try {return await fetcher(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json','webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${b64}`,'X-MCP-Subscription-Id':subscriptionID},body:payload});}
+  catch(error) {
+    const message=error instanceof Error?error.message.toLowerCase():'';
+    const tags=['dns','certificate','tls','redirect','timeout','public','private','network','fetch','socket','blocked','invocation','receiver'].filter(tag=>message.includes(tag));
+    const errorCode=message.match(/\b10\d{2}\b/)?.[0];if(errorCode)tags.push('code_'+errorCode);
+    const type=error instanceof Error&&['TypeError','AbortError','TimeoutError','Error'].includes(error.name)?error.name:'unknown';
+    throw new EventCallbackError(type==='TimeoutError'?'timeout':'connection_failed',[type,...tags].join(','));
+  }
 }
 const definition={name:NAME,description:'A new user message in this authorized Vesper conversation or a group this connection belongs to. When group_id is present, read and reply using the group tools.',delivery:['webhook'],inputSchema:{type:'object',properties:{},additionalProperties:false},payloadSchema:{type:'object',properties:{message_id:{type:'string'},text:{type:'string'},group_id:{type:'string'}},required:['message_id','text'],additionalProperties:false}};
 export function listEvents(){return {events:[definition]};}
@@ -57,7 +66,7 @@ export async function subscribe(env:Env,bindingID:string,input:unknown,fetcher:t
   const id='sub_'+(await digest(`${bindingID}\n${NAME}\n${url}`)).slice(0,48), challenge=crypto.randomUUID()+crypto.randomUUID();
   let verified:Response;
   try { verified=await signed(url,secret,'verify_'+crypto.randomUUID(),id,{type:'verification',challenge},fetcher); }
-  catch(error) { throw new EventCallbackError(error instanceof Error&&error.name==='TimeoutError'?'timeout':'connection_failed'); }
+  catch(error) { if(error instanceof EventCallbackError)throw error;throw new EventCallbackError('connection_failed'); }
   if(!verified.ok) throw new EventCallbackError('http_error');
   const json=await verified.json().catch(()=>null) as {challenge?:unknown}|null;
   if(!json||typeof json.challenge!=='string'||await digest(json.challenge)!==await digest(challenge)) throw new EventCallbackError('challenge_failed');
