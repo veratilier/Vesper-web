@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
 import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../../lib/conversation-bridge';
-import { listEvents, subscribe, unsubscribe, deliver } from './events';
+import { listEvents, subscribe, unsubscribe, deliver, eventFailureDiagnostic } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
 import { advertiseEvents } from './discovery';
 import { assistantGroups, assistantGroupMessages, assistantGroupSend } from '../../lib/bridge-groups';
@@ -92,6 +92,7 @@ async function handleMcp(request:Request,env:Env,ctx:ExecutionContext,bindingID:
       else return Response.json({jsonrpc:'2.0',id:packet.id??null,error:{code:-32601,message:'Method not found'}});
       return Response.json({jsonrpc:'2.0',id:packet.id??null,result});
     } catch(error) {
+      console.warn('vesper_event_request_failed',eventFailureDiagnostic(error,packet.params));
       const callback=error instanceof Error&&error.message==='callback_failed';
       return Response.json({jsonrpc:'2.0',id:packet.id??null,error:{code:callback?-32015:-32602,message:callback?'Callback endpoint verification failed':'Invalid event request',...(callback?{data:{reason:'challenge_failed'}}:{})}});
     }

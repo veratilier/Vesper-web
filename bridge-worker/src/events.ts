@@ -7,6 +7,19 @@ type Delivery=Sub & {message_id:string;message_text:string;message_created_at:st
 const NAME='message.created', KEY='vesper-chat-event:';
 const schema=z.object({name:z.literal(NAME),arguments:z.object({}).strict(),delivery:z.object({mode:z.literal('webhook'),url:z.string().max(2048),secret:z.string().optional()}).passthrough(),ttlMs:z.number().positive().nullable().optional()}).passthrough();
 const encoder=new TextEncoder();
+export class EventCallbackError extends Error {
+  readonly reason:'timeout'|'connection_failed'|'http_error'|'challenge_failed';
+  constructor(reason:'timeout'|'connection_failed'|'http_error'|'challenge_failed') {super('callback_failed');this.reason=reason;}
+}
+/** Only coarse failure classes and trusted provider hostnames may be logged. */
+export function eventFailureDiagnostic(error:unknown,input:unknown) {
+  const value=input&&typeof input==='object'?input as {delivery?:{url?:unknown}}:{};
+  let callbackHost='unknown';
+  try { const host=new URL(String(value.delivery?.url||'')).hostname.toLowerCase();callbackHost=host==='openai.com'||host.endsWith('.openai.com')||host==='chatgpt.com'||host.endsWith('.chatgpt.com')?host:'other'; } catch { /* no raw URLs in logs */ }
+  const reason=error instanceof EventCallbackError?error.reason:error instanceof z.ZodError?'invalid_schema':error instanceof Error&&['invalid_url','invalid_secret','connection_unavailable'].includes(error.message)?error.message:'internal_error';
+  const fields=error instanceof z.ZodError?error.issues.map(issue=>issue.path.map(String).join('.')).slice(0,8):[];
+  return {reason,callbackHost,fields};
+}
 async function digest(s:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(s))),x=>x.toString(16).padStart(2,'0')).join('');}
 function destination(value:string){
   const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.hash||u.port&&u.port!=='443') throw new Error('invalid_url');
@@ -44,10 +57,10 @@ export async function subscribe(env:Env,bindingID:string,input:unknown,fetcher:t
   const id='sub_'+(await digest(`${bindingID}\n${NAME}\n${url}`)).slice(0,48), challenge=crypto.randomUUID()+crypto.randomUUID();
   let verified:Response;
   try { verified=await signed(url,secret,'verify_'+crypto.randomUUID(),id,{type:'verification',challenge},fetcher); }
-  catch { throw new Error('callback_failed'); }
-  if(!verified.ok) throw new Error('callback_failed');
+  catch(error) { throw new EventCallbackError(error instanceof Error&&error.name==='TimeoutError'?'timeout':'connection_failed'); }
+  if(!verified.ok) throw new EventCallbackError('http_error');
   const json=await verified.json().catch(()=>null) as {challenge?:unknown}|null;
-  if(!json||typeof json.challenge!=='string'||await digest(json.challenge)!==await digest(challenge)) throw new Error('callback_failed');
+  if(!json||typeof json.challenge!=='string'||await digest(json.challenge)!==await digest(challenge)) throw new EventCallbackError('challenge_failed');
   const existing=await env.DB.prepare('SELECT start_rowid FROM vesper_bridge_subscriptions WHERE id=? AND binding_id=?').bind(id,bindingID).first<{start_rowid:number}>();
   const latest=await env.DB.prepare('SELECT COALESCE(MAX(m.rowid),0) AS n FROM vesper_bridge_messages m WHERE m.binding_id=? AND NOT EXISTS (SELECT 1 FROM vesper_bridge_inflight f WHERE f.binding_id=m.binding_id AND f.message_id=m.id AND f.ready=0)').bind(bindingID).first<{n:number}>();
   const ttl=Math.max(60000,Math.min(p.ttlMs??86400000,86400000));

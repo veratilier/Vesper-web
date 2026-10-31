@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { createHmac,randomBytes } from 'node:crypto';
 import { createBridge,userSend,revokeBridge } from '../lib/conversation-bridge.ts';
-import { listEvents,subscribe,unsubscribe,deliver } from '../bridge-worker/src/events.ts';
+import { listEvents,subscribe,unsubscribe,deliver,eventFailureDiagnostic,EventCallbackError } from '../bridge-worker/src/events.ts';
 import { createGroup,userGroupSend,assistantGroupSend } from '../lib/bridge-groups.ts';
 const sqlite=new DatabaseSync(':memory:');
 class Statement { constructor(sql,values=[]) {this.sql=sql;this.values=values;} bind(...values){return new Statement(this.sql,values);} async run(){return sqlite.prepare(this.sql).run(...this.values);} async first(){return sqlite.prepare(this.sql).get(...this.values)??null;} async all(){return {results:sqlite.prepare(this.sql).all(...this.values)};} }
@@ -11,6 +11,8 @@ const kv=new Map(), env={DB:db,OAUTH_KV:{put:async(k,v)=>kv.set(k,v),get:async k
 const a=await createBridge(db,'owner',{name:'A',provider:'work'}),b=await createBridge(db,'owner',{name:'B',provider:'work'});
 await userSend(db,'owner',{bindingId:a.binding.id,id:'before',text:'old'});
 const secret='whsec_'+randomBytes(32).toString('base64'), request={name:'message.created',arguments:{},delivery:{mode:'webhook',url:'https://connectors.api.openai.com/webhook/mcp-events/fixture',secret}};
+assert.deepEqual(eventFailureDiagnostic(new EventCallbackError('challenge_failed'),request),{reason:'challenge_failed',callbackHost:'connectors.api.openai.com',fields:[]});
+assert.equal(eventFailureDiagnostic(new Error('invalid_url'),{delivery:{url:'https://secret-user.example/private-token'}}).callbackHost,'other');
 let events=[],failedOnce=false;
 const receiver=async (url,options)=>{
   const h=options.headers, signature=createHmac('sha256',Buffer.from(secret.slice(6),'base64')).update(`${h['webhook-id']}.${h['webhook-timestamp']}.${options.body}`).digest('base64');
