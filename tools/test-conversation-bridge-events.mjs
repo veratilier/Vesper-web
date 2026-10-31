@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHmac,randomBytes } from 'node:crypto';
 import { createBridge,userSend,revokeBridge } from '../lib/conversation-bridge.ts';
 import { listEvents,subscribe,unsubscribe,deliver } from '../bridge-worker/src/events.ts';
+import { createGroup,userGroupSend,assistantGroupSend } from '../lib/bridge-groups.ts';
 const sqlite=new DatabaseSync(':memory:');
 class Statement { constructor(sql,values=[]) {this.sql=sql;this.values=values;} bind(...values){return new Statement(this.sql,values);} async run(){return sqlite.prepare(this.sql).run(...this.values);} async first(){return sqlite.prepare(this.sql).get(...this.values)??null;} async all(){return {results:sqlite.prepare(this.sql).all(...this.values)};} }
 const db={prepare:sql=>new Statement(sql),batch:async xs=>Promise.all(xs.map(x=>x.run()))};
@@ -29,6 +30,11 @@ sqlite.prepare('UPDATE vesper_bridge_deliveries SET next_at=?').run('2000-01-01T
 await deliver(env,receiver);assert.equal(events.length,2);assert.equal(events[1].eventId,first);
 await deliver(env,receiver);assert.equal(events.length,2);
 await subscribe(env,a.binding.id,request,receiver); await deliver(env,receiver);assert.equal(events.length,2);
-await userSend(db,'owner',{bindingId:a.binding.id,id:'revoked',text:'never sent'});await revokeBridge(db,'owner',a.binding.id);await deliver(env,receiver);assert.equal(events.length,2);
+const {group}=await createGroup(db,'owner',{name:'Group',members:[a.binding.id,b.binding.id]});
+await userGroupSend(db,'owner',{groupId:group.id,id:'group-message',text:'hello group'});
+await assistantGroupSend(db,b.binding.id,{groupId:group.id,id:'group-reply',text:'a reply'});
+await deliver(env,receiver);assert.equal(events.length,3);assert.equal(events[2].data.group_id,group.id);assert.equal(events[2].data.text,'hello group');
+await deliver(env,receiver);assert.equal(events.length,3);
+await userSend(db,'owner',{bindingId:a.binding.id,id:'revoked',text:'never sent'});await revokeBridge(db,'owner',a.binding.id);await deliver(env,receiver);assert.equal(events.length,3);
 await unsubscribe(env,a.binding.id,{...request,delivery:{mode:'webhook',url:request.delivery.url}});assert.equal(kv.size,0);
 console.log('event verification, isolated delivery, retries, revocation and unsubscribe passed');

@@ -6,6 +6,7 @@ import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../
 import { listEvents, subscribe, unsubscribe, deliver } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
 import { advertiseEvents } from './discovery';
+import { assistantGroups, assistantGroupMessages, assistantGroupSend } from '../../lib/bridge-groups';
 import { getBridgeImage, getBridgeMedia, uploadBridgeMedia } from '../../lib/bridge-media';
 
 type Env = { DB:D1Database; MEDIA:R2Bucket; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
@@ -13,6 +14,15 @@ const ORIGIN='https://bridge.vesper.r-vera.com', SCOPE='conversation:access';
 const response=(value:unknown)=>({content:[{type:'text' as const,text:JSON.stringify(value)}]});
 function server(env:Env,bindingID:string) {
   const mcp=new McpServer({name:'Vesper Chat',version:'1.0.0'});
+  mcp.registerTool('list_groups',{
+    description:'List only group conversations this connection belongs to.',inputSchema:{},annotations:{readOnlyHint:true},
+  },async()=>{try{return response(await assistantGroups(env.DB,bindingID));}catch{return {...response({error:'Groups unavailable'}),isError:true};}});
+  mcp.registerTool('read_group_messages',{
+    description:'Read messages in a group this connection belongs to. Sender IDs identify group participants.',inputSchema:{groupId:z.string()},annotations:{readOnlyHint:true},
+  },async({groupId})=>{try{return response(await assistantGroupMessages(env.DB,bindingID,groupId));}catch{return {...response({error:'Group unavailable'}),isError:true};}});
+  mcp.registerTool('send_group_message',{
+    description:'Send a message under your own identity to a group this connection belongs to. Generate a unique id and reuse it on retries.',inputSchema:{groupId:z.string(),id:z.string(),text:z.string()},annotations:{readOnlyHint:false,idempotentHint:true},
+  },async input=>{try{return response(await assistantGroupSend(env.DB,bindingID,input));}catch{return {...response({error:'Group unavailable'}),isError:true};}});
   mcp.registerTool('read_messages',{
     description:'Read this connection’s recent and pending messages. Attachments have private IDs; use read_attachment to view images or retrieve file bytes. No other conversations are accessible.',
     inputSchema:{},annotations:{readOnlyHint:true},

@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {createBridge,revokeBridge} from '../lib/conversation-bridge.ts';
+import {createGroup,userGroups,assistantGroups,userGroupMessages,userGroupSend,userGroupSendAsh,assistantGroupMessages,assistantGroupSend} from '../lib/bridge-groups.ts';
+const sqlite=new DatabaseSync(':memory:');
+class S{constructor(q,v=[]){this.q=q;this.v=v}bind(...v){return new S(this.q,v)}async run(){const r=sqlite.prepare(this.q).run(...this.v);return {meta:{changes:r.changes}}}async first(){return sqlite.prepare(this.q).get(...this.v)??null}async all(){return {results:sqlite.prepare(this.q).all(...this.v)}}}
+const db={prepare:q=>new S(q),batch:async xs=>{const out=[];for(const x of xs)out.push(await x.run());return out}};
+const a=await createBridge(db,'owner',{name:'A',provider:'work'}),b=await createBridge(db,'owner',{name:'B',provider:'muse'}),c=await createBridge(db,'other',{name:'C',provider:'work'});
+await assert.rejects(()=>createGroup(db,'owner',{name:'No',members:[c.binding.id]}));
+const {group}=await createGroup(db,'owner',{name:'Together',members:[a.binding.id,b.binding.id]});
+await assert.rejects(()=>userGroupSendAsh(db,'owner',{groupId:group.id,id:'ash-msg',text:'No Ash in group'}));
+const withAsh=(await createGroup(db,'owner',{name:'Together with Ash',members:[a.binding.id],includeAsh:true})).group;
+assert.equal(withAsh.includesAsh,true);
+await userGroupSendAsh(db,'owner',{groupId:withAsh.id,id:'ash-msg',text:'Hello'});
+await assert.rejects(()=>userGroupSendAsh(db,'other',{groupId:withAsh.id,id:'spoof',text:'Hello'}));
+assert.ok((await userGroupMessages(db,'owner',withAsh.id)).ashConversationId);
+assert.equal((await assistantGroupMessages(db,a.binding.id,withAsh.id)).ashConversationId,undefined);
+assert.equal((await userGroups(db,'owner')).groups.length,2);assert.equal((await assistantGroups(db,c.binding.id)).groups.length,0);
+await assert.rejects(()=>assistantGroupMessages(db,c.binding.id,group.id));await assert.rejects(()=>userGroupMessages(db,'other',group.id));
+await userGroupSend(db,'owner',{groupId:group.id,id:'u1',text:'Hello group'});
+await assistantGroupSend(db,a.binding.id,{groupId:group.id,id:'a1',text:'Hello'});
+await assistantGroupSend(db,a.binding.id,{groupId:group.id,id:'a1',text:'Hello'});
+await assert.rejects(()=>assistantGroupSend(db,b.binding.id,{groupId:group.id,id:'a1',text:'Spoof'}));
+const history=await assistantGroupMessages(db,b.binding.id,group.id);assert.equal(history.messages.length,2);assert.equal(history.messages[1].senderId,a.binding.id);
+await revokeBridge(db,'owner',a.binding.id);await assert.rejects(()=>assistantGroupMessages(db,a.binding.id,group.id));
+console.log('group membership, isolation, authorship and idempotency passed');

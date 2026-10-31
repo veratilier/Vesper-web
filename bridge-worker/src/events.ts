@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ensureBridge } from '../../lib/conversation-bridge.ts';
+import { ensureGroups } from '../../lib/bridge-groups.ts';
 type Env={DB:D1Database; OAUTH_KV:KVNamespace};
 type Sub={id:string;binding_id:string;url:string;expires_at:string;start_rowid:number};
 type Delivery=Sub & {message_id:string;message_text:string;message_created_at:string;attempts:number|null};
@@ -23,6 +24,7 @@ function decodeSecret(value:unknown):Uint8Array<ArrayBuffer> {
 async function ensure(env:Env){await env.DB.batch([
   env.DB.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_subscriptions (id TEXT PRIMARY KEY, binding_id TEXT NOT NULL, url TEXT NOT NULL, expires_at TEXT NOT NULL, start_rowid INTEGER NOT NULL)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_deliveries (subscription_id TEXT NOT NULL, message_id TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at TEXT NOT NULL, status TEXT NOT NULL, PRIMARY KEY(subscription_id,message_id))'),
+  env.DB.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_group_subscription_start (subscription_id TEXT PRIMARY KEY, start_rowid INTEGER NOT NULL)'),
 ]);}
 async function signed(url:string,secret:string,id:string,subscriptionID:string,body:unknown,fetcher:typeof fetch=fetch) {
   const payload=JSON.stringify(body), timestamp=String(Math.floor(Date.now()/1000));
@@ -31,14 +33,14 @@ async function signed(url:string,secret:string,id:string,subscriptionID:string,b
   const b64=btoa(String.fromCharCode(...signature));
   return fetcher(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json','webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${b64}`,'X-MCP-Subscription-Id':subscriptionID},body:payload});
 }
-const definition={name:NAME,description:'A new user message in this authorized Vesper conversation.',delivery:['webhook'],inputSchema:{type:'object',properties:{},additionalProperties:false},payloadSchema:{type:'object',properties:{message_id:{type:'string'},text:{type:'string'}},required:['message_id','text'],additionalProperties:false}};
+const definition={name:NAME,description:'A new user message in this authorized Vesper conversation or a group this connection belongs to. When group_id is present, read and reply using the group tools.',delivery:['webhook'],inputSchema:{type:'object',properties:{},additionalProperties:false},payloadSchema:{type:'object',properties:{message_id:{type:'string'},text:{type:'string'},group_id:{type:'string'}},required:['message_id','text'],additionalProperties:false}};
 export function listEvents(){return {events:[definition]};}
 export async function subscribe(env:Env,bindingID:string,input:unknown,fetcher:typeof fetch=fetch){
   const p=schema.parse(input), url=destination(p.delivery.url),secret=p.delivery.secret;
   decodeSecret(secret);if(typeof secret!=='string') throw new Error('invalid_secret');
   const active=await env.DB.prepare('SELECT id FROM vesper_bridge_bindings WHERE id=? AND revoked=0').bind(bindingID).first();
   if(!active) throw new Error('connection_unavailable');
-  await ensure(env);
+  await ensure(env);await ensureGroups(env.DB);
   const id='sub_'+(await digest(`${bindingID}\n${NAME}\n${url}`)).slice(0,48), challenge=crypto.randomUUID()+crypto.randomUUID();
   let verified:Response;
   try { verified=await signed(url,secret,'verify_'+crypto.randomUUID(),id,{type:'verification',challenge},fetcher); }
@@ -53,15 +55,19 @@ export async function subscribe(env:Env,bindingID:string,input:unknown,fetcher:t
   await env.OAUTH_KV.put(KEY+id,secret,{expirationTtl:Math.ceil(ttl/1000)+300});
   await env.DB.prepare('INSERT INTO vesper_bridge_subscriptions(id,binding_id,url,expires_at,start_rowid) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET url=excluded.url,expires_at=excluded.expires_at')
     .bind(id,bindingID,url,expiresAt,existing?.start_rowid??latest?.n??0).run();
+  const groupLatest=await env.DB.prepare('SELECT COALESCE(MAX(rowid),0) AS n FROM vesper_bridge_group_messages').first<{n:number}>();
+  await env.DB.prepare('INSERT INTO vesper_bridge_group_subscription_start(subscription_id,start_rowid) VALUES(?,?) ON CONFLICT DO NOTHING').bind(id,groupLatest?.n??0).run();
   return {id,refreshBefore:expiresAt,cursor:null,truncated:false};
 }
 export async function unsubscribe(env:Env,bindingID:string,input:unknown){
   const p=schema.parse(input),url=destination(p.delivery.url),id='sub_'+(await digest(`${bindingID}\n${NAME}\n${url}`)).slice(0,48);
   await ensure(env); await env.DB.prepare('DELETE FROM vesper_bridge_subscriptions WHERE id=? AND binding_id=?').bind(id,bindingID).run();
+  await env.DB.prepare('DELETE FROM vesper_bridge_group_subscription_start WHERE subscription_id=?').bind(id).run();
   await env.OAUTH_KV.delete(KEY+id); return {};
 }
 export async function deliver(env:Env,fetcher:typeof fetch=fetch){
-  await ensureBridge(env.DB);await ensure(env);const now=new Date().toISOString();
+  await ensureBridge(env.DB);await ensureGroups(env.DB);await ensure(env);const now=new Date().toISOString();
+  await env.DB.prepare('INSERT OR IGNORE INTO vesper_bridge_group_subscription_start(subscription_id,start_rowid) SELECT id,0 FROM vesper_bridge_subscriptions').run();
   const {results}=await env.DB.prepare(`SELECT s.*,m.id AS message_id,m.text AS message_text,m.created_at AS message_created_at,d.attempts
     FROM vesper_bridge_subscriptions s JOIN vesper_bridge_bindings b ON b.id=s.binding_id AND b.revoked=0
     JOIN vesper_bridge_messages m ON m.binding_id=s.binding_id AND m.sender='user' AND m.rowid>s.start_rowid
@@ -80,5 +86,22 @@ export async function deliver(env:Env,fetcher:typeof fetch=fetch){
     const next=new Date(Date.now()+Math.min(3600000,60000*2**(attempts-1))).toISOString();
     await env.DB.prepare('INSERT INTO vesper_bridge_deliveries(subscription_id,message_id,attempts,next_at,status) VALUES(?,?,?,?,?) ON CONFLICT(subscription_id,message_id) DO UPDATE SET attempts=excluded.attempts,next_at=excluded.next_at,status=excluded.status')
       .bind(item.id,item.message_id,attempts,next,status).run();
+  }
+  const groupResults=await env.DB.prepare(`SELECT s.*,g.id AS group_id,m.id AS message_id,m.text AS message_text,m.created_at AS message_created_at,d.attempts
+    FROM vesper_bridge_subscriptions s JOIN vesper_bridge_bindings b ON b.id=s.binding_id AND b.revoked=0
+    JOIN vesper_bridge_group_subscription_start gs ON gs.subscription_id=s.id
+    JOIN vesper_bridge_group_inbox i ON i.binding_id=s.binding_id
+    JOIN vesper_bridge_groups g ON g.id=i.group_id
+    JOIN vesper_bridge_group_members member ON member.group_id=g.id AND member.binding_id=s.binding_id
+    JOIN vesper_bridge_group_messages m ON m.group_id=i.group_id AND m.id=i.message_id AND m.rowid>gs.start_rowid
+    LEFT JOIN vesper_bridge_deliveries d ON d.subscription_id=s.id AND d.message_id=('group_'||g.id||'_'||m.id)
+    WHERE s.expires_at>? AND (d.status IS NULL OR (d.status='retry' AND d.next_at<=?)) ORDER BY m.rowid LIMIT 50`).bind(now,now).all<Delivery & {group_id:string}>();
+  for(const item of groupResults.results) {
+    const secret=await env.OAUTH_KV.get(KEY+item.id);if(!secret)continue;
+    const deliveryID='group_'+item.group_id+'_'+item.message_id,eventId='evt_'+(await digest(`${item.id}\n${deliveryID}`)).slice(0,48);
+    let status:'done'|'retry'|'terminal'='retry';const attempts=(item.attempts??0)+1;
+    try {const r=await signed(item.url,secret,eventId,item.id,{eventId,name:NAME,timestamp:item.message_created_at,data:{message_id:item.message_id,text:item.message_text,group_id:item.group_id},cursor:null},fetcher);if(r.ok)status='done';else if(r.status===410||r.status===413||attempts>=5)status='terminal';}catch{if(attempts>=5)status='terminal';}
+    const next=new Date(Date.now()+Math.min(3600000,60000*2**(attempts-1))).toISOString();
+    await env.DB.prepare('INSERT INTO vesper_bridge_deliveries(subscription_id,message_id,attempts,next_at,status) VALUES(?,?,?,?,?) ON CONFLICT(subscription_id,message_id) DO UPDATE SET attempts=excluded.attempts,next_at=excluded.next_at,status=excluded.status').bind(item.id,deliveryID,attempts,next,status).run();
   }
 }
