@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 if(!process.env.BRIDGE_TEST_URL) { console.log('OAuth Worker integration skipped: no local test server configured'); process.exit(0); }
 const root=process.env.BRIDGE_TEST_URL;
-const callback='https://chatgpt.com/connector_platform_oauth_redirect', code='vb_'+'A'.repeat(43);
+const callback=process.env.BRIDGE_TEST_CLIENT==='muse'?'https://agent.meta.ai/api/hatch/oauth/callback':'https://chatgpt.com/connector_platform_oauth_redirect', code='vb_'+'A'.repeat(43);
 let r=await fetch(root+'/oauth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_name:'Local fixture',redirect_uris:[callback],grant_types:['authorization_code','refresh_token'],response_types:['code'],token_endpoint_auth_method:'none'})});
 let client=await r.json();assert.equal(r.status,201);assert(client.client_id);
 const verifier=crypto.randomBytes(32).toString('base64url'), challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
