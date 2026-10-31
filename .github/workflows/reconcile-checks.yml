@@ -33,6 +33,7 @@ jobs:
       - run: node --experimental-strip-types tools/test-conversation-bridge.mjs
       - run: node --experimental-strip-types tools/test-bridge-media.mjs
       - run: node --experimental-strip-types tools/test-conversation-bridge-events.mjs
+      - run: node --experimental-strip-types tools/test-bridge-discovery.mjs
       - run: node --experimental-strip-types tools/test-bridge-consent.mjs
       - run: node tools/test-jottings.mjs
       - run: node tools/test-letters.mjs

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../../lib/conversation-bridge';
 import { listEvents, subscribe, unsubscribe, deliver } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
+import { advertiseEvents } from './discovery';
 import { getBridgeImage, getBridgeMedia, uploadBridgeMedia } from '../../lib/bridge-media';
 
 type Env = { DB:D1Database; MEDIA:R2Bucket; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
@@ -75,12 +76,10 @@ async function handleMcp(request:Request,env:Env,ctx:ExecutionContext,bindingID:
     }
   }
   const result=await createMcpHandler(()=>server(env,bindingID),{route:'/mcp'})(request,env,ctx);
-  if(packet?.method!=='initialize'||!result.ok) return result;
+  if(!['initialize','server/discover'].includes(packet?.method||'')||!result.ok) return result;
   const original=await result.text();
-  const update=(value:string)=>{const p=JSON.parse(value);p.result.capabilities.events={};return JSON.stringify(p);};
   try {
-    const body=(result.headers.get('content-type')||'').includes('text/event-stream')
-      ? original.replace(/^(data:\s*)(.+)$/m,(_,prefix,value)=>prefix+update(value)) : update(original);
+    const body=advertiseEvents(original,result.headers.get('content-type')||'');
     const headers=new Headers(result.headers);headers.delete('content-length');return new Response(body,{status:result.status,headers});
   } catch { return new Response(original,{status:result.status,headers:result.headers}); }
 }
