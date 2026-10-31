@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../../lib/conversation-bridge';
 import { listEvents, subscribe, unsubscribe, deliver } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
+import { advertiseEvents } from './discovery';
 import { getBridgeImage, getBridgeMedia, uploadBridgeMedia } from '../../lib/bridge-media';
 
 type Env = { DB:D1Database; MEDIA:R2Bucket; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
@@ -21,14 +22,14 @@ function server(env:Env,bindingID:string) {
   });
   mcp.registerTool('send_reply',{
     description:'Send a reply to a pending user message. Optional attachments must first be uploaded with upload_attachment. Generate a unique id and reuse it unchanged on retries.',
-    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
   },async input=>{
     try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
     catch { return {...response({error:'Reply unavailable'}),isError:true}; }
   });
   mcp.registerTool('send_message',{
     description:'Send a new message to the user in this connection without replying to a pending message. Choose a unique id and reuse it on retries. Optional attachments must first be uploaded with upload_attachment.',
-    inputSchema:{id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+    inputSchema:{id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
   },async input=>{
     try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
     catch { return {...response({error:'Message unavailable'}),isError:true}; }
@@ -75,12 +76,10 @@ async function handleMcp(request:Request,env:Env,ctx:ExecutionContext,bindingID:
     }
   }
   const result=await createMcpHandler(()=>server(env,bindingID),{route:'/mcp'})(request,env,ctx);
-  if(packet?.method!=='initialize'||!result.ok) return result;
+  if(!['initialize','server/discover'].includes(packet?.method||'')||!result.ok) return result;
   const original=await result.text();
-  const update=(value:string)=>{const p=JSON.parse(value);p.result.capabilities.events={};return JSON.stringify(p);};
   try {
-    const body=(result.headers.get('content-type')||'').includes('text/event-stream')
-      ? original.replace(/^(data:\s*)(.+)$/m,(_,prefix,value)=>prefix+update(value)) : update(original);
+    const body=advertiseEvents(original,result.headers.get('content-type')||'');
     const headers=new Headers(result.headers);headers.delete('content-length');return new Response(body,{status:result.status,headers});
   } catch { return new Response(original,{status:result.status,headers:result.headers}); }
 }
