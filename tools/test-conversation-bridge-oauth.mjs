@@ -1,7 +1,8 @@
 // Run against the isolated local Worker after seeding its D1 with the disposable fixture code.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-const root=process.env.BRIDGE_TEST_URL || 'http://127.0.0.1:18788';
+if(!process.env.BRIDGE_TEST_URL) { console.log('OAuth Worker integration skipped: no local test server configured'); process.exit(0); }
+const root=process.env.BRIDGE_TEST_URL;
 const callback='https://chatgpt.com/connector_platform_oauth_redirect', code='vb_'+'A'.repeat(43);
 let r=await fetch(root+'/oauth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_name:'Local fixture',redirect_uris:[callback],grant_types:['authorization_code','refresh_token'],response_types:['code'],token_endpoint_auth_method:'none'})});
 let client=await r.json();assert.equal(r.status,201);assert(client.client_id);
