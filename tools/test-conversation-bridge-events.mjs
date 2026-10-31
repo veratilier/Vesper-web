@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHmac,randomBytes } from 'node:crypto';
 import { createBridge,userSend,revokeBridge } from '../lib/conversation-bridge.ts';
 import { listEvents,subscribe,unsubscribe,deliver,eventFailureDiagnostic,EventCallbackError } from '../bridge-worker/src/events.ts';
-import { createGroup,userGroupSend,assistantGroupSend } from '../lib/bridge-groups.ts';
+import { createGroup,userGroupSend,assistantGroupSend,setGroupContinuous } from '../lib/bridge-groups.ts';
 const sqlite=new DatabaseSync(':memory:');
 class Statement { constructor(sql,values=[]) {this.sql=sql;this.values=values;} bind(...values){return new Statement(this.sql,values);} async run(){return sqlite.prepare(this.sql).run(...this.values);} async first(){return sqlite.prepare(this.sql).get(...this.values)??null;} async all(){return {results:sqlite.prepare(this.sql).all(...this.values)};} }
 const db={prepare:sql=>new Statement(sql),batch:async xs=>Promise.all(xs.map(x=>x.run()))};
@@ -36,12 +36,16 @@ await deliver(env,receiver);assert.equal(events.length,2);assert.equal(events[1]
 await deliver(env,receiver);assert.equal(events.length,2);
 await subscribe(env,a.binding.id,request,receiver); await deliver(env,receiver);assert.equal(events.length,2);
 const {group}=await createGroup(db,'owner',{name:'Group',members:[a.binding.id,b.binding.id]});
+await setGroupContinuous(db,'owner',{groupId:group.id,enabled:true});
 await userGroupSend(db,'owner',{groupId:group.id,id:'group-message',text:'hello group'});
 await assistantGroupSend(db,b.binding.id,{groupId:group.id,id:'group-reply',text:'a reply'});
 await deliver(env,receiver);assert.equal(events.length,4);assert.equal(events[2].data.group_id,group.id);assert.equal(events[2].data.text,'hello group');
-assert.equal(events[3].data.group_id,group.id);assert.equal(events[3].data.sender_id,b.binding.id);assert.equal(events[3].data.sender_name,'B');
+assert.equal(events[3].data.group_id,group.id);assert.equal(events[3].data.sender_id,b.binding.id);assert.equal(events[3].data.sender_name,'B');assert.equal(events[3].data.continuous,true);
 await assistantGroupSend(db,b.binding.id,{groupId:group.id,id:'peer-second',text:'another reply'});
-await deliver(env,receiver);assert.equal(events.length,4, 'peer notifications are bounded per user turn');
-await userSend(db,'owner',{bindingId:a.binding.id,id:'revoked',text:'never sent'});await revokeBridge(db,'owner',a.binding.id);await deliver(env,receiver);assert.equal(events.length,4);
+await deliver(env,receiver);assert.equal(events.length,5, 'continuous mode delivers another peer message');
+await setGroupContinuous(db,'owner',{groupId:group.id,enabled:false});
+await assistantGroupSend(db,b.binding.id,{groupId:group.id,id:'peer-after-stop',text:'stopped'});
+await deliver(env,receiver);assert.equal(events.length,5);
+await userSend(db,'owner',{bindingId:a.binding.id,id:'revoked',text:'never sent'});await revokeBridge(db,'owner',a.binding.id);await deliver(env,receiver);assert.equal(events.length,5);
 await unsubscribe(env,a.binding.id,{...request,delivery:{mode:'webhook',url:request.delivery.url}});assert.equal(kv.size,0);
 console.log('event verification, isolated delivery, retries, revocation and unsubscribe passed');

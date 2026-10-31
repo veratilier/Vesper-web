@@ -25,7 +25,7 @@ export async function readCombinedInbox(db: DB, bindingID: string) {
       if (message.senderId === bindingID || !notified.has(message.id)) continue;
       groupPending.push({...message, sender: message.senderId==='user'?'user':'participant',
         senderName: message.senderId==='user'?'Vera':message.senderId==='ash'?'Ash':(group.members.find(member=>member.id===message.senderId)?.name ?? 'Member'),
-        groupId: group.id, group_id: group.id, groupName: group.name, source: 'group', recentGroupMessages: recent});
+        groupId: group.id, group_id: group.id, groupName: group.name, continuous: group.continuous, source: 'group', recentGroupMessages: recent});
     }
   }
   const pending = [...direct.pending, ...groupPending]

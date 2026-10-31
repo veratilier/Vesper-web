@@ -57,7 +57,7 @@ async function signed(url:string,secret:string,id:string,subscriptionID:string,b
     throw new EventCallbackError(type==='TimeoutError'?'timeout':'connection_failed',[type,...tags].join(','));
   }
 }
-const definition={name:NAME,description:'A new message in this authorized Vesper conversation or a group this connection belongs to. Group events include the sender; read group context before deciding whether to reply.',delivery:['webhook'],inputSchema:{type:'object',properties:{},additionalProperties:false},payloadSchema:{type:'object',properties:{message_id:{type:'string'},text:{type:'string'},group_id:{type:'string'},sender_id:{type:'string'},sender_name:{type:'string'}},required:['message_id','text'],additionalProperties:false}};
+const definition={name:NAME,description:'A new message in this authorized Vesper conversation or a group this connection belongs to. Group events include the sender and interaction mode. Read group context. When continuous is true, peer messages invite a natural continuation until the owner stops it.',delivery:['webhook'],inputSchema:{type:'object',properties:{},additionalProperties:false},payloadSchema:{type:'object',properties:{message_id:{type:'string'},text:{type:'string'},group_id:{type:'string'},sender_id:{type:'string'},sender_name:{type:'string'},continuous:{type:'boolean'}},required:['message_id','text'],additionalProperties:false}};
 export function listEvents(){return {events:[definition]};}
 export async function subscribe(env:Env,bindingID:string,input:unknown,fetcher:typeof fetch=fetch){
   const p=schema.parse(input), url=destination(p.delivery.url),secret=p.delivery.secret;
@@ -112,7 +112,7 @@ export async function deliver(env:Env,fetcher:typeof fetch=fetch){
       .bind(item.id,item.message_id,attempts,next,status).run();
   }
   const groupResults=await env.DB.prepare(`SELECT s.*,g.id AS group_id,m.id AS message_id,m.text AS message_text,m.created_at AS message_created_at,m.sender_id,
-      CASE WHEN m.sender_id='user' THEN 'Vera' WHEN m.sender_id='ash' THEN 'Ash' ELSE COALESCE(sender.name,'Member') END AS sender_name,d.attempts
+      CASE WHEN m.sender_id='user' THEN 'Vera' WHEN m.sender_id='ash' THEN 'Ash' ELSE COALESCE(sender.name,'Member') END AS sender_name,COALESCE(mode.enabled,0) AS continuous,d.attempts
     FROM vesper_bridge_subscriptions s JOIN vesper_bridge_bindings b ON b.id=s.binding_id AND b.revoked=0
     JOIN vesper_bridge_group_subscription_start gs ON gs.subscription_id=s.id
     JOIN vesper_bridge_group_inbox i ON i.binding_id=s.binding_id
@@ -120,13 +120,14 @@ export async function deliver(env:Env,fetcher:typeof fetch=fetch){
     JOIN vesper_bridge_group_members member ON member.group_id=g.id AND member.binding_id=s.binding_id
     JOIN vesper_bridge_group_messages m ON m.group_id=i.group_id AND m.id=i.message_id AND m.rowid>gs.start_rowid
     LEFT JOIN vesper_bridge_bindings sender ON sender.id=m.sender_id
+    LEFT JOIN vesper_bridge_group_interaction mode ON mode.group_id=g.id
     LEFT JOIN vesper_bridge_deliveries d ON d.subscription_id=s.id AND d.message_id=('group_'||g.id||'_'||m.id)
-    WHERE s.expires_at>? AND (d.status IS NULL OR (d.status='retry' AND d.next_at<=?)) ORDER BY m.rowid LIMIT 50`).bind(now,now).all<Delivery & {group_id:string;sender_id:string;sender_name:string}>();
+    WHERE s.expires_at>? AND (d.status IS NULL OR (d.status='retry' AND d.next_at<=?)) ORDER BY m.rowid LIMIT 50`).bind(now,now).all<Delivery & {group_id:string;sender_id:string;sender_name:string;continuous:number}>();
   for(const item of groupResults.results) {
     const secret=await env.OAUTH_KV.get(KEY+item.id);if(!secret)continue;
     const deliveryID='group_'+item.group_id+'_'+item.message_id,eventId='evt_'+(await digest(`${item.id}\n${deliveryID}`)).slice(0,48);
     let status:'done'|'retry'|'terminal'='retry';const attempts=(item.attempts??0)+1;
-    try {const r=await signed(item.url,secret,eventId,item.id,{eventId,name:NAME,timestamp:item.message_created_at,data:{message_id:item.message_id,text:item.message_text,group_id:item.group_id,sender_id:item.sender_id,sender_name:item.sender_name},cursor:null},fetcher);if(r.ok)status='done';else if((r.status>=300&&r.status<400)||r.status===410||r.status===413||attempts>=5)status='terminal';}catch{if(attempts>=5)status='terminal';}
+    try {const r=await signed(item.url,secret,eventId,item.id,{eventId,name:NAME,timestamp:item.message_created_at,data:{message_id:item.message_id,text:item.message_text,group_id:item.group_id,sender_id:item.sender_id,sender_name:item.sender_name,continuous:item.continuous===1},cursor:null},fetcher);if(r.ok)status='done';else if((r.status>=300&&r.status<400)||r.status===410||r.status===413||attempts>=5)status='terminal';}catch{if(attempts>=5)status='terminal';}
     const next=new Date(Date.now()+Math.min(3600000,60000*2**(attempts-1))).toISOString();
     await env.DB.prepare('INSERT INTO vesper_bridge_deliveries(subscription_id,message_id,attempts,next_at,status) VALUES(?,?,?,?,?) ON CONFLICT(subscription_id,message_id) DO UPDATE SET attempts=excluded.attempts,next_at=excluded.next_at,status=excluded.status').bind(item.id,deliveryID,attempts,next,status).run();
   }
