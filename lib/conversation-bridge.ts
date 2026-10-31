@@ -20,6 +20,7 @@ export async function ensureBridge(db: DB) {
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_bindings (id TEXT PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, revoked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vesper_bridge_messages (id TEXT NOT NULL, binding_id TEXT NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL, reply_to TEXT, created_at TEXT NOT NULL, PRIMARY KEY(binding_id,id))'),
     db.prepare('CREATE INDEX IF NOT EXISTS vesper_bridge_messages_order ON vesper_bridge_messages(binding_id,created_at,id)'),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS vesper_bridge_one_reply ON vesper_bridge_messages(binding_id,reply_to) WHERE sender='assistant'"),
   ]);
 }
 async function owned(db: DB, owner: string, bindingID: unknown): Promise<Binding> {
@@ -67,9 +68,13 @@ async function putMessage(db: DB, binding: Binding, input: Record<string, unknow
     const parent=await db.prepare('SELECT id FROM vesper_bridge_messages WHERE binding_id=? AND id=? AND sender=?').bind(binding.id,replyTo,'user').first();
     if (!parent) throw new Error('Message unavailable');
   }
-  await db.prepare('INSERT INTO vesper_bridge_messages(id,binding_id,sender,text,reply_to,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(binding_id,id) DO NOTHING')
+  await db.prepare('INSERT INTO vesper_bridge_messages(id,binding_id,sender,text,reply_to,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING')
     .bind(id,binding.id,sender,text,replyTo,new Date().toISOString()).run();
   const saved=await db.prepare('SELECT * FROM vesper_bridge_messages WHERE binding_id=? AND id=?').bind(binding.id,id).first<Message>();
+  if (!saved && replyTo) {
+    const existing=await db.prepare("SELECT * FROM vesper_bridge_messages WHERE binding_id=? AND sender='assistant' AND reply_to=?").bind(binding.id,replyTo).first<Message>();
+    if (existing) return { message:publicMessage(existing), alreadyReplied:true };
+  }
   if (!saved || saved.sender!==sender || saved.text!==text || saved.reply_to!==replyTo) throw new Error('Message id already used');
   return { message:publicMessage(saved) };
 }

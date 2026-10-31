@@ -25,6 +25,7 @@ await assert.rejects(()=>assistantReply(db,a.token,{id:'reply',replyTo:'two',tex
 await assistantReply(db,a.token,{id:'reply',replyTo:'one',text:'hello'});
 assert.deepEqual((await assistantMessages(db,a.token)).pending,[]);
 await assistantReply(db,a.token,{id:'reply',replyTo:'one',text:'hello'});
+assert.equal((await assistantReply(db,a.token,{id:'different-retry',replyTo:'one',text:'hello again'})).alreadyReplied,true);
 assert.equal((await userMessages(db,'owner-a',a.binding.id)).messages.length,2);
 await assert.rejects(()=>assistantReply(db,a.token,{id:'reply',replyTo:'one',text:'different retry'}));
 await revokeBridge(db,'owner-a',a.binding.id);
