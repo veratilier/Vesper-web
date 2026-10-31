@@ -47,7 +47,7 @@ export async function subscribe(env:Env,bindingID:string,input:unknown,fetcher:t
   const json=await verified.json().catch(()=>null) as {challenge?:unknown}|null;
   if(!json||typeof json.challenge!=='string'||await digest(json.challenge)!==await digest(challenge)) throw new Error('callback_failed');
   const existing=await env.DB.prepare('SELECT start_rowid FROM vesper_bridge_subscriptions WHERE id=? AND binding_id=?').bind(id,bindingID).first<{start_rowid:number}>();
-  const latest=await env.DB.prepare('SELECT COALESCE(MAX(rowid),0) AS n FROM vesper_bridge_messages WHERE binding_id=?').bind(bindingID).first<{n:number}>();
+  const latest=await env.DB.prepare('SELECT COALESCE(MAX(m.rowid),0) AS n FROM vesper_bridge_messages m WHERE m.binding_id=? AND NOT EXISTS (SELECT 1 FROM vesper_bridge_inflight f WHERE f.binding_id=m.binding_id AND f.message_id=m.id AND f.ready=0)').bind(bindingID).first<{n:number}>();
   const ttl=Math.max(60000,Math.min(p.ttlMs??86400000,86400000));
   const expiresAt=new Date(Date.now()+ttl).toISOString();
   await env.OAUTH_KV.put(KEY+id,secret,{expirationTtl:Math.ceil(ttl/1000)+300});
@@ -66,7 +66,8 @@ export async function deliver(env:Env,fetcher:typeof fetch=fetch){
     FROM vesper_bridge_subscriptions s JOIN vesper_bridge_bindings b ON b.id=s.binding_id AND b.revoked=0
     JOIN vesper_bridge_messages m ON m.binding_id=s.binding_id AND m.sender='user' AND m.rowid>s.start_rowid
     LEFT JOIN vesper_bridge_deliveries d ON d.subscription_id=s.id AND d.message_id=m.id
-    WHERE s.expires_at>? AND (d.status IS NULL OR (d.status='retry' AND d.next_at<=?))
+    WHERE s.expires_at>? AND NOT EXISTS (SELECT 1 FROM vesper_bridge_inflight f WHERE f.binding_id=m.binding_id AND f.message_id=m.id AND f.ready=0)
+    AND (d.status IS NULL OR (d.status='retry' AND d.next_at<=?))
     ORDER BY m.rowid LIMIT 50`).bind(now,now).all<Delivery>();
   for(const item of results){
     const secret=await env.OAUTH_KV.get(KEY+item.id);if(!secret) continue;

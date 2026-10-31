@@ -5,25 +5,53 @@ import { z } from 'zod';
 import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../../lib/conversation-bridge';
 import { listEvents, subscribe, unsubscribe, deliver } from './events';
 import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
+import { getBridgeImage, getBridgeMedia, uploadBridgeMedia } from '../../lib/bridge-media';
 
-type Env = { DB:D1Database; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
+type Env = { DB:D1Database; MEDIA:R2Bucket; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
 const ORIGIN='https://bridge.vesper.r-vera.com', SCOPE='conversation:access';
 const response=(value:unknown)=>({content:[{type:'text' as const,text:JSON.stringify(value)}]});
 function server(env:Env,bindingID:string) {
   const mcp=new McpServer({name:'Vesper Chat',version:'1.0.0'});
   mcp.registerTool('read_messages',{
-    description:'Read this connection’s recent messages and pending user messages. No other Vesper conversations or data are accessible.',
+    description:'Read this connection’s recent and pending messages. Attachments have private IDs; use read_attachment to view images or retrieve file bytes. No other conversations are accessible.',
     inputSchema:{},annotations:{readOnlyHint:true},
   },async()=>{
     try { return response(await assistantMessagesBound(env.DB,bindingID)); }
     catch { return {...response({error:'Connection unavailable'}),isError:true}; }
   });
   mcp.registerTool('send_reply',{
-    description:'Send a reply to a pending user message in this connection. Generate a unique id and reuse it unchanged on retries.',
-    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string()},annotations:{idempotentHint:true,readOnlyHint:false},
+    description:'Send a reply to a pending user message. Optional attachments must first be uploaded with upload_attachment. Generate a unique id and reuse it unchanged on retries.',
+    inputSchema:{id:z.string(),replyTo:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
   },async input=>{
     try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
     catch { return {...response({error:'Reply unavailable'}),isError:true}; }
+  });
+  mcp.registerTool('send_message',{
+    description:'Send a new message to the user in this connection without replying to a pending message. Choose a unique id and reuse it on retries. Optional attachments must first be uploaded with upload_attachment.',
+    inputSchema:{id:z.string(),text:z.string().optional(),attachments:z.array(z.string()).max(5).optional(),card:z.object({kind:z.enum(['location','music']),data:z.record(z.string(),z.unknown())}).optional()},annotations:{idempotentHint:true,readOnlyHint:false},
+  },async input=>{
+    try { return response(await assistantReplyBound(env.DB,bindingID,input)); }
+    catch { return {...response({error:'Message unavailable'}),isError:true}; }
+  });
+  mcp.registerTool('read_attachment',{
+    description:'Read an attachment belonging to a sent message in this connection. Images up to 4 MB are returned as images; other files are returned in base64 chunks using nextOffset.',
+    inputSchema:{id:z.string(),offset:z.number().int().min(0).default(0)},annotations:{readOnlyHint:true},
+  },async ({id,offset})=>{
+    try {
+      if(offset===0) { const image=await getBridgeImage(env.DB,env.MEDIA,bindingID,id);if(image)return {content:[{type:'image' as const,data:image.data,mimeType:image.mimeType},{type:'text' as const,text:JSON.stringify(image.attachment)}]}; }
+      return response(await getBridgeMedia(env.DB,env.MEDIA,bindingID,id,offset));
+    } catch { return {...response({error:'Attachment unavailable'}),isError:true}; }
+  });
+  mcp.registerTool('upload_attachment',{
+    description:'Stage an actual file or sticker for your next send_reply. Supply genuine base64 bytes, not a guessed URL. Attach the returned ID to send_reply. Maximum 8 MB.',
+    inputSchema:{name:z.string().min(1).max(160),mimeType:z.string().max(128),base64:z.string().max(12*1024*1024),kind:z.enum(['file','sticker']).default('file')},annotations:{readOnlyHint:false},
+  },async input=>{
+    try {
+      if(!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64)||input.base64.length%4!==0)throw new Error('Invalid base64');
+      const raw=atob(input.base64);if(raw.length>8*1024*1024)throw new Error('Too large');
+      const bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
+      return response(await uploadBridgeMedia(env.DB,env.MEDIA,bindingID,'assistant',{name:input.name,type:input.mimeType,bytes,kind:input.kind}));
+    } catch { return {...response({error:'Attachment upload unavailable'}),isError:true}; }
   });
   return mcp;
 }
