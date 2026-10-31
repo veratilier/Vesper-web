@@ -113,7 +113,7 @@ export async function claimGroupAsh(db:DB,owner:string,input:Record<string,unkno
   const job=await db.prepare("SELECT message_id FROM vesper_bridge_ash_jobs WHERE group_id=? AND (state='pending' OR (state='running' AND lease_until<?)) ORDER BY rowid LIMIT 1").bind(group.id,now).first<{message_id:string}>();
   if(!job)return {job:null};
   const leaseUntil=new Date(Date.now()+15*60*1000).toISOString();
-  const result=await db.prepare("UPDATE vesper_bridge_ash_jobs SET state='running',claimant=?,lease_until=? WHERE group_id=? AND message_id=? AND (state='pending' OR (state='running' AND lease_until<?))").bind(claimant,leaseUntil,group.id,job.message_id,now).run();
+  const result=await db.prepare("UPDATE vesper_bridge_ash_jobs SET state='running',claimant=?,lease_until=? WHERE group_id=? AND message_id=? AND (state='pending' OR (state='running' AND lease_until<?)) AND NOT EXISTS (SELECT 1 FROM vesper_bridge_ash_jobs active WHERE active.group_id=? AND active.message_id<>? AND active.state='running' AND active.lease_until>=?)").bind(claimant,leaseUntil,group.id,job.message_id,now,group.id,job.message_id,now).run();
   if(!result.meta.changes)return {job:null};
   return {job:{messageId:job.message_id,leaseUntil}};
 }

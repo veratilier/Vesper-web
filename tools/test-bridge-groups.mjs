@@ -25,6 +25,7 @@ const withAsh=(await createGroup(db,'owner',{name:'Together with Ash',members:[a
 assert.equal(withAsh.includesAsh,true);
 await userGroupSend(db,'owner',{groupId:withAsh.id,id:'wake-ash',text:'Hi Ash'});
 const claim=await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'phone'});assert.equal(claim.job.messageId,'wake-ash');
+await userGroupSend(db,'owner',{groupId:withAsh.id,id:'waiting',text:'Wait for the first turn'});
 assert.equal((await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'mac'})).job,null);
 await assert.rejects(()=>completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-ash',claimant:'mac',text:'No'}));
 const ashMedia=(await uploadGroupMedia(db,bucket,withAsh.id,{owner:'owner',ash:{messageId:'wake-ash',claimant:'phone'}},{name:'sticker.png',type:'image/png',kind:'sticker',bytes:new Uint8Array([8,9])})).attachment;
@@ -33,6 +34,8 @@ await completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-ash',claim
 await completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-ash',claimant:'phone',text:'Hi',attachments:[ashMedia.id]});
 assert.equal((await userGroupMessages(db,'owner',withAsh.id)).messages.at(-1).attachments[0].id,ashMedia.id);
 await assert.rejects(()=>completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'wake-ash',claimant:'phone',text:'Changed'}));
+assert.equal((await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'phone'})).job.messageId,'waiting');
+await completeGroupAsh(db,'owner',{groupId:withAsh.id,messageId:'waiting',claimant:'phone',text:'Done waiting'});
 await userGroupSend(db,'owner',{groupId:withAsh.id,id:'wake-again',text:'Again'});
 assert.equal((await claimGroupAsh(db,'owner',{groupId:withAsh.id,claimant:'phone'})).job.messageId,'wake-again');
 sqlite.prepare("UPDATE vesper_bridge_ash_jobs SET lease_until='2000-01-01T00:00:00.000Z' WHERE message_id='wake-again'").run();
