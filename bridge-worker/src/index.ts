@@ -4,6 +4,7 @@ import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
 import { bridgeIdentity, assistantMessagesBound, assistantReplyBound } from '../../lib/conversation-bridge';
 import { listEvents, subscribe, unsubscribe, deliver } from './events';
+import { createConsent, getConsent, deleteConsent, consentCookie, clearConsentCookie, cookieMatches } from './consent';
 
 type Env = { DB:D1Database; OAUTH_KV:KVNamespace; OAUTH_PROVIDER:OAuthHelpers };
 const ORIGIN='https://bridge.vesper.r-vera.com', SCOPE='conversation:access';
@@ -82,9 +83,9 @@ const oauth=new OAuthProvider<Env>({
         const auth=await env.OAUTH_PROVIDER.parseAuthRequest(request);
         if(!allowedRedirect(auth.redirectUri)||auth.scope.some(s=>s!==SCOPE)) return page('This authorization request is not supported.',undefined,400);
         const nonce=crypto.randomUUID()+crypto.randomUUID();
-        await env.OAUTH_KV.put(`chat-consent:${nonce}`,request.url,{expirationTtl:600});
+        await createConsent(env.DB,nonce,request.url);
         const client=await env.OAUTH_PROVIDER.lookupClient(auth.clientId);
-        return page(`<h1>Connect Vesper Chat</h1><p>Connect ${escape(client?.clientName||'your assistant')} to one conversation. This does not grant access to Vesper memory, diary, photos, or other chats.</p><form method="post" action="/authorize"><input type="hidden" name="csrf" value="${nonce}"><label>Connection code<input type="password" name="code" autocomplete="off" required></label><small>Use the code from Vesper; do not send it in a message.</small><button name="decision" value="allow">Connect</button><button name="decision" value="deny" formnovalidate>Cancel</button></form>`,`__Host-vesper-chat=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
+        return page(`<h1>Connect Vesper Chat</h1><p>Connect ${escape(client?.clientName||'your assistant')} to one conversation. This does not grant access to Vesper memory, diary, photos, or other chats.</p><form method="post" action="/authorize"><input type="hidden" name="csrf" value="${nonce}"><label>Connection code<input type="password" name="code" autocomplete="off" required></label><small>Use the code from Vesper; do not send it in a message.</small><button name="decision" value="allow">Connect</button><button name="decision" value="deny" formnovalidate>Cancel</button></form>`,consentCookie(nonce));
       }
       const origin=request.headers.get('origin'), fetchSite=request.headers.get('sec-fetch-site');
       // Some WebKit versions submit an opaque Origin under strict referrer policies.
@@ -94,14 +95,17 @@ const oauth=new OAuthProvider<Env>({
       if(request.method!=='POST'||!sameOrigin) return page('Invalid request. Please restart the connection in ChatGPT.',undefined,403);
       const raw=await request.text(); if(raw.length>12000) return page('Request too large.',undefined,400);
       const form=new URLSearchParams(raw), nonce=form.get('csrf')||'';
-      const cookie=request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith('__Host-vesper-chat='))?.slice('__Host-vesper-chat='.length);
-      if(!/^[a-f0-9-]{72}$/.test(nonce)||nonce!==cookie) return page('The authorization page expired.',undefined,403);
-      const original=await env.OAUTH_KV.get(`chat-consent:${nonce}`);
-      if(!original) return page('The authorization page expired.',undefined,403);
+      if(!cookieMatches(request.headers.get('cookie'),nonce)) return page('The browser session could not be verified. Open the latest authorization link and complete it in the same browser.',undefined,403);
+      // Read through old KV entries for authorizations started before this update.
+      const currentConsent=await getConsent(env.DB,nonce);
+      const legacyConsent=currentConsent ? null : await env.OAUTH_KV.get(`chat-consent:${nonce}`);
+      const original=currentConsent ?? legacyConsent;
+      if(!original) return page('This authorization link has expired. Ask the assistant to start a new connection.',undefined,403);
       const auth=await env.OAUTH_PROVIDER.parseAuthRequest(new Request(original));
       if(!allowedRedirect(auth.redirectUri)||auth.scope.some(s=>s!==SCOPE)) return page('Unsupported authorization.',undefined,400);
       if(form.get('decision')==='deny') {
-        await env.OAUTH_KV.delete(`chat-consent:${nonce}`);
+        await deleteConsent(env.DB,nonce).catch(()=>{});
+        if(legacyConsent) await env.OAUTH_KV.delete(`chat-consent:${nonce}`).catch(()=>{});
         const denied=new URL(auth.redirectUri); denied.searchParams.set('error','access_denied'); denied.searchParams.set('state',auth.state||''); denied.searchParams.set('iss',ORIGIN); return Response.redirect(denied,303);
       }
       if(form.get('decision')!=='allow') return page('Authorization denied.',undefined,403);
@@ -112,8 +116,9 @@ const oauth=new OAuthProvider<Env>({
         throw error;
       }
       const granted=await env.OAUTH_PROVIDER.completeAuthorization({request:auth,userId:`chat_${bindingID}`,metadata:{clientName:'Vesper Chat'},scope:[SCOPE],props:{bindingID,scope:[SCOPE]}});
-      await env.OAUTH_KV.delete(`chat-consent:${nonce}`);
-      return new Response(null,{status:303,headers:{location:granted.redirectTo,'cache-control':'no-store','set-cookie':'__Host-vesper-chat=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'}});
+      await deleteConsent(env.DB,nonce).catch(()=>{});
+      if(legacyConsent) await env.OAUTH_KV.delete(`chat-consent:${nonce}`).catch(()=>{});
+      return new Response(null,{status:303,headers:{location:granted.redirectTo,'cache-control':'no-store','set-cookie':clearConsentCookie(nonce)}});
     } catch { return page('Unable to complete authorization. Please restart the connection in ChatGPT.',undefined,400); }
   }},
 });
